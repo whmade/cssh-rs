@@ -907,7 +907,7 @@ pub(crate) fn build_startupinfo(with_keyboard_focus: bool) -> STARTUPINFOW {
 /// # Examples
 ///
 /// ```
-/// use csshw_lib::utils::windows::build_command_line;
+/// use cssh_rs_core::utils::windows::build_command_line;
 ///
 /// let cmd_line = build_command_line("cmd.exe", &["arg1".to_string(), "arg2".to_string()]);
 /// // Returns UTF-16 encoded: "cmd.exe" "arg1" "arg2"\0
@@ -939,7 +939,7 @@ pub fn build_command_line(application: &str, args: &[String]) -> Vec<u16> {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{set_console_color, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{set_console_color, DefaultWindowsApi};
 /// use windows::Win32::System::Console::CONSOLE_CHARACTER_ATTRIBUTES;
 ///
 /// let api = DefaultWindowsApi;
@@ -977,7 +977,7 @@ pub fn set_console_color(api: &dyn WindowsApi, color: CONSOLE_CHARACTER_ATTRIBUT
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{clear_screen, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{clear_screen, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// clear_screen(&api);
@@ -1017,7 +1017,7 @@ pub fn clear_screen(api: &dyn WindowsApi) {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{set_console_border_color, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{set_console_border_color, DefaultWindowsApi};
 /// use windows::Win32::Foundation::COLORREF;
 ///
 /// set_console_border_color(&DefaultWindowsApi, COLORREF(0x001A2B3C));
@@ -1043,7 +1043,7 @@ pub fn set_console_border_color(api: &dyn WindowsApi, color: COLORREF) {
 /// # Examples
 ///
 /// ```
-/// use csshw_lib::utils::windows::utf16_buffer_to_string;
+/// use cssh_rs_core::utils::windows::utf16_buffer_to_string;
 ///
 /// let utf16_data = vec![72, 101, 108, 108, 111, 0]; // "Hello" + null terminator
 /// let result = utf16_buffer_to_string(&utf16_data);
@@ -1074,7 +1074,7 @@ pub fn utf16_buffer_to_string(buffer: &[u16]) -> String {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{get_console_title, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{get_console_title, DefaultWindowsApi};
 ///
 /// let title = get_console_title(&DefaultWindowsApi);
 /// println!("Console title: {}", title);
@@ -1112,7 +1112,7 @@ fn get_std_handle(nstdhandle: STD_HANDLE) -> HANDLE {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::get_console_input_buffer;
+/// use cssh_rs_core::utils::windows::get_console_input_buffer;
 ///
 /// let input_handle = get_console_input_buffer();
 /// ```
@@ -1130,7 +1130,7 @@ pub fn get_console_input_buffer() -> HANDLE {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::get_console_output_buffer;
+/// use cssh_rs_core::utils::windows::get_console_output_buffer;
 ///
 /// let output_handle = get_console_output_buffer();
 /// ```
@@ -1154,7 +1154,7 @@ pub fn get_console_output_buffer() -> HANDLE {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{read_console_input, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{read_console_input, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// let input_record = read_console_input(&api);
@@ -1188,7 +1188,7 @@ pub fn read_console_input(api: &dyn WindowsApi) -> INPUT_RECORD {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{read_keyboard_input, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{read_keyboard_input, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// let key_event = read_keyboard_input(&api);
@@ -1224,7 +1224,7 @@ pub fn read_keyboard_input(api: &dyn WindowsApi) -> INPUT_RECORD_0 {
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{arrange_console, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{arrange_console, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// arrange_console(&api, 100, 100, 800, 600);
@@ -1251,7 +1251,7 @@ pub fn arrange_console(api: &dyn WindowsApi, x: i32, y: i32, width: i32, height:
 /// # Examples
 ///
 /// ```no_run
-/// use csshw_lib::utils::windows::{is_windows_10, DefaultWindowsApi};
+/// use cssh_rs_core::utils::windows::{is_windows_10, DefaultWindowsApi};
 ///
 /// if is_windows_10(&DefaultWindowsApi) {
 ///     println!("Running on Windows 10");

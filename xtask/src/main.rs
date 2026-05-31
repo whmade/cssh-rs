@@ -29,9 +29,9 @@ struct Args {
 /// Available xtask subcommands.
 #[derive(Subcommand)]
 enum Command {
-    /// Verify the README help section matches `cargo run --package csshw -- --help`.
+    /// Verify the README help section matches `cargo run --package cssh-rs -- --help`.
     CheckReadmeHelp,
-    /// Update the README help section to match `cargo run --package csshw -- --help`.
+    /// Update the README help section to match `cargo run --package cssh-rs -- --help`.
     UpdateReadmeHelp,
     /// Generate changelog for the current version from news fragments.
     GenerateChangelog,

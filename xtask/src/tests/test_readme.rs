@@ -18,7 +18,7 @@ mock! {
 
 fn make_readme(help_content: &str) -> String {
     format!(
-        "# Title\r\n<!-- HELP_OUTPUT_START -->\r\n```cmd\r\ncsshw.exe --help\r\n{help_content}\r\n```\r\n<!-- HELP_OUTPUT_END -->\r\nMore content."
+        "# Title\r\n<!-- HELP_OUTPUT_START -->\r\n```cmd\r\ncssh-rs.exe --help\r\n{help_content}\r\n```\r\n<!-- HELP_OUTPUT_END -->\r\nMore content."
     )
 }
 
@@ -78,7 +78,7 @@ fn test_extract_readme_help_section_missing_start_marker() {
 #[test]
 fn test_extract_readme_help_section_missing_end_marker() {
     // Arrange
-    let readme = "<!-- HELP_OUTPUT_START -->\r\n```cmd\r\ncsshw.exe --help\r\ncontent";
+    let readme = "<!-- HELP_OUTPUT_START -->\r\n```cmd\r\ncssh-rs.exe --help\r\ncontent";
 
     // Act
     let result = extract_readme_help_section(readme);

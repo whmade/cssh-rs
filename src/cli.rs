@@ -37,17 +37,17 @@ pub struct Args {
     /// Hosts or cluster tags might use brace expansion,
     /// but need to be properly quoted.
     ///
-    /// E.g.: `csshw.exe "host{1..3}" hostA`
+    /// E.g.: `cssh-rs.exe "host{1..3}" hostA`
     ///
     /// Hosts can include a username which will take precedence over the
     /// username given via the `-u` option and over any ssh config value.
     ///
-    /// E.g.: `csshw.exe -u user3 user1@host1 userA@hostA host3`
+    /// E.g.: `cssh-rs.exe -u user3 user1@host1 userA@hostA host3`
     ///
     /// Hosts can include a port number which will take precedence over the
     /// port given via the `-p` option.
     ///
-    /// E.g.: `csshw.exe -p 33 host1:11 host2:22 host3`
+    /// E.g.: `cssh-rs.exe -p 33 host1:11 host2:22 host3`
     ///
     /// If no hosts are provided and the application is launched in a new console window
     /// (e.g. by double clicking the executable in the File Explorer),

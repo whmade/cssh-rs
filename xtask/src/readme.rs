@@ -5,7 +5,7 @@
 //! ```text
 //! <!-- HELP_OUTPUT_START -->
 //! ```cmd
-//! csshw.exe --help
+//! cssh-rs.exe --help
 //! <help content>
 //! ```
 //! <!-- HELP_OUTPUT_END -->
@@ -19,7 +19,7 @@ use anyhow::{bail, Context, Result};
 
 const START_MARKER: &str = "<!-- HELP_OUTPUT_START -->";
 const END_MARKER: &str = "<!-- HELP_OUTPUT_END -->";
-const PREAMBLE: &str = "\r\n```cmd\r\ncsshw.exe --help\r\n";
+const PREAMBLE: &str = "\r\n```cmd\r\ncssh-rs.exe --help\r\n";
 const POSTAMBLE: &str = "\r\n```\r\n";
 
 /// All side-effecting operations required by this module.
@@ -27,7 +27,7 @@ const POSTAMBLE: &str = "\r\n```\r\n";
 /// Implement with mocks in tests to achieve zero filesystem and process
 /// side-effects.
 pub trait ReadmeSystem {
-    /// Run `cargo run --package csshw -- --help` and return the captured output.
+    /// Run `cargo run --package cssh-rs -- --help` and return the captured output.
     ///
     /// # Errors
     ///
@@ -56,9 +56,9 @@ pub struct RealSystem;
 impl ReadmeSystem for RealSystem {
     fn get_help_output(&self) -> Result<String> {
         let output = std::process::Command::new("cargo")
-            .args(["run", "--package", "csshw", "--", "--help"])
+            .args(["run", "--package", "cssh-rs", "--", "--help"])
             .output()
-            .context("failed to run `cargo run --package csshw -- --help`")?;
+            .context("failed to run `cargo run --package cssh-rs -- --help`")?;
         let raw = String::from_utf8_lossy(&output.stdout).into_owned();
         Ok(raw)
     }

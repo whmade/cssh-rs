@@ -1,7 +1,7 @@
 //! Cluster SSH tool for Windows inspired by csshX - Binary
 //! ---
 //! ```
-//! Usage: csshw.exe [OPTIONS] [HOSTS]... [COMMAND]
+//! Usage: cssh-rs.exe [OPTIONS] [HOSTS]... [COMMAND]
 //!
 //! Commands:
 //!   client  Subcommand that will launch a single client window
@@ -24,11 +24,11 @@
 #![doc(html_no_source)]
 
 use clap::Parser as _;
-use csshw_lib::cli::{
+use cssh_rs_core::cli::{
     self, Args, CLIArgsCommand, CLIConfigManager, CLIEnvironment, CLIInput, CLILoggerInitializer,
     CLIOutput, MainEntrypoint,
 };
-use csshw_lib::utils::windows::DefaultWindowsApi;
+use cssh_rs_core::utils::windows::DefaultWindowsApi;
 
 /// The main entrypoint of the binary
 #[tokio::main]

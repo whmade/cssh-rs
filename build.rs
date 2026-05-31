@@ -10,7 +10,7 @@ fn main() {
         &[16, 24, 32, 48, 64, 128, 256],
     )
     .expect("Failed to convert SVG to ICO");
-    embed_resource::compile_for("res/csshw.rc", ["csshw"], embed_resource::NONE)
+    embed_resource::compile_for("res/csshw.rc", ["cssh-rs"], embed_resource::NONE)
         .manifest_required()
         .unwrap();
 }
