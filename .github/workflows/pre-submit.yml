@@ -15,6 +15,9 @@ on:
 jobs:
   detect-changes:
     runs-on: &runner ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       src: ${{ steps.changes.outputs.src }}
       workflows: ${{ steps.changes.outputs.workflows }}
