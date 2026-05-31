@@ -3,17 +3,17 @@ members = ["xtask"]
 resolver = "2"
 
 [package]
-name = "csshw"
+name = "cssh-rs"
 version = "0.19.1"
 edition = "2021"
 license-file = "LICENSE.txt"
-default-run = "csshw"
+default-run = "cssh-rs"
 
 [lib]
-name = "csshw_lib"
+name = "cssh_rs_core"
 
 [[bin]]
-name = "csshw"
+name = "cssh-rs"
 path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
