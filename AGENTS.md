@@ -21,10 +21,10 @@ multiple hosts simultaneously with synchronized keystroke distribution.
 
 ## Project Structure
 
-- **Binary**: `csshw.exe` - Main executable with CLI interface (`src/main.rs`, `src/cli.rs`)
-- **Library**: `csshw_lib` - Core functionality (`src/lib.rs`)
-- **Modules**: `src/client/`, `src/daemon/`, `src/protocol/`, `src/utils/`
-- **Tests**: `src/tests/` with component-based organization (`test_*.rs` naming)
+- **Binary**: `cssh-rs.exe` - Main executable with CLI interface (`cssh-rs/src/main.rs`, `cssh-rs/src/cli.rs`)
+- **Library**: `cssh_rs_core` - Core functionality (`cssh-rs/src/lib.rs`)
+- **Modules**: `cssh-rs/src/client/`, `cssh-rs/src/daemon/`, `cssh-rs/src/protocol/`, `cssh-rs/src/utils/`
+- **Tests**: `cssh-rs/src/tests/` with component-based organization (`test_*.rs` naming)
 - **xtask**: `xtask/` - Developer automation tasks (README checks, release, changelog, social preview)
 - **Config**: `.config/` - grouped, shared single-line marker files consumed
   by both `xtask` and CI. Currently holds `.config/coverage/` (pinned
@@ -72,7 +72,7 @@ characters - do NOT add to the allowlist.
   returns ...`), plus `# Arguments` and `# Returns`. The `# Arguments` block
   is load-bearing - keep it even when trimming other parts of a docstring.
 - **`# Examples`**: only for reusable utilities a caller invokes in isolation
-  (see `src/utils/windows.rs`). Do NOT add `# Examples` to trait methods, CLI
+  (see `cssh-rs/src/utils/windows.rs`). Do NOT add `# Examples` to trait methods, CLI
   entrypoints, protocol handlers, or any function whose behaviour is only
   meaningful inside its module.
 - **`# Panics` / `# Errors`**: only when they actually apply. Omit otherwise.
@@ -81,7 +81,7 @@ characters - do NOT add to the allowlist.
 - **Test functions, closures, trivial trait impls**: no docs.
 - **Module docs** (`//!`): one line for typical modules. Multi-paragraph only
   when the module defines a protocol or wire format (see
-  `src/protocol/mod.rs`). All library modules use
+  `cssh-rs/src/protocol/mod.rs`). All library modules use
   `#![doc(html_no_source)]`.
 
 ````rust
@@ -171,7 +171,7 @@ set_console_title(handle, &title)?;
 
 ## Testing Standards
 
-- **Naming**: `test_*.rs` files in `src/tests/`, descriptive test function names
+- **Naming**: `test_*.rs` files in `cssh-rs/src/tests/`, descriptive test function names
 - **Pattern**: Arrange-Act-Assert for all tests
 - **Mocking**: Use `mockall` for all Windows API interactions - tests must have zero side-effects on the system
 - **No external state**: tests must not modify registry, filesystem, or process state
