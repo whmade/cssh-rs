@@ -7,6 +7,8 @@
 # repo labels that are not. Add or change a label here, not in
 # the GitHub UI.
 
+# --- Default GitHub labels --------------------------------------------------
+
 - name: "bug"
   color: "d73a4a"
   description: "Something isn't working"
@@ -27,6 +29,8 @@
   color: "ffffff"
   description: "This will not be worked on"
 
+# --- Workflow / automation --------------------------------------------------
+
 - name: "no-news-fragment-needed"
   color: "7bb344"
   description: "Indicates that this PR does not require a news fragment"
@@ -38,3 +42,63 @@
 - name: "internal"
   color: "d4c5f9"
   description: "Internal maintenance, tooling, or chores"
+
+# --- Workstream -------------------------------------------------------------
+
+- name: "workstream:code"
+  color: "0e8a16"
+  description: "Implementation work"
+
+- name: "workstream:ci"
+  color: "1d76db"
+  description: "CI / testing infrastructure"
+
+- name: "workstream:docs"
+  color: "5319e7"
+  description: "Documentation and authoring guides"
+
+# --- Platform ---------------------------------------------------------------
+
+- name: "platform:windows"
+  color: "0366d6"
+  description: "Affects Windows"
+
+- name: "platform:linux"
+  color: "fbca04"
+  description: "Affects Linux"
+
+- name: "platform:macos"
+  color: "c5def5"
+  description: "Affects macOS"
+
+# --- Type -------------------------------------------------------------------
+
+- name: "type:epic"
+  color: "b60205"
+  description: "Milestone-level epic (M0-M10)"
+
+- name: "type:plugin"
+  color: "ededed"
+  description: "First-party plugin"
+
+- name: "type:crate"
+  color: "ededed"
+  description: "New or restructured crate"
+
+- name: "type:spike"
+  color: "fef2c0"
+  description: "Time-boxed investigation"
+
+- name: "type:release"
+  color: "f9d0c4"
+  description: "Release engineering deliverable"
+
+# --- Risk -------------------------------------------------------------------
+
+- name: "risk:high"
+  color: "d93f0b"
+  description: "High-uncertainty work"
+
+- name: "risk:gate"
+  color: "e11d21"
+  description: "Explicit GO/NO-GO gate"
