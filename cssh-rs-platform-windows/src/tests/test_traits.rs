@@ -35,7 +35,6 @@ fn unique_pipe_name(tag: &str) -> OsString {
     name.push(n.to_string());
     return name;
 }
-}
 
 mod process_spawner_tests {
     use super::*;
