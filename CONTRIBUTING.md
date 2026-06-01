@@ -194,7 +194,7 @@ csshW follows standard Rust conventions with some specific requirements:
 
 csshW has no integration tests (yet). The following applies to unit tests.
 
-- **Tests in `cssh-rs/src/tests/`** with `test_*.rs` naming convention
+- **Tests in `cssh-rs-core/src/tests/`** with `test_*.rs` naming convention
 - **Use `mockall`** for Windows API mocking
 - **Follow Arrange-Act-Assert** pattern
 - **Use descriptive test names** that explain what is being tested

@@ -5,65 +5,14 @@ edition = "2021"
 license-file = "../LICENSE.txt"
 default-run = "cssh-rs"
 
-[lib]
-name = "cssh_rs_core"
-
 [[bin]]
 name = "cssh-rs"
 path = "src/main.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-bracoxide = "0.1.8"
-chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive"] }
-cli-clipboard = "0.4.0"
-log = "0.4.29"
-log-panics = "2.1.0"
-os_info = { version = "3.15.0", default-features = false }
-registry = "1.3.0"
-serde = "1.0.228"
-serde_derive = "1.0.228"
-simplelog = "0.12.2"
-ssh2-config = "0.7.1"
-time = "0.3.47"
-tokio = { version = "1.52.3", features = [
-    "macros",
-    "net",
-    "process",
-    "rt",
-    "rt-multi-thread",
-    "signal",
-    "sync",
-    "time",
-] }
-
-[dependencies.confy]
-version = "2.0.0"
-features = ["toml_conf"]
-default-features = false
-
-[dependencies.windows]
-version = "0.62.2"
-features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Dwm",
-    "Win32_Graphics_Gdi",
-    "Win32_Security",
-    "Win32_System_Console",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Threading",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_Shell",
-    "Win32_UI_Shell_Common",
-    "Win32_UI_WindowsAndMessaging",
-]
-
-[dev-dependencies]
-mockall = "0.14.0"
-toml = "1.1"
+cssh-rs-core = { path = "../cssh-rs-core" }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
 embed-resource = "3.0.9"

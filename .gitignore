@@ -1,5 +1,5 @@
 /target
-/res/csshw.ico
+/cssh-rs/res/csshw.ico
 /xtask/social-preview/node_modules/
 
 # Per-contributor paseo state — track only the explanatory README,

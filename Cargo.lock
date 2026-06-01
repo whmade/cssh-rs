@@ -315,12 +315,22 @@ dependencies = [
 name = "cssh-rs"
 version = "0.19.1"
 dependencies = [
+ "clap",
+ "cssh-rs-core",
+ "embed-resource",
+ "svg_to_ico",
+ "tokio",
+]
+
+[[package]]
+name = "cssh-rs-core"
+version = "0.19.1"
+dependencies = [
  "bracoxide",
  "chrono",
  "clap",
  "cli-clipboard",
  "confy",
- "embed-resource",
  "log",
  "log-panics",
  "mockall",
@@ -330,7 +340,6 @@ dependencies = [
  "serde_derive",
  "simplelog",
  "ssh2-config",
- "svg_to_ico",
  "time",
  "tokio",
  "toml 1.1.2+spec-1.1.0",

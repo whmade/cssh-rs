@@ -31,6 +31,7 @@ jobs:
               - '.cargo/**'
               - '.config/coverage/**'
               - 'cssh-rs/**'
+              - 'cssh-rs-core/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'clippy.toml'
