@@ -27,6 +27,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::error::Error;
+use std::ffi::{OsStr, OsString};
 use std::future::Future;
 
 /// Platform-supplied context required when launching a child process.
@@ -61,8 +62,8 @@ pub trait ProcessSpawner: Send + Sync {
     /// error if the spawn failed.
     fn spawn(
         &self,
-        program: &str,
-        args: &[String],
+        program: &OsStr,
+        args: &[OsString],
         context: &Self::Context,
     ) -> Result<Self::Handle, Self::Error>;
 }
@@ -115,7 +116,8 @@ pub trait ControlChannelClient: Send {
     /// # Arguments
     /// * `endpoint` - Platform-specific endpoint identifier (named pipe
     ///   name on Windows, UNIX socket path on Linux/macOS).
-    fn connect(&mut self, endpoint: &str) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn connect(&mut self, endpoint: &OsStr)
+        -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Send raw bytes to the daemon.
     ///
