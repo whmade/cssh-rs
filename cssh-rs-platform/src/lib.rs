@@ -2,7 +2,7 @@
 //!
 //! Defines the surface that per-platform crates
 //! (`cssh-rs-platform-windows`, `-linux`, `-macos`) implement so the
-//! daemon, client, and plugin host stay platform-agnostic. M0 scope is
+//! daemon, client, and plugin hosts stay platform-agnostic. M0 scope is
 //! the trait definitions only; concrete impls land alongside the
 //! per-platform crate extractions.
 //!
