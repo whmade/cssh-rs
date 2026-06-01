@@ -32,6 +32,7 @@ jobs:
               - '.config/coverage/**'
               - 'cssh-rs/**'
               - 'cssh-rs-core/**'
+              - 'cssh-rs-platform/**'
               - 'cssh-rs-protocol/**'
               - 'Cargo.toml'
               - 'Cargo.lock'

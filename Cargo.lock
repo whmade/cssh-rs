@@ -348,6 +348,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cssh-rs-platform"
+version = "0.19.1"
+
+[[package]]
 name = "cssh-rs-protocol"
 version = "0.19.1"
 dependencies = [
