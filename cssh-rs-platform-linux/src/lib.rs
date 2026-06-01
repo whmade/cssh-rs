@@ -4,6 +4,10 @@
 //! `unimplemented!()` until M4 lands the concrete impls; the crate
 //! exists so workspace consumers compile against the platform-
 //! abstraction surface on Linux targets.
+//!
+//! All items in this crate are only available on Linux targets; on other
+//! targets the crate compiles to an empty library so the workspace stays
+//! buildable for `cargo check --target` of Windows and macOS hosts.
 
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
@@ -11,8 +15,10 @@
 #![doc(html_no_source)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(target_os = "linux")]
 use std::ffi::{OsStr, OsString};
 
+#[cfg(target_os = "linux")]
 use cssh_rs_platform::{
     ControlChannelClient, ControlChannelServer, LaunchContext, ProcessSpawner, WindowHandleProbe,
 };
@@ -21,15 +27,20 @@ use cssh_rs_platform::{
 ///
 /// The real type will carry the Wayland activation token (or equivalent
 /// X11 startup id) once M4 lands.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Default)]
 pub struct LinuxLaunchContext;
 
+#[cfg(target_os = "linux")]
 impl LaunchContext for LinuxLaunchContext {}
 
 /// Placeholder Linux process spawner.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Default)]
 pub struct LinuxProcessSpawner;
 
+#[cfg(target_os = "linux")]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl ProcessSpawner for LinuxProcessSpawner {
     type Context = LinuxLaunchContext;
     type Handle = std::process::Child;
@@ -46,9 +57,12 @@ impl ProcessSpawner for LinuxProcessSpawner {
 }
 
 /// Placeholder Linux control-channel server endpoint.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Default)]
 pub struct LinuxControlChannelServer;
 
+#[cfg(target_os = "linux")]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl ControlChannelServer for LinuxControlChannelServer {
     type Error = std::io::Error;
 
@@ -66,9 +80,12 @@ impl ControlChannelServer for LinuxControlChannelServer {
 }
 
 /// Placeholder Linux control-channel client endpoint.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Default)]
 pub struct LinuxControlChannelClient;
 
+#[cfg(target_os = "linux")]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl ControlChannelClient for LinuxControlChannelClient {
     type Error = std::io::Error;
 
@@ -90,9 +107,12 @@ impl ControlChannelClient for LinuxControlChannelClient {
 /// `Handle` is `u64` to leave room for both X11 window XIDs (`u32`) and
 /// Wayland surface ids (`u64`); the concrete representation is settled
 /// in M4 once the focus-tracking implementation is in place.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Default)]
 pub struct LinuxWindowHandleProbe;
 
+#[cfg(target_os = "linux")]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl WindowHandleProbe for LinuxWindowHandleProbe {
     type Handle = u64;
 
