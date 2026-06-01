@@ -19,6 +19,12 @@
 //! - [`ControlChannelClient`] - client side of the same transport.
 //! - [`WindowHandleProbe`] - looks up the window handle owned by a
 //!   given process id, used by focus tracking.
+//!
+//! The control-channel traits use return-position `impl Future`, which
+//! makes them not `dyn`-compatible. Platform selection is a compile-time
+//! choice in this crate's consumers, so the traits are intended for
+//! static dispatch (generic parameters / `impl Trait`) rather than
+//! `Box<dyn ...>` storage.
 
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
@@ -45,7 +51,12 @@ pub trait ProcessSpawner: Send + Sync {
     /// Per-spawn context type; see [`LaunchContext`].
     type Context: LaunchContext;
     /// Opaque handle to a successfully spawned child.
-    type Handle: Send + Sync + 'static;
+    ///
+    /// Only `Send + 'static` is required; the bound omits `Sync` so
+    /// platform implementations can return handles intended for
+    /// single-owner mutation (e.g. `tokio::process::Child`) without
+    /// wrapping them in an interior-mutability container.
+    type Handle: Send + 'static;
     /// Error type returned when spawning fails.
     type Error: Error + Send + Sync + 'static;
 
@@ -98,7 +109,9 @@ pub trait ControlChannelServer: Send {
     /// * `buf` - Destination buffer.
     ///
     /// # Returns
-    /// Number of bytes written into `buf`, or an error.
+    /// Number of bytes written into `buf`. `Ok(0)` signals EOF (the
+    /// peer closed the connection cleanly); any transport-level
+    /// failure is reported as `Err`.
     fn recv(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
@@ -131,7 +144,9 @@ pub trait ControlChannelClient: Send {
     /// * `buf` - Destination buffer.
     ///
     /// # Returns
-    /// Number of bytes written into `buf`, or an error.
+    /// Number of bytes written into `buf`. `Ok(0)` signals EOF (the
+    /// daemon closed the connection cleanly); any transport-level
+    /// failure is reported as `Err`.
     fn recv(&mut self, buf: &mut [u8]) -> impl Future<Output = Result<usize, Self::Error>> + Send;
 }
 
