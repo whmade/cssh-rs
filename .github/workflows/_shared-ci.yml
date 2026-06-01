@@ -103,14 +103,25 @@ jobs:
           $nightly = "${{ steps.nightly.outputs.version }}"
           $ignoreRegex = (Get-Content -Raw ".config/coverage/ignore-filename.regex").Trim()
           cargo +$nightly llvm-cov clean --workspace
-          # --no-fail-fast: one crate's failing tests should not abort
-          # cargo before later test binaries run, or their coverage is
-          # missing from the report and diff-cover trips on new code.
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # PowerShell does not propagate native-command exit codes by default,
+          # so capture the cargo test exit and surface it after writing reports.
+          # --no-fail-fast keeps later test binaries running when an earlier one
+          # blows up, so we get full coverage instrumentation for all of them.
           cargo +$nightly llvm-cov --all-features --workspace --no-fail-fast --no-report -- --no-capture
+          $testExit = $LASTEXITCODE
           cargo +$nightly llvm-cov report --cobertura --output-path coverage.xml --ignore-filename-regex $ignoreRegex
+          $cobExit = $LASTEXITCODE
           cargo +$nightly llvm-cov report --html --output-dir coverage_html --ignore-filename-regex $ignoreRegex
+          $htmlExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }
+          if ($cobExit -ne 0) { exit $cobExit }
+          if ($htmlExit -ne 0) { exit $htmlExit }
 
       - name: Upload Coverage XML Data
+        # Run even if tests failed so downstream coverage consumers still
+        # get a partial report for the test binaries that did finish.
+        if: always()
         uses: &upload-artifact-action actions/upload-artifact@v7
         with:
           name: coverage-xml-data
@@ -118,6 +129,7 @@ jobs:
           retention-days: 1
 
       - name: Upload Coverage HTML Report
+        if: always()
         uses: *upload-artifact-action
         with:
           name: coverage-html-report

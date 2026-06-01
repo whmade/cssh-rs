@@ -138,6 +138,7 @@ mod cli_args_test {
 
 /// Test module for show_interactive_prompt function
 mod show_interactive_prompt_test {
+    use super::super::PKG_NAME;
     use crate::cli::{show_interactive_prompt, MockOutput};
     use mockall::predicate::eq;
 
@@ -154,7 +155,9 @@ mod show_interactive_prompt_test {
 
         mock_output
             .expect_println()
-            .with(eq("Enter your csshw arguments (or press Enter to exit):"))
+            .with(eq(format!(
+                "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+            )))
             .times(1)
             .returning(|_| {});
 
@@ -257,6 +260,7 @@ mod read_user_input_test {
 }
 
 mod cli_main_test {
+    use super::super::PKG_NAME;
     use crate::cli::{
         main, Args, Commands, MockArgsCommand, MockConfigManager, MockEntrypoint, MockEnvironment,
         MockInput, MockLoggerInitializer, MockOutput,
@@ -331,7 +335,7 @@ mod cli_main_test {
     fn setup_common_config_manager_mocks(mock_config_manager: &mut MockConfigManager) {
         mock_config_manager
             .expect_load_config()
-            .with(mockall::predicate::eq("csshw-config.toml"))
+            .with(mockall::predicate::eq(format!("{PKG_NAME}-config.toml")))
             .returning(|_| return Ok(ConfigOpt::default()));
     }
 
@@ -392,7 +396,7 @@ mod cli_main_test {
 
                     mock.expect_main().once().returning(
                         |_: &MockWindowsApi, _: &MockConfigManager, config_path, _, args| {
-                            assert_eq!(config_path, "csshw-config.toml");
+                            assert_eq!(config_path, format!("{PKG_NAME}-config.toml"));
                             assert_eq!(args.command, None);
                             assert_eq!(args.username, None);
                             assert_eq!(args.hosts, vec!["host1".to_string(), "host2".to_string()]);
@@ -455,7 +459,9 @@ mod cli_main_test {
 
                     mock_output
                         .expect_println()
-                        .with(eq("Enter your csshw arguments (or press Enter to exit):"))
+                        .with(eq(format!(
+                            "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+                        )))
                         .times(1)
                         .returning(|_| {});
 
@@ -984,9 +990,9 @@ mod cli_main_test {
             .returning(|_| {});
         mock_output
             .expect_println()
-            .with(mockall::predicate::eq(
-                "Enter your csshw arguments (or press Enter to exit):",
-            ))
+            .with(mockall::predicate::eq(format!(
+                "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+            )))
             .times(1)
             .returning(|_| {});
         mock_output
@@ -1759,6 +1765,7 @@ mod main_entrypoint_test {
 
 /// Test module for the interactive mode helper functions
 mod interactive_mode_test {
+    use super::super::PKG_NAME;
     use crate::cli::{
         execute_parsed_command, handle_special_commands, run_interactive_mode, Args, Commands,
         MockArgsCommand, MockConfigManager, MockEntrypoint, MockInput, MockLoggerInitializer,
@@ -2001,7 +2008,9 @@ mod interactive_mode_test {
             .returning(|_| {});
         mock_output
             .expect_println()
-            .with(eq("Enter your csshw arguments (or press Enter to exit):"))
+            .with(eq(format!(
+                "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+            )))
             .times(2)
             .returning(|_| {});
         mock_output
@@ -2072,7 +2081,9 @@ mod interactive_mode_test {
             .returning(|_| {});
         mock_output
             .expect_println()
-            .with(eq("Enter your csshw arguments (or press Enter to exit):"))
+            .with(eq(format!(
+                "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+            )))
             .times(2)
             .returning(|_| {});
         mock_output
@@ -2144,7 +2155,9 @@ mod interactive_mode_test {
             .returning(|_| {});
         mock_output
             .expect_println()
-            .with(eq("Enter your csshw arguments (or press Enter to exit):"))
+            .with(eq(format!(
+                "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+            )))
             .times(3)
             .returning(|_| {});
         mock_output
