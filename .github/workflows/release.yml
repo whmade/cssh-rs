@@ -19,7 +19,7 @@ jobs:
   build-release:
     runs-on: windows-latest
     steps:
-      - uses: &checkout-action actions/checkout@v5
+      - uses: &checkout-action actions/checkout@v6
 
       - name: Build release binary
         run: cargo release
@@ -42,7 +42,7 @@ jobs:
       - uses: *checkout-action
 
       - name: Download release binary
-        uses: &download-artifact-action actions/download-artifact@v4
+        uses: &download-artifact-action actions/download-artifact@v8
         with:
           name: csshw-binary
           path: ./artifacts
@@ -96,7 +96,7 @@ jobs:
           path: ./artifacts
 
       - name: Create draft release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

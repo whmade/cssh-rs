@@ -22,8 +22,8 @@ jobs:
       src: ${{ steps.changes.outputs.src }}
       workflows: ${{ steps.changes.outputs.workflows }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -53,10 +53,10 @@ jobs:
     if: always() && needs.ci.result == 'success'
     runs-on: *runner
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Download Coverage XML Data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-xml-data
           path: coverage-data/
@@ -103,7 +103,7 @@ jobs:
     if: always() && needs.ci.result == 'success'
     runs-on: *runner
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -117,7 +117,7 @@ jobs:
           echo "version=$(cat .config/coverage/diff-cover.version)" >> $GITHUB_OUTPUT
 
       - name: Cache pip packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: pip-cache
         with:
           path: ~/.cache/pip
@@ -130,7 +130,7 @@ jobs:
         run: pip install diff-cover==${{ steps.diffcover.outputs.version }}
 
       - name: Download Coverage XML Data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-xml-data
           path: coverage-data/
