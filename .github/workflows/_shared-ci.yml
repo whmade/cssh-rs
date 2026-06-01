@@ -111,8 +111,12 @@ jobs:
           cargo +$nightly llvm-cov --all-features --workspace --no-fail-fast --no-report -- --no-capture
           $testExit = $LASTEXITCODE
           cargo +$nightly llvm-cov report --cobertura --output-path coverage.xml --ignore-filename-regex $ignoreRegex
+          $cobExit = $LASTEXITCODE
           cargo +$nightly llvm-cov report --html --output-dir coverage_html --ignore-filename-regex $ignoreRegex
+          $htmlExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
+          if ($cobExit -ne 0) { exit $cobExit }
+          if ($htmlExit -ne 0) { exit $htmlExit }
 
       - name: Upload Coverage XML Data
         # Run even if tests failed so downstream coverage consumers still
