@@ -3,15 +3,8 @@
 //! This module provides a trait-based abstraction over Windows APIs to enable
 //! mocking in tests and centralize Windows-specific functionality.
 
-#![deny(clippy::implicit_return)]
-#![allow(
-    clippy::needless_return,
-    clippy::doc_overindented_list_items,
-    rustdoc::private_intra_doc_links
-)]
-
 use log::{error, warn};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::OsStrExt;
 use std::{mem, ptr};
 
@@ -42,17 +35,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SYSTEM_METRICS_INDEX, WINDOWPLACEMENT,
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "mock"))]
 use mockall::automock;
 
-use super::constants::MAX_WINDOW_TITLE_LENGTH;
+use crate::MAX_WINDOW_TITLE_LENGTH;
 
 /// Trait for Windows API operations to enable mocking in tests.
 ///
 /// This trait abstracts Windows API calls to allow for unit testing without
 /// actual system interaction. All console and system operations should go
 /// through this trait.
-#[cfg_attr(test, automock)]
+#[cfg_attr(any(test, feature = "mock"), automock)]
 pub trait WindowsApi: Send + Sync {
     /// Sets the console window title.
     ///
@@ -309,6 +302,70 @@ pub trait WindowsApi: Send + Sync {
         }
     }
 
+    /// Create a new process from `OsStr`/`OsString` inputs without lossy
+    /// UTF-8 conversion.
+    ///
+    /// Mirrors [`Self::create_process_with_args`] but preserves the
+    /// platform-native UTF-16 representation of `application` and `args`.
+    /// Use this from code that hands paths or user-supplied arguments
+    /// straight to the spawner (e.g. the platform-trait
+    /// `ProcessSpawner::spawn`) - non-UTF-8 sequences are passed through
+    /// to `CreateProcessW` unmodified instead of being replaced with
+    /// `U+FFFD`.
+    ///
+    /// # Arguments
+    ///
+    /// * `application`         - Application path or name.
+    /// * `args`                - Arguments to the application.
+    /// * `with_keyboard_focus` - Whether the new console window should
+    ///                           take foreground focus when it appears.
+    ///
+    /// # Returns
+    ///
+    /// Process information on success, or the originating
+    /// [`windows::core::Error`] from `CreateProcessW`.
+    fn create_process_with_os_args(
+        &self,
+        application: &OsStr,
+        args: &[OsString],
+        with_keyboard_focus: bool,
+    ) -> windows::core::Result<PROCESS_INFORMATION> {
+        let app_wide = encode_wide_z(application);
+        let mut cmd_line = build_command_line_wide(application, args);
+        let mut startupinfo = build_startupinfo(with_keyboard_focus);
+        let mut process_information = PROCESS_INFORMATION::default();
+        let command_line_ptr = windows::core::PWSTR(cmd_line.as_mut_ptr());
+
+        self.create_process_raw_wide(
+            &app_wide,
+            command_line_ptr,
+            &mut startupinfo,
+            &mut process_information,
+        )?;
+        return Ok(process_information);
+    }
+
+    /// Low-level `CreateProcessW` call accepting an already-wide,
+    /// null-terminated application path.
+    ///
+    /// # Arguments
+    ///
+    /// * `application_wide` - UTF-16, null-terminated application path.
+    /// * `command_line`     - Mutable UTF-16 command line as `PWSTR`.
+    /// * `startup_info`     - Startup information structure.
+    /// * `process_info`     - Output process information.
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure of the operation.
+    fn create_process_raw_wide(
+        &self,
+        application_wide: &[u16],
+        command_line: windows::core::PWSTR,
+        startup_info: &mut windows::Win32::System::Threading::STARTUPINFOW,
+        process_info: &mut windows::Win32::System::Threading::PROCESS_INFORMATION,
+    ) -> windows::core::Result<()>;
+
     /// Low-level process creation API call
     ///
     /// # Arguments
@@ -512,7 +569,7 @@ pub trait WindowsApi: Send + Sync {
     ) -> windows::core::Result<()>;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "mock"))]
 impl Clone for MockWindowsApi {
     fn clone(&self) -> Self {
         return MockWindowsApi::new();
@@ -744,6 +801,34 @@ impl WindowsApi for DefaultWindowsApi {
         };
     }
 
+    fn create_process_raw_wide(
+        &self,
+        application_wide: &[u16],
+        command_line: windows::core::PWSTR,
+        startup_info: &mut windows::Win32::System::Threading::STARTUPINFOW,
+        process_info: &mut windows::Win32::System::Threading::PROCESS_INFORMATION,
+    ) -> windows::core::Result<()> {
+        let app_pcwstr = if application_wide.is_empty() {
+            PCWSTR::null()
+        } else {
+            PCWSTR(application_wide.as_ptr())
+        };
+        return unsafe {
+            CreateProcessW(
+                app_pcwstr,
+                Some(command_line),
+                Some(ptr::null_mut()),
+                Some(ptr::null_mut()),
+                false,
+                CREATE_NEW_CONSOLE,
+                Some(ptr::null_mut()),
+                PCWSTR::null(),
+                ptr::addr_of_mut!(*startup_info),
+                ptr::addr_of_mut!(*process_info),
+            )
+        };
+    }
+
     fn get_console_window(&self) -> HWND {
         return unsafe { GetConsoleWindow() };
     }
@@ -907,7 +992,7 @@ pub(crate) fn build_startupinfo(with_keyboard_focus: bool) -> STARTUPINFOW {
 /// # Examples
 ///
 /// ```
-/// use cssh_rs_core::utils::windows::build_command_line;
+/// use cssh_rs_platform_windows::build_command_line;
 ///
 /// let cmd_line = build_command_line("cmd.exe", &["arg1".to_string(), "arg2".to_string()]);
 /// // Returns UTF-16 encoded: "cmd.exe" "arg1" "arg2"\0
@@ -929,6 +1014,54 @@ pub fn build_command_line(application: &str, args: &[String]) -> Vec<u16> {
     return cmd;
 }
 
+/// Build a UTF-16, null-terminated command line directly from `OsStr`
+/// inputs.
+///
+/// Mirrors [`build_command_line`] but skips the `&str`/`String` round-trip
+/// so non-UTF-8 byte sequences (typical for paths and user-supplied
+/// arguments on Windows) survive intact.
+///
+/// # Arguments
+///
+/// * `application` - Application path or name.
+/// * `args`        - Arguments to the application.
+///
+/// # Returns
+///
+/// UTF-16 encoded command line with proper quoting.
+pub fn build_command_line_wide(application: &OsStr, args: &[OsString]) -> Vec<u16> {
+    let mut cmd: Vec<u16> = Vec::new();
+    cmd.push(b'"' as u16);
+    cmd.extend(application.encode_wide());
+    cmd.push(b'"' as u16);
+
+    for arg in args {
+        cmd.push(' ' as u16);
+        cmd.push(b'"' as u16);
+        cmd.extend(arg.encode_wide());
+        cmd.push(b'"' as u16);
+    }
+    cmd.push(0);
+
+    return cmd;
+}
+
+/// UTF-16 encode `s` with a trailing null terminator.
+///
+/// # Arguments
+///
+/// * `s` - String to encode.
+///
+/// # Returns
+///
+/// UTF-16 encoded buffer suitable for passing to wide-string Win32 APIs
+/// such as `CreateProcessW`'s `lpApplicationName`.
+pub(crate) fn encode_wide_z(s: &OsStr) -> Vec<u16> {
+    let mut out: Vec<u16> = s.encode_wide().collect();
+    out.push(0);
+    return out;
+}
+
 /// Sets the back- and foreground color of the current console window using the provided API.
 ///
 /// # Arguments
@@ -939,7 +1072,7 @@ pub fn build_command_line(application: &str, args: &[String]) -> Vec<u16> {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{set_console_color, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{set_console_color, DefaultWindowsApi};
 /// use windows::Win32::System::Console::CONSOLE_CHARACTER_ATTRIBUTES;
 ///
 /// let api = DefaultWindowsApi;
@@ -977,7 +1110,7 @@ pub fn set_console_color(api: &dyn WindowsApi, color: CONSOLE_CHARACTER_ATTRIBUT
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{clear_screen, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{clear_screen, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// clear_screen(&api);
@@ -1017,7 +1150,7 @@ pub fn clear_screen(api: &dyn WindowsApi) {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{set_console_border_color, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{set_console_border_color, DefaultWindowsApi};
 /// use windows::Win32::Foundation::COLORREF;
 ///
 /// set_console_border_color(&DefaultWindowsApi, COLORREF(0x001A2B3C));
@@ -1043,7 +1176,7 @@ pub fn set_console_border_color(api: &dyn WindowsApi, color: COLORREF) {
 /// # Examples
 ///
 /// ```
-/// use cssh_rs_core::utils::windows::utf16_buffer_to_string;
+/// use cssh_rs_platform_windows::utf16_buffer_to_string;
 ///
 /// let utf16_data = vec![72, 101, 108, 108, 111, 0]; // "Hello" + null terminator
 /// let result = utf16_buffer_to_string(&utf16_data);
@@ -1074,7 +1207,7 @@ pub fn utf16_buffer_to_string(buffer: &[u16]) -> String {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{get_console_title, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{get_console_title, DefaultWindowsApi};
 ///
 /// let title = get_console_title(&DefaultWindowsApi);
 /// println!("Console title: {}", title);
@@ -1112,7 +1245,7 @@ fn get_std_handle(nstdhandle: STD_HANDLE) -> HANDLE {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::get_console_input_buffer;
+/// use cssh_rs_platform_windows::get_console_input_buffer;
 ///
 /// let input_handle = get_console_input_buffer();
 /// ```
@@ -1130,7 +1263,7 @@ pub fn get_console_input_buffer() -> HANDLE {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::get_console_output_buffer;
+/// use cssh_rs_platform_windows::get_console_output_buffer;
 ///
 /// let output_handle = get_console_output_buffer();
 /// ```
@@ -1154,7 +1287,7 @@ pub fn get_console_output_buffer() -> HANDLE {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{read_console_input, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{read_console_input, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// let input_record = read_console_input(&api);
@@ -1188,7 +1321,7 @@ pub fn read_console_input(api: &dyn WindowsApi) -> INPUT_RECORD {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{read_keyboard_input, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{read_keyboard_input, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// let key_event = read_keyboard_input(&api);
@@ -1224,7 +1357,7 @@ pub fn read_keyboard_input(api: &dyn WindowsApi) -> INPUT_RECORD_0 {
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{arrange_console, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{arrange_console, DefaultWindowsApi};
 ///
 /// let api = DefaultWindowsApi;
 /// arrange_console(&api, 100, 100, 800, 600);
@@ -1251,7 +1384,7 @@ pub fn arrange_console(api: &dyn WindowsApi, x: i32, y: i32, width: i32, height:
 /// # Examples
 ///
 /// ```no_run
-/// use cssh_rs_core::utils::windows::{is_windows_10, DefaultWindowsApi};
+/// use cssh_rs_platform_windows::{is_windows_10, DefaultWindowsApi};
 ///
 /// if is_windows_10(&DefaultWindowsApi) {
 ///     println!("Running on Windows 10");
@@ -1271,5 +1404,5 @@ pub fn is_windows_10(api: &dyn WindowsApi) -> bool {
 }
 
 #[cfg(test)]
-#[path = "../tests/utils/test_windows.rs"]
+#[path = "tests/test_api.rs"]
 mod test_mod;

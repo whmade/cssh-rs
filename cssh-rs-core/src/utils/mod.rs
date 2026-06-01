@@ -10,7 +10,15 @@
 pub mod config;
 pub mod constants;
 pub mod debug;
-pub mod windows;
+
+/// Re-exports the Windows API abstraction from `cssh-rs-platform-windows`.
+///
+/// Existing daemon and client modules import from `crate::utils::windows`;
+/// the re-export preserves those paths while the implementation lives in
+/// the platform crate.
+pub mod windows {
+    pub use cssh_rs_platform_windows::*;
+}
 
 #[cfg(test)]
 #[path = "../tests/utils/test_mod.rs"]

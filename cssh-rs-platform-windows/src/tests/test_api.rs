@@ -3,7 +3,7 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 
-use crate::utils::windows::{
+use crate::api::{
     clear_screen, is_windows_10, read_console_input, read_keyboard_input, set_console_border_color,
     set_console_color, utf16_buffer_to_string, MockWindowsApi, KEY_EVENT,
 };
@@ -544,7 +544,76 @@ mod console_input_test {
 
 /// Test module for command line building functionality.
 mod command_line_test {
-    use crate::utils::windows::build_command_line;
+    use crate::api::{build_command_line, build_command_line_wide, encode_wide_z};
+    use std::ffi::{OsStr, OsString};
+    use std::os::windows::ffi::OsStringExt;
+
+    /// `build_command_line_wide` quotes the application and each argument
+    /// and terminates with a NUL - mirroring the UTF-8 `build_command_line`
+    /// output for plain ASCII inputs.
+    #[test]
+    fn test_build_command_line_wide_simple() {
+        let application = OsString::from("cmd.exe");
+        let args = vec![OsString::from("arg1"), OsString::from("arg2")];
+
+        let result = build_command_line_wide(&application, &args);
+
+        assert_eq!(
+            result,
+            vec![
+                34, 99, 109, 100, 46, 101, 120, 101, 34, 32, 34, 97, 114, 103, 49, 34, 32, 34, 97,
+                114, 103, 50, 34, 0
+            ]
+        );
+    }
+
+    /// `build_command_line_wide` still quotes the application and terminates
+    /// with a NUL when no arguments are supplied.
+    #[test]
+    fn test_build_command_line_wide_no_args() {
+        let application = OsString::from("notepad.exe");
+        let args: Vec<OsString> = vec![];
+
+        let result = build_command_line_wide(&application, &args);
+
+        assert_eq!(
+            result,
+            vec![34, 110, 111, 116, 101, 112, 97, 100, 46, 101, 120, 101, 34, 0]
+        );
+    }
+
+    /// `build_command_line_wide` passes non-UTF-8 byte sequences (lone
+    /// surrogates) through unchanged, instead of replacing them with
+    /// `U+FFFD` the way the UTF-8 path would.
+    #[test]
+    fn test_build_command_line_wide_preserves_lone_surrogate() {
+        let application = OsString::from("a.exe");
+        let surrogate_arg = OsString::from_wide(&[0xD800u16, b'a' as u16]);
+        let args = vec![surrogate_arg];
+
+        let result = build_command_line_wide(&application, &args);
+
+        // "a.exe" quoted, space, quote, 0xD800, 'a', quote, NUL.
+        assert_eq!(
+            result,
+            vec![34, 97, 46, 101, 120, 101, 34, 32, 34, 0xD800, 97, 34, 0]
+        );
+    }
+
+    /// `encode_wide_z` returns the UTF-16 encoding of its input followed by
+    /// a single NUL terminator.
+    #[test]
+    fn test_encode_wide_z_appends_nul_terminator() {
+        let encoded = encode_wide_z(OsStr::new("abc"));
+        assert_eq!(encoded, vec![97, 98, 99, 0]);
+    }
+
+    /// `encode_wide_z` returns just the NUL terminator for an empty input.
+    #[test]
+    fn test_encode_wide_z_empty_input() {
+        let encoded = encode_wide_z(OsStr::new(""));
+        assert_eq!(encoded, vec![0]);
+    }
 
     /// Tests build_command_line with simple application and arguments.
     /// Validates proper UTF-16 encoding and quoting.
@@ -607,7 +676,7 @@ mod create_process_with_args_test {
         UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
     };
 
-    use crate::utils::windows::{build_startupinfo, DefaultWindowsApi, WindowsApi};
+    use crate::api::{build_startupinfo, DefaultWindowsApi, WindowsApi};
 
     /// Tests create_process_with_args with valid application and arguments.
     /// Validates that the process creation function is called with correct parameters.

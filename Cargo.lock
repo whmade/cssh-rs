@@ -331,6 +331,7 @@ dependencies = [
  "clap",
  "cli-clipboard",
  "confy",
+ "cssh-rs-platform-windows",
  "cssh-rs-protocol",
  "log",
  "log-panics",
@@ -350,6 +351,18 @@ dependencies = [
 [[package]]
 name = "cssh-rs-platform"
 version = "0.19.1"
+
+[[package]]
+name = "cssh-rs-platform-windows"
+version = "0.19.1"
+dependencies = [
+ "cssh-rs-platform",
+ "log",
+ "mockall",
+ "os_info",
+ "tokio",
+ "windows 0.62.2",
+]
 
 [[package]]
 name = "cssh-rs-protocol"
