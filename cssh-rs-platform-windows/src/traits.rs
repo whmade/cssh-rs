@@ -19,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
 use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions,
 };
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows::Win32::System::Threading::PROCESS_INFORMATION;
 
 use crate::api::{DefaultWindowsApi, WindowsApi};
@@ -41,6 +41,26 @@ unsafe impl Send for SendProcessInformation {}
 // SAFETY: same justification as for `Send` - the handle values are immutable
 // once `CreateProcessW` returns, so shared references can travel freely.
 unsafe impl Sync for SendProcessInformation {}
+
+impl Drop for SendProcessInformation {
+    fn drop(&mut self) {
+        // CreateProcessW returns kernel handles to the new process and its
+        // primary thread; both must be closed to avoid leaking entries from
+        // the per-process handle table. NULL/invalid handles are a no-op for
+        // CloseHandle - see
+        // https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle
+        for handle in [self.0.hProcess, self.0.hThread] {
+            if !handle.is_invalid() {
+                // SAFETY: handle came from CreateProcessW (or a test-side
+                // fake) and is not aliased anywhere else - the wrapper owns
+                // it for its entire lifetime.
+                let _ = unsafe { CloseHandle(handle) };
+            }
+        }
+        self.0.hProcess = HANDLE::default();
+        self.0.hThread = HANDLE::default();
+    }
+}
 
 /// `Send + Sync` wrapper around [`HWND`].
 ///
@@ -107,17 +127,19 @@ impl<A: WindowsApi + 'static> ProcessSpawner for WindowsProcessSpawner<A> {
         args: &[OsString],
         context: &Self::Context,
     ) -> Result<Self::Handle, Self::Error> {
-        let program = program.to_string_lossy().into_owned();
-        let args = args
-            .iter()
-            .map(|a| return a.to_string_lossy().into_owned())
-            .collect();
         return self
             .api
-            .create_process_with_args(&program, args, context.with_keyboard_focus)
+            .create_process_with_os_args(program, args, context.with_keyboard_focus)
             .map(SendProcessInformation)
-            .ok_or_else(|| {
-                return io::Error::other("CreateProcessW failed");
+            .map_err(|err| {
+                // The thread-local last-error code is what CreateProcessW
+                // actually reports; the windows-rs `Error` typically just
+                // re-wraps it but stringifies it as an opaque HRESULT.
+                let os_err = io::Error::last_os_error();
+                if os_err.raw_os_error().unwrap_or(0) != 0 {
+                    return os_err;
+                }
+                return io::Error::other(format!("CreateProcessW failed: {err}"));
             });
     }
 }
@@ -128,7 +150,7 @@ impl<A: WindowsApi + 'static> ProcessSpawner for WindowsProcessSpawner<A> {
 /// waits for the matching client process to connect; `send` / `recv`
 /// then exchange already-framed bytes produced by `cssh-rs-protocol`.
 pub struct WindowsControlChannelServer {
-    pipe: Option<NamedPipeServer>,
+    pipe: NamedPipeServer,
     endpoint: OsString,
 }
 
@@ -149,38 +171,11 @@ impl WindowsControlChannelServer {
             .pipe_mode(PipeMode::Message)
             .create(endpoint)?;
         return Ok(Self {
-            pipe: Some(pipe),
+            pipe,
             endpoint: endpoint.to_owned(),
         });
     }
-}
 
-impl ControlChannelServer for WindowsControlChannelServer {
-    type Error = io::Error;
-
-    async fn accept(&mut self) -> Result<(), Self::Error> {
-        let pipe = self.pipe.as_mut().ok_or_else(|| {
-            return io::Error::other("control channel server has no pending pipe");
-        })?;
-        return pipe.connect().await;
-    }
-
-    async fn send(&mut self, frame: &[u8]) -> Result<(), Self::Error> {
-        let pipe = self.pipe.as_mut().ok_or_else(|| {
-            return io::Error::other("control channel server is not bound");
-        })?;
-        return pipe.write_all(frame).await;
-    }
-
-    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let pipe = self.pipe.as_mut().ok_or_else(|| {
-            return io::Error::other("control channel server is not bound");
-        })?;
-        return pipe.read(buf).await;
-    }
-}
-
-impl WindowsControlChannelServer {
     /// Endpoint name the server is bound to.
     ///
     /// # Returns
@@ -195,11 +190,24 @@ impl WindowsControlChannelServer {
     /// `Ok(true)` when the pipe has bytes ready to read, `Ok(false)`
     /// otherwise, or the underlying I/O error.
     pub async fn ready_to_read(&mut self) -> io::Result<bool> {
-        let pipe = self.pipe.as_mut().ok_or_else(|| {
-            return io::Error::other("control channel server is not bound");
-        })?;
-        let ready = pipe.ready(Interest::READABLE).await?;
+        let ready = self.pipe.ready(Interest::READABLE).await?;
         return Ok(ready.is_readable());
+    }
+}
+
+impl ControlChannelServer for WindowsControlChannelServer {
+    type Error = io::Error;
+
+    async fn accept(&mut self) -> Result<(), Self::Error> {
+        return self.pipe.connect().await;
+    }
+
+    async fn send(&mut self, frame: &[u8]) -> Result<(), Self::Error> {
+        return self.pipe.write_all(frame).await;
+    }
+
+    async fn recv(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        return self.pipe.read(buf).await;
     }
 }
 
@@ -283,3 +291,7 @@ impl<A: WindowsApi + 'static> WindowHandleProbe for WindowsWindowHandleProbe<A> 
         return None;
     }
 }
+
+#[cfg(test)]
+#[path = "tests/test_traits.rs"]
+mod test_mod;

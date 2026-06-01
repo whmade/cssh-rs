@@ -30,17 +30,18 @@
 #![doc(html_no_source)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(windows)]
+pub mod api;
+#[cfg(windows)]
+pub mod traits;
+
 /// Maximum expected length of window title of a client window.
 ///
 /// Only used as fixed buffer size when reading the current window title to
 /// check if we need to reset it. If the actual window title exceeds this
 /// length it will be cut off at that point.
+#[cfg(windows)]
 pub const MAX_WINDOW_TITLE_LENGTH: usize = 2048;
-
-#[cfg(windows)]
-pub mod api;
-#[cfg(windows)]
-pub mod traits;
 
 #[cfg(windows)]
 pub use api::{
