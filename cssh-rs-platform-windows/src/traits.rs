@@ -46,8 +46,8 @@ impl Drop for SendProcessInformation {
     fn drop(&mut self) {
         // CreateProcessW returns kernel handles to the new process and its
         // primary thread; both must be closed to avoid leaking entries from
-        // the per-process handle table. NULL/invalid handles are a no-op for
-        // CloseHandle - see
+        // the per-process handle table. Skip NULL/invalid handles to avoid
+        // the ERROR_INVALID_HANDLE that CloseHandle reports for them - see
         // https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle
         for handle in [self.0.hProcess, self.0.hThread] {
             if !handle.is_invalid() {
@@ -91,10 +91,11 @@ pub struct WindowsLaunchContext {
 
 impl LaunchContext for WindowsLaunchContext {}
 
-/// Process spawner backed by [`WindowsApi::create_process_with_args`].
+/// Process spawner backed by [`WindowsApi::create_process_with_os_args`].
 ///
 /// Holds an [`Arc`] over a [`WindowsApi`] implementation so callers can
-/// inject [`crate::api::MockWindowsApi`] in tests; production code uses
+/// inject a mock in tests (the crate's `mock` feature exposes
+/// `MockWindowsApi` for this purpose); production code uses
 /// [`Self::default`] which selects [`DefaultWindowsApi`].
 pub struct WindowsProcessSpawner<A: WindowsApi = DefaultWindowsApi> {
     api: Arc<A>,

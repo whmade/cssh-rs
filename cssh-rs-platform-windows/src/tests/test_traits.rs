@@ -192,6 +192,7 @@ mod control_channel_tests {
     fn round_trip_exchange() {
         let runtime = Builder::new_multi_thread()
             .enable_io()
+            .enable_time()
             .worker_threads(2)
             .build()
             .expect("tokio runtime");
