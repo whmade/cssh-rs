@@ -12,6 +12,7 @@ mod readme;
 mod release;
 mod social_preview;
 mod typography;
+mod worktree_teardown;
 
 use std::path::PathBuf;
 
@@ -65,6 +66,13 @@ enum Command {
     /// Scan tracked text files for forbidden decorative Unicode
     /// punctuation and fail with a list of offending locations.
     CheckTypography,
+    /// Tear down a paseo worktree: detach `HEAD` in the worktree and
+    /// force-delete its branch from the source checkout. Reads
+    /// `PASEO_WORKTREE_PATH`, `PASEO_SOURCE_CHECKOUT_PATH`, and
+    /// `PASEO_BRANCH_NAME` from the environment. Designed to be
+    /// invoked from `paseo.json`'s `worktree.teardown` so the same
+    /// entry works on Windows (PowerShell) and Linux/macOS (bash).
+    WorktreeTeardown,
 }
 
 fn main() -> Result<()> {
@@ -100,6 +108,9 @@ fn main() -> Result<()> {
         }
         Command::CheckTypography => {
             typography::check_typography(&typography::RealSystem)?;
+        }
+        Command::WorktreeTeardown => {
+            worktree_teardown::worktree_teardown(&worktree_teardown::RealSystem)?;
         }
     }
     Ok(())
