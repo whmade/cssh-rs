@@ -30,8 +30,7 @@ jobs:
             src:
               - '.cargo/**'
               - '.config/coverage/**'
-              - 'src/**'
-              - 'build.rs'
+              - 'cssh-rs/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'clippy.toml'
