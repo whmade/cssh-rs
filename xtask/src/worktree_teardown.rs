@@ -15,11 +15,12 @@
 //!    a future `paseo worktree create` can reuse the name without a
 //!    manual `git branch -D`.
 //!
-//! Both steps are best-effort: a non-zero git exit is logged but
-//! does not abort teardown, mirroring the previous shell scripts
-//! that used `; $global:LASTEXITCODE = 0` (PowerShell) and `|| true`
-//! (bash). Aborting would leave the worktree half-removed and force
-//! the contributor to clean up by hand.
+//! Both steps are best-effort: a non-zero git exit or a failure to
+//! spawn `git` at all is logged but does not abort teardown,
+//! mirroring the previous shell scripts that used
+//! `; $global:LASTEXITCODE = 0` (PowerShell) and `|| true` (bash).
+//! Aborting would leave the worktree half-removed and force the
+//! contributor to clean up by hand.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -108,7 +109,8 @@ impl WorktreeTeardownSystem for RealSystem {
 /// Tear down a paseo worktree by detaching `HEAD` and deleting the
 /// backing branch from the source checkout.
 ///
-/// Both git steps are best-effort: a non-zero exit code is logged
+/// Both git steps are best-effort: a non-zero exit code or a
+/// spawn failure (for example, `git` missing from `PATH`) is logged
 /// but does not abort the function. A missing env var means paseo
 /// did not invoke us (or invoked us with an incomplete environment);
 /// we log the gap and skip the affected step rather than failing.
@@ -120,26 +122,18 @@ impl WorktreeTeardownSystem for RealSystem {
 /// # Returns
 ///
 /// `Ok(())` once every applicable step has been attempted.
-///
-/// # Errors
-///
-/// Returns an error only if the `git` binary cannot be spawned at
-/// all; per-step non-zero exits are absorbed.
 pub fn worktree_teardown<S: WorktreeTeardownSystem>(system: &S) -> Result<()> {
     let worktree_path = system.env_var(ENV_WORKTREE_PATH);
     let source_path = system.env_var(ENV_SOURCE_CHECKOUT_PATH);
     let branch_name = system.env_var(ENV_BRANCH_NAME);
 
     if let Some(path) = worktree_path.as_deref() {
-        let code = system.run_git(
+        run_git_best_effort(
+            system,
             &PathBuf::from(path),
             vec!["checkout".to_owned(), "--detach".to_owned()],
-        )?;
-        if code != 0 {
-            system.log(&format!(
-                "WARN - paseo worktree teardown: `git checkout --detach` in {path} exited with code {code}; continuing."
-            ));
-        }
+            &format!("`git checkout --detach` in {path}"),
+        );
     } else {
         system.log(&format!(
             "INFO - paseo worktree teardown: {ENV_WORKTREE_PATH} not set; skipping HEAD detach."
@@ -148,15 +142,12 @@ pub fn worktree_teardown<S: WorktreeTeardownSystem>(system: &S) -> Result<()> {
 
     match (source_path.as_deref(), branch_name.as_deref()) {
         (Some(source), Some(branch)) => {
-            let code = system.run_git(
+            run_git_best_effort(
+                system,
                 &PathBuf::from(source),
                 vec!["branch".to_owned(), "-D".to_owned(), branch.to_owned()],
-            )?;
-            if code != 0 {
-                system.log(&format!(
-                    "WARN - paseo worktree teardown: `git branch -D {branch}` in {source} exited with code {code}; continuing."
-                ));
-            }
+                &format!("`git branch -D {branch}` in {source}"),
+            );
         }
         _ => {
             system.log(&format!(
@@ -166,6 +157,27 @@ pub fn worktree_teardown<S: WorktreeTeardownSystem>(system: &S) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn run_git_best_effort<S: WorktreeTeardownSystem>(
+    system: &S,
+    repo_path: &Path,
+    args: Vec<String>,
+    description: &str,
+) {
+    match system.run_git(repo_path, args) {
+        Ok(0) => {}
+        Ok(code) => {
+            system.log(&format!(
+                "WARN - paseo worktree teardown: {description} exited with code {code}; continuing."
+            ));
+        }
+        Err(err) => {
+            system.log(&format!(
+                "WARN - paseo worktree teardown: {description} failed to spawn `git`: {err:#}; continuing."
+            ));
+        }
+    }
 }
 
 #[cfg(test)]

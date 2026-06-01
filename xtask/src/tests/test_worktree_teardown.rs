@@ -179,7 +179,7 @@ fn test_missing_branch_or_source_skips_branch_delete() {
 }
 
 #[test]
-fn test_run_git_spawn_failure_propagates() {
+fn test_run_git_spawn_failure_logs_and_continues() {
     // Arrange
     let mut mock = MockWorktreeTeardownSystemMock::new();
     expect_env(
@@ -188,13 +188,30 @@ fn test_run_git_spawn_failure_propagates() {
         Some("/tmp/source"),
         Some("feature/x"),
     );
-    mock.expect_run_git()
-        .returning(|_, _| Err(anyhow::anyhow!("git binary missing")));
+
+    let invocations = Arc::new(Mutex::new(0usize));
+    let invocations_clone = invocations.clone();
+    mock.expect_run_git().returning(move |_, _| {
+        *invocations_clone.lock().unwrap() += 1;
+        Err(anyhow::anyhow!("git binary missing"))
+    });
+
+    let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+    let logs_clone = logs.clone();
+    mock.expect_log().returning(move |msg| {
+        logs_clone.lock().unwrap().push(msg.to_owned());
+    });
 
     // Act
     let result = worktree_teardown(&mock);
 
     // Assert
-    assert!(result.is_err());
-    assert!(format!("{:#}", result.unwrap_err()).contains("git binary missing"));
+    assert!(result.is_ok());
+    assert_eq!(*invocations.lock().unwrap(), 2);
+    let logs = logs.lock().unwrap();
+    assert_eq!(logs.len(), 2);
+    assert!(logs[0].contains("checkout --detach"));
+    assert!(logs[0].contains("git binary missing"));
+    assert!(logs[1].contains("branch -D feature/x"));
+    assert!(logs[1].contains("git binary missing"));
 }
