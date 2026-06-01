@@ -1,0 +1,11 @@
+[package]
+name = "cssh-rs-platform-linux"
+version = "0.19.1"
+edition = "2021"
+license-file = "../LICENSE.txt"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
+
+[dependencies]
+cssh-rs-platform = { path = "../cssh-rs-platform" }
