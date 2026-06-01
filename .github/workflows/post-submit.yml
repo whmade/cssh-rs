@@ -39,7 +39,7 @@ on:
 
 # Constrain `pull_request_target` to the minimum scopes required.
 # `contents: read` for checkout; `actions: write` for the shared CI
-# workflow's caches (`actions/cache@v4`, `Swatinem/rust-cache@v2`) and
+# workflow's caches (`actions/cache@v5`, `Swatinem/rust-cache@v2`) and
 # artifact upload/download.
 permissions:
   contents: read
@@ -73,12 +73,12 @@ jobs:
       # merged commit on the target branch, not the
       # `pull_request_target` default `refs/pull/<n>/merge` (which would
       # source the action from PR-controlled content).
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Download Coverage XML Data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-xml-data
           path: coverage-data/
