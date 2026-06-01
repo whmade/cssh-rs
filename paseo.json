@@ -5,8 +5,7 @@
       "cargo xtask inject-agent-token"
     ],
     "teardown": [
-      "git -C \"$env:PASEO_WORKTREE_PATH\" checkout --detach; $global:LASTEXITCODE = 0",
-      "git -C \"$env:PASEO_SOURCE_CHECKOUT_PATH\" branch -D \"$env:PASEO_BRANCH_NAME\"; $global:LASTEXITCODE = 0"
+      "cargo xtask worktree-teardown"
     ]
   }
 }
