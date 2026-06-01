@@ -12,6 +12,8 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 #![warn(missing_docs)]
+#![doc(html_no_source)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use windows::Win32::System::Console::INPUT_RECORD_0;
 
@@ -33,19 +35,19 @@ pub const SERIALIZED_PID_LENGTH: usize = 4;
 ///
 /// The tag byte is followed by the
 /// [`SERIALIZED_INPUT_RECORD_0_LENGTH`]-byte serialized payload produced
-/// by [`crate::protocol::serialization::serialize_input_record_0`].
+/// by [`crate::serialization::serialize_input_record_0`].
 pub const TAG_INPUT_RECORD: u8 = 0x00;
 
 /// Tag byte identifying a client state-change message on the daemon-to-client
 /// pipe.
 ///
 /// The tag byte is followed by the single-byte payload produced by
-/// [`crate::protocol::serialization::serialize_client_state`].
+/// [`crate::serialization::serialize_client_state`].
 pub const TAG_STATE_CHANGE: u8 = 0x01;
 
 /// Tag byte identifying a highlight-toggle message on the daemon-to-client
 /// pipe. Payload is the byte produced by
-/// [`crate::protocol::serialization::serialize_highlight`]. Purely visual,
+/// [`crate::serialization::serialize_highlight`]. Purely visual,
 /// orthogonal to [`ClientState`].
 pub const TAG_HIGHLIGHT: u8 = 0x02;
 
@@ -79,8 +81,8 @@ pub const FRAMED_HIGHLIGHT_LENGTH: usize = 2;
 /// state inside its main loop.
 ///
 /// `#[repr(u8)]` so the enum round-trips through
-/// [`crate::protocol::serialization::serialize_client_state`] /
-/// [`crate::protocol::deserialization::deserialize_client_state`] using a
+/// [`crate::serialization::serialize_client_state`] /
+/// [`crate::deserialization::deserialize_client_state`] using a
 /// single byte.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,5 +118,5 @@ pub enum DaemonToClientMessage {
 }
 
 #[cfg(test)]
-#[path = "../tests/protocol/test_mod.rs"]
+#[path = "tests/test_mod.rs"]
 mod test_mod;

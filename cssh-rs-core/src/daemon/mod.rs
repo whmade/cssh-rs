@@ -13,13 +13,6 @@ use std::{
 use std::{thread, time};
 
 use crate::get_console_window_handle;
-use crate::protocol::{
-    deserialization::deserialize_pid,
-    serialization::{serialize_client_state, serialize_highlight, serialize_input_record_0},
-    ClientState, FRAMED_HIGHLIGHT_LENGTH, FRAMED_INPUT_RECORD_LENGTH, FRAMED_STATE_CHANGE_LENGTH,
-    SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT, TAG_INPUT_RECORD,
-    TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
-};
 use crate::utils::config::{Cluster, DaemonConfig, EdgeBehavior};
 use crate::utils::debug::StringRepr;
 use crate::utils::windows::{clear_screen, set_console_color, WindowsApi};
@@ -35,6 +28,13 @@ use crate::{
     WindowsSettingsDefaultTerminalApplicationGuard,
 };
 use bracoxide::explode;
+use cssh_rs_protocol::{
+    deserialization::deserialize_pid,
+    serialization::{serialize_client_state, serialize_highlight, serialize_input_record_0},
+    ClientState, FRAMED_HIGHLIGHT_LENGTH, FRAMED_INPUT_RECORD_LENGTH, FRAMED_STATE_CHANGE_LENGTH,
+    SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT, TAG_INPUT_RECORD,
+    TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
+};
 use log::{debug, error, warn};
 use tokio::{
     net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions},
@@ -1247,7 +1247,7 @@ impl<'a> Daemon<'a> {
     ///
     /// Looks the client up by PID and broadcasts the new state through its
     /// [`watch::Sender`]. The pipe-server task subscribed to that sender
-    /// observes the change and forwards a [`crate::protocol::TAG_STATE_CHANGE`]
+    /// observes the change and forwards a [`cssh_rs_protocol::TAG_STATE_CHANGE`]
     /// frame to the client over the named pipe. Called from the
     /// control-mode handlers for `[t]oggle enabled` and `e[n]able all` via
     /// [`Daemon::update_client_states`].

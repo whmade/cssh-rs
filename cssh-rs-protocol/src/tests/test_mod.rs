@@ -5,7 +5,7 @@ use windows::{
     Win32::System::Console::{INPUT_RECORD_0, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0},
 };
 
-use crate::protocol::{SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH};
+use crate::{SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH};
 
 const EXPECTED_PID: u32 = 0x04030201;
 const EXPECTED_PID_SEQUENCE: [u8; SERIALIZED_PID_LENGTH] = [0x01, 0x02, 0x03, 0x04];
@@ -41,7 +41,7 @@ const EXPECTED_INPUT_RECORD_0_SEQUENCE: [u8; SERIALIZED_INPUT_RECORD_0_LENGTH] =
 
 mod serialization_test {
     use super::*;
-    use crate::protocol::serialization::*;
+    use crate::serialization::*;
 
     #[test]
     fn test_serialize_key_event_record_0() {
@@ -75,7 +75,7 @@ mod serialization_test {
 
 mod deserialization_test {
     use super::*;
-    use crate::protocol::deserialization::*;
+    use crate::deserialization::*;
 
     pub(super) trait Equality<T = Self> {
         fn equals(&self, other: T) -> bool;
@@ -135,16 +135,16 @@ mod deserialization_test {
 
     #[test]
     fn test_pid_round_trip() {
-        use crate::protocol::serialization::serialize_pid;
+        use crate::serialization::serialize_pid;
         let pid = 0xDEADBEEFu32;
         assert_eq!(deserialize_pid(&serialize_pid(pid)), pid);
     }
 }
 
 mod client_state_test {
-    use crate::protocol::deserialization::deserialize_client_state;
-    use crate::protocol::serialization::serialize_client_state;
-    use crate::protocol::ClientState;
+    use crate::deserialization::deserialize_client_state;
+    use crate::serialization::serialize_client_state;
+    use crate::ClientState;
 
     /// Round-trip list of every [`ClientState`] variant through the
     /// byte-level serializer / deserializer.
@@ -212,8 +212,8 @@ mod client_state_test {
 }
 
 mod highlight_test {
-    use crate::protocol::deserialization::deserialize_highlight;
-    use crate::protocol::serialization::serialize_highlight;
+    use crate::deserialization::deserialize_highlight;
+    use crate::serialization::serialize_highlight;
 
     #[test]
     fn test_serialize_highlight_true_byte() {
@@ -245,7 +245,7 @@ mod highlight_test {
 mod framed_message_test {
     use super::deserialization_test::Equality;
     use super::*;
-    use crate::protocol::{
+    use crate::{
         deserialization::parse_daemon_to_client_messages,
         serialization::serialize_daemon_to_client_message, ClientState, DaemonToClientMessage,
         FRAMED_HIGHLIGHT_LENGTH, FRAMED_INPUT_RECORD_LENGTH, FRAMED_KEEP_ALIVE_LENGTH,

@@ -3,7 +3,7 @@ use windows::{
     Win32::System::Console::{INPUT_RECORD_0, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0},
 };
 
-use crate::protocol::{
+use crate::{
     ClientState, DaemonToClientMessage, SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH,
     TAG_HIGHLIGHT, TAG_INPUT_RECORD, TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
 };
@@ -65,7 +65,7 @@ pub fn deserialize_pid(bytes: &[u8; SERIALIZED_PID_LENGTH]) -> u32 {
 ///
 /// # Arguments
 ///
-/// * `byte` - The single payload byte of a [`crate::protocol::TAG_STATE_CHANGE`]
+/// * `byte` - The single payload byte of a [`crate::TAG_STATE_CHANGE`]
 ///            frame, equal to a [`ClientState`]'s `#[repr(u8)]` discriminant.
 ///
 /// # Returns
@@ -90,7 +90,7 @@ pub fn deserialize_client_state(byte: u8) -> ClientState {
 ///
 /// # Arguments
 ///
-/// * `byte` - Payload byte of a [`crate::protocol::TAG_HIGHLIGHT`]
+/// * `byte` - Payload byte of a [`crate::TAG_HIGHLIGHT`]
 ///            frame: `0` for not highlighted, `1` for highlighted.
 ///
 /// # Returns
@@ -130,7 +130,7 @@ pub fn deserialize_highlight(byte: u8) -> bool {
 /// # Panics
 ///
 /// Panics if `buffer` contains a tag byte that is not part of the documented
-/// daemon-to-client protocol (see [`crate::protocol`]). An unknown tag
+/// daemon-to-client protocol (see [`crate`]). An unknown tag
 /// indicates either a protocol-version mismatch between the daemon and
 /// client or corruption on the pipe -- both unrecoverable, matching the
 /// codebase's "broken bookkeeping -> panic" convention.

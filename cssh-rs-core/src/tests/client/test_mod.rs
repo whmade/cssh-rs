@@ -14,12 +14,12 @@ use crate::client::{
     paint_console_color, read_write_loop, resolve_username, run_visuals_loop, send_pid_handshake,
     write_console_input, ReadWriteResult,
 };
-use crate::protocol::serialization::{
-    serialize_client_state, serialize_highlight, serialize_input_record_0,
-};
-use crate::protocol::{ClientState, TAG_HIGHLIGHT, TAG_INPUT_RECORD, TAG_STATE_CHANGE};
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::MockWindowsApi;
+use cssh_rs_protocol::serialization::{
+    serialize_client_state, serialize_highlight, serialize_input_record_0,
+};
+use cssh_rs_protocol::{ClientState, TAG_HIGHLIGHT, TAG_INPUT_RECORD, TAG_STATE_CHANGE};
 use tokio::sync::watch;
 use windows::Win32::System::Console::CONSOLE_CHARACTER_ATTRIBUTES;
 
@@ -1016,7 +1016,7 @@ async fn test_send_pid_handshake() -> Result<(), Box<dyn std::error::Error>> {
     server.connect().await?;
 
     // Read the 4-byte PID from the server side.
-    use crate::protocol::{deserialization::deserialize_pid, SERIALIZED_PID_LENGTH};
+    use cssh_rs_protocol::{deserialization::deserialize_pid, SERIALIZED_PID_LENGTH};
     let mut buf = [0u8; SERIALIZED_PID_LENGTH];
     let mut total_read = 0;
     while total_read < SERIALIZED_PID_LENGTH {
