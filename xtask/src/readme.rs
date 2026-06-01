@@ -2,14 +2,14 @@
 //!
 //! The README embeds the `--help` output between two HTML comment delimiters:
 //!
-//! ```text
+//! ````text
 //! <!-- HELP_OUTPUT_START -->
 //! ```cmd
 //! cssh-rs.exe --help
 //! <help content>
 //! ```
 //! <!-- HELP_OUTPUT_END -->
-//! ```
+//! ````
 //!
 //! [`check_readme_help`] fails when the embedded text differs from the live
 //! output. [`update_readme_help`] rewrites the README when they differ and
