@@ -24,13 +24,17 @@ use crate::traits::{
 /// Construct a unique named-pipe endpoint per test invocation so concurrent
 /// tests cannot collide.
 fn unique_pipe_name(tag: &str) -> OsString {
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
     let mut name = OsString::from(r"\\.\pipe\cssh-rs-platform-windows-test-");
     name.push(tag);
     name.push("-");
     name.push(std::process::id().to_string());
     name.push("-");
-    name.push(format!("{:p}", &tag));
+    name.push(n.to_string());
     return name;
+}
 }
 
 mod process_spawner_tests {
