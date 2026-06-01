@@ -3,7 +3,7 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 
-use crate::utils::windows::{
+use crate::api::{
     clear_screen, is_windows_10, read_console_input, read_keyboard_input, set_console_border_color,
     set_console_color, utf16_buffer_to_string, MockWindowsApi, KEY_EVENT,
 };
@@ -544,7 +544,7 @@ mod console_input_test {
 
 /// Test module for command line building functionality.
 mod command_line_test {
-    use crate::utils::windows::build_command_line;
+    use crate::api::build_command_line;
 
     /// Tests build_command_line with simple application and arguments.
     /// Validates proper UTF-16 encoding and quoting.
@@ -607,7 +607,7 @@ mod create_process_with_args_test {
         UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
     };
 
-    use crate::utils::windows::{build_startupinfo, DefaultWindowsApi, WindowsApi};
+    use crate::api::{build_startupinfo, DefaultWindowsApi, WindowsApi};
 
     /// Tests create_process_with_args with valid application and arguments.
     /// Validates that the process creation function is called with correct parameters.

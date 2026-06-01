@@ -12,6 +12,7 @@ bracoxide = "0.1.8"
 chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive"] }
 cli-clipboard = "0.4.0"
+cssh-rs-platform-windows = { path = "../cssh-rs-platform-windows" }
 cssh-rs-protocol = { path = "../cssh-rs-protocol" }
 log = "0.4.30"
 log-panics = "2.1.0"
@@ -56,6 +57,7 @@ features = [
 ]
 
 [dev-dependencies]
+cssh-rs-platform-windows = { path = "../cssh-rs-platform-windows", features = ["mock"] }
 mockall = "0.14.0"
 toml = "1.1"
 
