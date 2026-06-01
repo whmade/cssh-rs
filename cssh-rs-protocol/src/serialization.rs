@@ -1,6 +1,6 @@
 use windows::Win32::System::Console::{INPUT_RECORD_0, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0};
 
-use crate::protocol::{
+use crate::{
     ClientState, DaemonToClientMessage, FRAMED_HIGHLIGHT_LENGTH, FRAMED_INPUT_RECORD_LENGTH,
     FRAMED_KEEP_ALIVE_LENGTH, FRAMED_STATE_CHANGE_LENGTH, SERIALIZED_INPUT_RECORD_0_LENGTH,
     SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT, TAG_INPUT_RECORD, TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
@@ -63,7 +63,7 @@ pub fn serialize_pid(pid: u32) -> [u8; SERIALIZED_PID_LENGTH] {
 /// # Returns
 ///
 /// The state's `#[repr(u8)]` discriminant, used as the payload of a tagged
-/// [`crate::protocol::TAG_STATE_CHANGE`] frame.
+/// [`crate::TAG_STATE_CHANGE`] frame.
 pub fn serialize_client_state(state: ClientState) -> u8 {
     return state as u8;
 }
@@ -78,7 +78,7 @@ pub fn serialize_client_state(state: ClientState) -> u8 {
 /// # Returns
 ///
 /// `1` for `true`, `0` for `false`. Used as the payload of a tagged
-/// [`crate::protocol::TAG_HIGHLIGHT`] frame.
+/// [`crate::TAG_HIGHLIGHT`] frame.
 pub fn serialize_highlight(highlighted: bool) -> u8 {
     return if highlighted { 1 } else { 0 };
 }

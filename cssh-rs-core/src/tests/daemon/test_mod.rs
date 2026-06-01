@@ -20,6 +20,13 @@ mod daemon_test {
         VK_RIGHT, VK_T, VK_UP, VK_X,
     };
 
+    use cssh_rs_protocol::{
+        serialization::serialize_pid, ClientState, FRAMED_HIGHLIGHT_LENGTH,
+        FRAMED_INPUT_RECORD_LENGTH, FRAMED_KEEP_ALIVE_LENGTH, FRAMED_STATE_CHANGE_LENGTH,
+        SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT, TAG_INPUT_RECORD,
+        TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
+    };
+
     use crate::{
         daemon::{
             classify_control_mode_key, classify_enable_disable_submenu_key, expand_hosts,
@@ -28,12 +35,6 @@ mod daemon_test {
             workspace::WorkspaceArea,
             Client, Clients, ControlModeAction, ControlModeState, Daemon,
             EnableDisableSubmenuAction, HWNDWrapper, NavigationDirection,
-        },
-        protocol::{
-            serialization::serialize_pid, ClientState, FRAMED_HIGHLIGHT_LENGTH,
-            FRAMED_INPUT_RECORD_LENGTH, FRAMED_KEEP_ALIVE_LENGTH, FRAMED_STATE_CHANGE_LENGTH,
-            SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT,
-            TAG_INPUT_RECORD, TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
         },
         utils::{
             config::{Cluster, DaemonConfig, EdgeBehavior},

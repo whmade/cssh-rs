@@ -1,0 +1,12 @@
+[package]
+name = "cssh-rs-protocol"
+version = "0.19.1"
+edition = "2021"
+license-file = "../LICENSE.txt"
+
+[dependencies.windows]
+version = "0.62.2"
+features = ["Win32_System_Console"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }

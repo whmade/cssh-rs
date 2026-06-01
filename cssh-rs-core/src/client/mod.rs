@@ -23,14 +23,12 @@ use windows::Win32::System::Console::{
     LEFT_ALT_PRESSED, RIGHT_ALT_PRESSED, SHIFT_PRESSED,
 };
 
-use crate::{
-    protocol::{
-        deserialization::parse_daemon_to_client_messages, serialization::serialize_pid,
-        ClientState, DaemonToClientMessage, SERIALIZED_INPUT_RECORD_0_LENGTH,
-        SERIALIZED_PID_LENGTH,
-    },
-    utils::constants::{PIPE_NAME, PKG_NAME},
+use cssh_rs_protocol::{
+    deserialization::parse_daemon_to_client_messages, serialization::serialize_pid, ClientState,
+    DaemonToClientMessage, SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH,
 };
+
+use crate::utils::constants::{PIPE_NAME, PKG_NAME};
 
 /// Possible results when reading from the named pipe and writing to the
 /// current process's stdinput.

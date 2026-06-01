@@ -23,7 +23,8 @@ multiple hosts simultaneously with synchronized keystroke distribution.
 
 - **Binary**: `cssh-rs.exe` - Main executable with CLI interface (`cssh-rs/src/main.rs`)
 - **Library**: `cssh_rs_core` - Core functionality (`cssh-rs-core/src/lib.rs`, `cssh-rs-core/src/cli.rs`)
-- **Modules**: `cssh-rs-core/src/client/`, `cssh-rs-core/src/daemon/`, `cssh-rs-core/src/protocol/`, `cssh-rs-core/src/utils/`
+- **Protocol crate**: `cssh-rs-protocol` - wire protocol between daemon and clients (`cssh-rs-protocol/src/lib.rs`)
+- **Modules**: `cssh-rs-core/src/client/`, `cssh-rs-core/src/daemon/`, `cssh-rs-core/src/utils/`
 - **Tests**: `cssh-rs-core/src/tests/` with component-based organization (`test_*.rs` naming)
 - **xtask**: `xtask/` - Developer automation tasks (README checks, release, changelog, social preview)
 - **Config**: `.config/` - grouped, shared single-line marker files consumed
@@ -81,7 +82,7 @@ characters - do NOT add to the allowlist.
 - **Test functions, closures, trivial trait impls**: no docs.
 - **Module docs** (`//!`): one line for typical modules. Multi-paragraph only
   when the module defines a protocol or wire format (see
-  `cssh-rs-core/src/protocol/mod.rs`). All library modules use
+  `cssh-rs-protocol/src/lib.rs`). All library modules use
   `#![doc(html_no_source)]`.
 
 ````rust
