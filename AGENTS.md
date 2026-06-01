@@ -25,6 +25,7 @@ multiple hosts simultaneously with synchronized keystroke distribution.
 - **Library**: `cssh_rs_core` - Core functionality (`cssh-rs-core/src/lib.rs`, `cssh-rs-core/src/cli.rs`)
 - **Protocol crate**: `cssh-rs-protocol` - wire protocol between daemon and clients (`cssh-rs-protocol/src/lib.rs`)
 - **Platform crate**: `cssh-rs-platform` - platform-abstraction trait definitions (`cssh-rs-platform/src/lib.rs`)
+- **Linux platform crate**: `cssh-rs-platform-linux` - Linux trait implementations; scaffolded with `unimplemented!()` stubs until M4 (`cssh-rs-platform-linux/src/lib.rs`)
 - **Modules**: `cssh-rs-core/src/client/`, `cssh-rs-core/src/daemon/`, `cssh-rs-core/src/utils/`
 - **Tests**: `cssh-rs-core/src/tests/` with component-based organization (`test_*.rs` naming)
 - **xtask**: `xtask/` - Developer automation tasks (README checks, release, changelog, social preview)

@@ -33,6 +33,7 @@ jobs:
               - 'cssh-rs/**'
               - 'cssh-rs-core/**'
               - 'cssh-rs-platform/**'
+              - 'cssh-rs-platform-linux/**'
               - 'cssh-rs-protocol/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
