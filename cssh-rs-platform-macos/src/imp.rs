@@ -24,6 +24,7 @@ impl ProcessSpawner for MacOsProcessSpawner {
     type Handle = std::process::Child;
     type Error = std::io::Error;
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn spawn(
         &self,
         _program: &OsStr,
@@ -41,14 +42,17 @@ pub struct MacOsControlChannelServer;
 impl ControlChannelServer for MacOsControlChannelServer {
     type Error = std::io::Error;
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn accept(&mut self) -> Result<(), Self::Error> {
         unimplemented!("cssh-rs-platform-macos: control-channel accept lands in M5");
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn send(&mut self, _frame: &[u8]) -> Result<(), Self::Error> {
         unimplemented!("cssh-rs-platform-macos: control-channel send lands in M5");
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn recv(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> {
         unimplemented!("cssh-rs-platform-macos: control-channel recv lands in M5");
     }
@@ -61,14 +65,17 @@ pub struct MacOsControlChannelClient;
 impl ControlChannelClient for MacOsControlChannelClient {
     type Error = std::io::Error;
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn connect(&mut self, _endpoint: &OsStr) -> Result<(), Self::Error> {
         unimplemented!("cssh-rs-platform-macos: control-channel connect lands in M5");
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn send(&mut self, _bytes: &[u8]) -> Result<(), Self::Error> {
         unimplemented!("cssh-rs-platform-macos: control-channel send lands in M5");
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     async fn recv(&mut self, _buf: &mut [u8]) -> Result<usize, Self::Error> {
         unimplemented!("cssh-rs-platform-macos: control-channel recv lands in M5");
     }
@@ -85,6 +92,7 @@ pub struct MacOsWindowHandleProbe;
 impl WindowHandleProbe for MacOsWindowHandleProbe {
     type Handle = u64;
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn window_handle_for_process(&self, _pid: u32) -> Option<Self::Handle> {
         unimplemented!("cssh-rs-platform-macos: window-handle probe lands in M5");
     }
