@@ -190,7 +190,6 @@ fn test_run_git_spawn_failure_propagates() {
     );
     mock.expect_run_git()
         .returning(|_, _| Err(anyhow::anyhow!("git binary missing")));
-    mock.expect_log().returning(|_| {});
 
     // Act
     let result = worktree_teardown(&mock);
