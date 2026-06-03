@@ -292,7 +292,7 @@ mod daemon_test {
         const TEST_PID: u32 = 66666;
         // Use a per-test unique pipe name so parallel test runs don't collide
         // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\csshw-test-state-change-{}", std::process::id());
+        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-state-change-{}", std::process::id());
         let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
             SERIALIZED_INPUT_RECORD_0_LENGTH,
         );
@@ -396,7 +396,10 @@ mod daemon_test {
         const TEST_PID: u32 = 88888;
         // Use a per-test unique pipe name so parallel test runs don't collide
         // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\csshw-test-initial-state-{}", std::process::id());
+        let pipe_name = format!(
+            r"\\.\pipe\cssh-rs-test-initial-state-{}",
+            std::process::id()
+        );
         let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
             SERIALIZED_INPUT_RECORD_0_LENGTH,
         );
@@ -563,7 +566,7 @@ mod daemon_test {
         const SENT_PID: u32 = 44444;
         // Use a per-test unique pipe name so parallel test runs don't collide
         // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\csshw-test-pid-mismatch-{}", std::process::id());
+        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-pid-mismatch-{}", std::process::id());
         // Setup sender and receiver
         let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
             SERIALIZED_INPUT_RECORD_0_LENGTH,
@@ -592,7 +595,7 @@ mod daemon_test {
         // Use a per-test unique pipe name so parallel test runs don't collide
         // on the global PIPE_NAME.
         let pipe_name = format!(
-            r"\\.\pipe\csshw-test-client-closes-before-pid-{}",
+            r"\\.\pipe\cssh-rs-test-client-closes-before-pid-{}",
             std::process::id()
         );
         let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
@@ -647,7 +650,7 @@ mod daemon_test {
         const TEST_PID: u32 = 66666;
         // Use a per-test unique pipe name so parallel test runs don't collide
         // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\csshw-test-disabled-{}", std::process::id());
+        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-disabled-{}", std::process::id());
         let (sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
             SERIALIZED_INPUT_RECORD_0_LENGTH,
         );
@@ -812,7 +815,7 @@ mod daemon_test {
         const TEST_PID: u32 = 77777;
         // Use a per-test unique pipe name so parallel test runs don't collide
         // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\csshw-test-lagged-{}", std::process::id());
+        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-lagged-{}", std::process::id());
         // Capacity 2 keeps the buffer small so a modest send burst is
         // guaranteed to overflow before the routine consumes anything.
         let (sender, mut receiver) =

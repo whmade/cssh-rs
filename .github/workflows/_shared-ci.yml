@@ -1,5 +1,5 @@
 #
-#   csshw Shared CI Logic
+#   cssh-rs Shared CI Logic
 #
 # Reusable workflow containing common CI jobs that can be called by both
 # the main CI workflow and the coverage CI workflow.

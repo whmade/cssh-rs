@@ -1,8 +1,8 @@
-# csshW - Agent Instructions
+# cssh-rs - Agent Instructions
 
 ## Project Overview
 
-csshW is a Rust-based cluster SSH tool for Windows inspired by csshX. It enables users to SSH into
+cssh-rs is a Rust-based cluster SSH tool for Windows inspired by csshX. It enables users to SSH into
 multiple hosts simultaneously with synchronized keystroke distribution.
 
 ## Architecture

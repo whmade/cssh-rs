@@ -17,15 +17,15 @@ mock! {
 }
 
 const CARGO_TOML: &str = r#"[package]
-name = "csshw"
+name = "cssh-rs"
 version = "1.2.3"
 edition = "2021"
 "#;
 
 const CHANGELOGGING_TOML: &str = r#"[context]
-name = "csshw"
+name = "cssh-rs"
 version = "0.0.0"
-url = "https://github.com/whme/csshw"
+url = "https://github.com/whmade/cssh-rs"
 
 [paths]
 directory = "news"
@@ -43,7 +43,7 @@ fn test_extract_version_from_cargo_toml_valid() {
 #[test]
 fn test_extract_version_from_cargo_toml_missing_key() {
     // Arrange
-    let content = "[package]\nname = \"csshw\"\n";
+    let content = "[package]\nname = \"cssh-rs\"\n";
 
     // Act
     let result = extract_version_from_cargo_toml(content);
@@ -81,10 +81,10 @@ fn test_set_changelogging_version_preserves_other_keys() {
 
     // Assert
     let doc: toml_edit::DocumentMut = result.parse().unwrap();
-    assert_eq!(doc["context"]["name"].as_str().unwrap(), "csshw");
+    assert_eq!(doc["context"]["name"].as_str().unwrap(), "cssh-rs");
     assert_eq!(
         doc["context"]["url"].as_str().unwrap(),
-        "https://github.com/whme/csshw"
+        "https://github.com/whmade/cssh-rs"
     );
     assert_eq!(doc["paths"]["directory"].as_str().unwrap(), "news");
 }

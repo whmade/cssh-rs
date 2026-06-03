@@ -59,7 +59,7 @@ fn create_test_client_config(ssh_config_path: String) -> ClientConfig {
 ///
 /// A tuple containing the temporary directory path and the path to the SSH config file.
 fn create_temp_ssh_config(content: &str) -> (PathBuf, String) {
-    let temp_dir = env::temp_dir().join(format!("csshw_test_{}", std::process::id()));
+    let temp_dir = env::temp_dir().join(format!("cssh-rs_test_{}", std::process::id()));
     fs::create_dir_all(&temp_dir).expect("Failed to create temporary directory");
     let config_path = temp_dir.join("config");
     let mut file = File::create(&config_path).expect("Failed to create SSH config file");
@@ -509,7 +509,7 @@ async fn test_read_write_loop_dispatches_state_change_and_input_record(
     // Use a per-test unique pipe name so parallel test runs don't collide
     // on the global PIPE_NAME.
     let pipe_name = format!(
-        r"\\.\pipe\csshw-test-read-write-loop-{}",
+        r"\\.\pipe\cssh-rs-test-read-write-loop-{}",
         std::process::id()
     );
     let server = ServerOptions::new()
@@ -607,7 +607,7 @@ async fn test_read_write_loop_dispatches_disabled_state_change(
     use tokio::net::windows::named_pipe::{ClientOptions, PipeMode, ServerOptions};
 
     let pipe_name = format!(
-        r"\\.\pipe\csshw-test-read-write-loop-disabled-{}",
+        r"\\.\pipe\cssh-rs-test-read-write-loop-disabled-{}",
         std::process::id()
     );
     let server = ServerOptions::new()
@@ -671,7 +671,7 @@ async fn test_read_write_loop_dispatches_highlight() -> Result<(), Box<dyn std::
     use tokio::net::windows::named_pipe::{ClientOptions, PipeMode, ServerOptions};
 
     let pipe_name = format!(
-        r"\\.\pipe\csshw-test-read-write-loop-highlight-{}",
+        r"\\.\pipe\cssh-rs-test-read-write-loop-highlight-{}",
         std::process::id()
     );
     let server = ServerOptions::new()
@@ -998,7 +998,7 @@ async fn test_send_pid_handshake() -> Result<(), Box<dyn std::error::Error>> {
     // Use a per-test unique pipe name so parallel test runs don't collide
     // on the global PIPE_NAME.
     let pipe_name = format!(
-        r"\\.\pipe\csshw-test-send-pid-handshake-{}",
+        r"\\.\pipe\cssh-rs-test-send-pid-handshake-{}",
         std::process::id()
     );
 

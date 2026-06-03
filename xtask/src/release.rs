@@ -914,7 +914,7 @@ pub fn create_release_tag<S: ReleaseSystem>(system: &S) -> Result<()> {
     system.git_push_tag(&version.to_string())?;
 
     println!("INFO - Tag '{version}' created and pushed");
-    println!("INFO - Check: https://github.com/whme/csshw/actions/workflows/release.yml");
+    println!("INFO - Check: https://github.com/whmade/cssh-rs/actions/workflows/release.yml");
     Ok(())
 }
 

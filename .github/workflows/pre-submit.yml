@@ -1,5 +1,5 @@
 #
-#   csshw Pre-Submit CI
+#   cssh-rs Pre-Submit CI
 #
 # Runs CI workflows based on changed files in pull requests.
 # Uses paths-filter to determine which jobs need to run.
