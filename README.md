@@ -18,26 +18,28 @@ Key-strokes performed while having the daemon console focussed will be sent to a
 Focussing a client will cause any key-strokes to be sent to this client only.
 
 ## Cross-platform
-cssh-rs is designed to run on Windows, Linux, and macOS. Per-OS
-behaviour lives behind a platform abstraction
-(`cssh-rs-platform-{windows,linux,macos}`) plus a plugin system that
-pairs a terminal-emulator spawner with a window manager backend.
+cssh-rs is designed to run on Windows, Linux, and macOS.
 
-Today only Windows + conhost is implemented; every other combination
-below is planned per the [architecture design](https://github.com/whmade/cssh-rs/issues/1).
+The matrix below tracks supported terminal emulators per OS; cross-platform
+emulators (WezTerm, Ghostty) appear in multiple columns. See the
+[architecture design](https://github.com/whmade/cssh-rs/issues/1) for the
+full plugin-system rationale and Linux Wayland scope.
 
-| OS              | Terminal emulator                         | Window manager                                | Status           |
-|-----------------|-------------------------------------------|-----------------------------------------------|------------------|
-| Windows         | conhost                                   | Win32 / DWM                                   | implemented      |
-| Windows         | Windows Terminal                          | Win32 / DWM                                   | planned          |
-| Windows         | WezTerm                                   | Win32 / DWM                                   | planned          |
-| Linux (X11)     | GNOME Terminal, Alacritty, Kitty, WezTerm | EWMH                                          | planned          |
-| Linux (Wayland) | Alacritty, Kitty, WezTerm                 | wlroots (Sway, Hyprland, river, Niri, COSMIC) | planned          |
-| Linux (Wayland) | Alacritty, Kitty, WezTerm                 | KWin (KDE Plasma)                             | planned          |
-| Linux (Wayland) | -                                         | Mutter (GNOME)                                | not planned (v1) |
-| macOS           | Terminal.app                              | Accessibility API                             | planned          |
-| macOS           | iTerm2                                    | iTerm2 API (no Accessibility prompt)          | planned          |
-| macOS           | Alacritty, Kitty, WezTerm                 | Accessibility API                             | planned          |
+| Terminal emulator | ![Windows](https://img.shields.io/badge/-Windows-0078D6?logo=windows&logoColor=white) | ![Linux](https://img.shields.io/badge/-Linux-FCC624?logo=linux&logoColor=black) | ![macOS](https://img.shields.io/badge/-macOS-000000?logo=apple&logoColor=white) |
+|---|---|---|---|
+| conhost          | ![implemented](https://img.shields.io/badge/-implemented-brightgreen) | -                                                                       | -                                                                       |
+| Windows Terminal | ![planned](https://img.shields.io/badge/-planned-yellow)              | -                                                                       | -                                                                       |
+| GNOME Terminal   | -                                                                     | ![planned](https://img.shields.io/badge/-planned-yellow) (X11)          | -                                                                       |
+| Alacritty        | -                                                                     | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+| Kitty            | -                                                                     | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+| WezTerm          | ![planned](https://img.shields.io/badge/-planned-yellow)              | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+| Ghostty          | ![planned](https://img.shields.io/badge/-planned-yellow)              | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+| Terminal.app     | -                                                                     | -                                                                       | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+| iTerm2           | -                                                                     | -                                                                       | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+
+**Linux Wayland scope:** Wayland support targets wlroots (Sway,
+Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma). Mutter (GNOME on
+Wayland) is ![not planned](https://img.shields.io/badge/-not%20planned%20%28v1%29-red) for v1.
 
 ## Download/Installation
 cssh-rs is a portable application and is not installed.<br>
