@@ -48,7 +48,7 @@ jobs:
           cp cssh-rs/res/cssh-rs.ico unified_site/favicon.ico
           cp cssh-rs/res/cssh-rs.svg unified_site/cssh-rs.svg
 
-          echo "<meta http-equiv=\"refresh\" content=\"0; url=cssh_rs_lib/index.html\">" > unified_site/docs/index.html
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=cssh_rs_core/index.html\">" > unified_site/docs/index.html
 
       - name: Upload unified site
         uses: actions/upload-pages-artifact@v5

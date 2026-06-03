@@ -1,5 +1,5 @@
 <p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="100" alt="cssh-rs Logo"></img></a></p>
-<h1 align="center">cssh-rs</h3>
+<h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>

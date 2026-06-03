@@ -17,7 +17,7 @@ Just download the `.zip` archive, extract it and run `cssh-rs.exe`
 > `Properties` -> tick `Unblock` -> `Apply`. Equivalent from
 > PowerShell: `Unblock-File .\cssh-rs.exe`.
 
-# <a href="https://github.com/whmade/cssh-rs/releases/download/{{VERSION}}/cssh-rs.{{VERSION}}.zip"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/res/cssh-rs.svg" width="20" alt="cssh-rs Logo"></img> cssh-rs.{{VERSION}}.zip</a> [![Downloads](https://img.shields.io/github/downloads/whmade/cssh-rs/{{VERSION}}/total?label=downloads)](https://github.com/whmade/cssh-rs/releases/download/{{VERSION}}/cssh-rs.{{VERSION}}.zip)
+# <a href="https://github.com/whmade/cssh-rs/releases/download/{{VERSION}}/cssh-rs.{{VERSION}}.zip"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="20" alt="cssh-rs Logo"></img> cssh-rs.{{VERSION}}.zip</a> [![Downloads](https://img.shields.io/github/downloads/whmade/cssh-rs/{{VERSION}}/total?label=downloads)](https://github.com/whmade/cssh-rs/releases/download/{{VERSION}}/cssh-rs.{{VERSION}}.zip)
 
 ### Verifying the download
 Starting with 0.19.0 the release `.zip` is signed with a [GitHub build

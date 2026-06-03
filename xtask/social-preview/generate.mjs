@@ -41,8 +41,8 @@ if (!OUT_PATH) {
 }
 
 const TEMPLATE_PATH = "templates/social-preview.html";
-const LOGO_PATH = "res/cssh-rs.svg";
-const FONT_PATH = "res/dejavu-sans-mono.book.ttf";
+const LOGO_PATH = "cssh-rs/res/cssh-rs.svg";
+const FONT_PATH = "cssh-rs/res/dejavu-sans-mono.book.ttf";
 // ozh/github-colors is a long-running community mirror of the colors
 // embedded in github-linguist/linguist's `languages.yml`, published as
 // plain JSON. Using it at runtime keeps us from committing and manually
