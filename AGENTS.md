@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-cssh-rs is a Rust-based cross-platform cluster SSH tool inspired by csshX. It enables users to SSH into
+cssh-rs is a Rust-based cross-platform cluster SSH tool. It enables users to SSH into
 multiple hosts simultaneously with synchronized keystroke distribution.
 
 ## Architecture

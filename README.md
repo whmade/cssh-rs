@@ -1,6 +1,6 @@
 <p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="100" alt="cssh-rs Logo"></img></a></p>
 <h1 align="center">cssh-rs</h3>
-<p align="center"><i>Cross-platform cluster SSH tool inspired by <a href="https://github.com/brockgr/csshx">csshX</a></i></p>
+<p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
   <a href="https://github.com/whmade/cssh-rs/releases/latest"><img src="https://img.shields.io/github/v/release/whmade/cssh-rs.svg"></a>
@@ -44,7 +44,7 @@ To download the cssh-rs application refer to the [Releases 📦](https://github.
 <!-- HELP_OUTPUT_START -->
 ```cmd
 cssh-rs.exe --help
-Cross-platform cluster SSH tool inspired by csshX
+Cross-platform cluster SSH tool
 
 Usage: cssh-rs.exe [OPTIONS] [HOSTS]... [COMMAND]
 
