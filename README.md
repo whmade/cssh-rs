@@ -1,4 +1,4 @@
-<p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="100" alt="cssh-rs Logo"></img></a></p>
+<p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="100" alt="cssh-rs Logo" /></a></p>
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
