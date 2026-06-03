@@ -73,6 +73,10 @@
 
 # --- Type -------------------------------------------------------------------
 
+- name: "type:initiative"
+  color: "5319e7"
+  description: "Top-level initiative spanning multiple epics"
+
 - name: "type:epic"
   color: "b60205"
   description: "Milestone-level epic (M0-M10)"
