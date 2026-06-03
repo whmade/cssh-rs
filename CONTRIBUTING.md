@@ -1,6 +1,6 @@
 # Contributing to cssh-rs
 
-Thank you for considering contributing to cssh-rs! It's people like you that make cssh-rs a robust and reliable cluster SSH tool for Windows users.
+Thank you for considering contributing to cssh-rs! It's people like you that make cssh-rs a robust and reliable cross-platform cluster SSH tool.
 
 Following these guidelines helps to communicate that you respect the time of the developers managing and developing this open source project. In return, they should reciprocate that respect in addressing your issue, assessing changes, and helping you finalize your pull requests.
 

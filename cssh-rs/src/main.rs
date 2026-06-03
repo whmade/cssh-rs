@@ -1,4 +1,4 @@
-//! Cluster SSH tool for Windows inspired by csshX - Binary
+//! Cross-platform cluster SSH tool inspired by csshX - Binary
 //! ---
 //! ```
 //! Usage: cssh-rs.exe [OPTIONS] [HOSTS]... [COMMAND]

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!--
-  cssh-rs - Cluster SSH for Windows
+  cssh-rs - Cross-platform cluster SSH
 
   App icon, designed to match the visual language of the official
   Windows Terminal icon (microsoft/terminal, res/terminal/Terminal.svg).

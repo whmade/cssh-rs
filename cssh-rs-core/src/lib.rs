@@ -1,4 +1,4 @@
-//! Cluster SSH tool for Windows inspired by csshX
+//! Cross-platform cluster SSH tool inspired by csshX
 
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
