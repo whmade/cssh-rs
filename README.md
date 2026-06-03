@@ -12,13 +12,32 @@
 
 ![cssh-rs demo](https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/demo/cssh-rs.gif)[^1][^2][^3]
 
-## Pre-requisite
-- Any SSH client (Windows 10 and Windows 11 already include a built-in SSH server and client - [docs](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh))
-
 ## Overview
 cssh-rs will launch 1 daemon and N client windows (with N being the number of hosts to SSH onto).<br>
 Key-strokes performed while having the daemon console focussed will be sent to all clients simoultaneously and be replayed by them.<br>
 Focussing a client will cause any key-strokes to be sent to this client only.
+
+## Cross-platform
+cssh-rs is designed to run on Windows, Linux, and macOS. Per-OS
+behaviour lives behind a platform abstraction
+(`cssh-rs-platform-{windows,linux,macos}`) plus a plugin system that
+pairs a terminal-emulator spawner with a window manager backend.
+
+Today only Windows + conhost is implemented; every other combination
+below is planned per the [architecture design](https://github.com/whmade/cssh-rs/issues/1).
+
+| OS              | Terminal emulator                         | Window manager                                | Status           |
+|-----------------|-------------------------------------------|-----------------------------------------------|------------------|
+| Windows         | conhost                                   | Win32 / DWM                                   | implemented      |
+| Windows         | Windows Terminal                          | Win32 / DWM                                   | planned          |
+| Windows         | WezTerm                                   | Win32 / DWM                                   | planned          |
+| Linux (X11)     | GNOME Terminal, Alacritty, Kitty, WezTerm | EWMH                                          | planned          |
+| Linux (Wayland) | Alacritty, Kitty, WezTerm                 | wlroots (Sway, Hyprland, river, Niri, COSMIC) | planned          |
+| Linux (Wayland) | Alacritty, Kitty, WezTerm                 | KWin (KDE Plasma)                             | planned          |
+| Linux (Wayland) | -                                         | Mutter (GNOME)                                | not planned (v1) |
+| macOS           | Terminal.app                              | Accessibility API                             | planned          |
+| macOS           | iTerm2                                    | iTerm2 API (no Accessibility prompt)          | planned          |
+| macOS           | Alacritty, Kitty, WezTerm                 | Accessibility API                             | planned          |
 
 ## Download/Installation
 cssh-rs is a portable application and is not installed.<br>
@@ -38,6 +57,9 @@ To download the cssh-rs application refer to the [Releases 📦](https://github.
 > proves the archive came from this project's release workflow at the
 > tagged commit, but does not change SmartScreen's behavior for the
 > unsigned `.exe` inside.
+
+## Pre-requisite
+- Any SSH client (Windows 10 and Windows 11 already include a built-in SSH server and client - [docs](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh))
 
 ## Usage
 
