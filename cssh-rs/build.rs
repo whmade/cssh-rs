@@ -4,13 +4,13 @@ extern crate embed_resource;
 
 fn main() {
     svg_to_ico(
-        Path::new("res/csshw.svg"),
+        Path::new("res/cssh-rs.svg"),
         96.0,
-        Path::new("res/csshw.ico"),
+        Path::new("res/cssh-rs.ico"),
         &[16, 24, 32, 48, 64, 128, 256],
     )
     .expect("Failed to convert SVG to ICO");
-    embed_resource::compile_for("res/csshw.rc", ["cssh-rs"], embed_resource::NONE)
+    embed_resource::compile_for("res/cssh-rs.rc", ["cssh-rs"], embed_resource::NONE)
         .manifest_required()
         .unwrap();
 }

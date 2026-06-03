@@ -100,7 +100,7 @@ pub trait SocialPreviewSystem {
     /// Print a debug-level message. Intended for low-level command
     /// traces (e.g. the exact `docker` invocation) that would be noisy by
     /// default but useful when troubleshooting. The production
-    /// implementation only emits the message when `CSSHW_XTASK_VERBOSE`
+    /// implementation only emits the message when `CSSH_RS_XTASK_VERBOSE`
     /// is set to a non-empty value.
     fn print_debug(&self, message: &str);
 }
@@ -201,7 +201,7 @@ impl SocialPreviewSystem for RealSystem {
     }
 
     fn print_debug(&self, message: &str) {
-        if std::env::var("CSSHW_XTASK_VERBOSE")
+        if std::env::var("CSSH_RS_XTASK_VERBOSE")
             .map(|v| !v.is_empty())
             .unwrap_or(false)
         {

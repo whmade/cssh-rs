@@ -1,4 +1,4 @@
-//! xtask - developer automation tasks for csshw.
+//! xtask - developer automation tasks for cssh-rs.
 //!
 //! Invoke via `cargo xtask <subcommand>`.
 //! See each subcommand's module for details.
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-/// Developer automation tasks for csshw.
+/// Developer automation tasks for cssh-rs.
 #[derive(Parser)]
 #[clap(name = "xtask")]
 struct Args {

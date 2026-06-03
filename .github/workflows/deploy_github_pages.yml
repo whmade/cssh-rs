@@ -45,10 +45,10 @@ jobs:
           cp -r coverage_html unified_site/coverage
 
           cp templates/github-pages-index.html unified_site/index.html
-          cp cssh-rs/res/csshw.ico unified_site/favicon.ico
-          cp cssh-rs/res/csshw.svg unified_site/csshw.svg
+          cp cssh-rs/res/cssh-rs.ico unified_site/favicon.ico
+          cp cssh-rs/res/cssh-rs.svg unified_site/cssh-rs.svg
 
-          echo "<meta http-equiv=\"refresh\" content=\"0; url=csshw_lib/index.html\">" > unified_site/docs/index.html
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=cssh_rs_core/index.html\">" > unified_site/docs/index.html
 
       - name: Upload unified site
         uses: actions/upload-pages-artifact@v5

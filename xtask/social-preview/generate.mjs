@@ -12,8 +12,8 @@
 //                   filesystem (required, set by the Rust xtask; may be
 //                   absolute).
 //   GITHUB_TOKEN  - optional; enables authenticated GitHub API requests.
-//   GITHUB_OWNER  - defaults to "whme".
-//   GITHUB_REPO   - defaults to "csshw".
+//   GITHUB_OWNER  - defaults to "whmade".
+//   GITHUB_REPO   - defaults to "cssh-rs".
 //
 // Outputs:
 //   A 2560x1280 PNG (2x scale for sharp rendering) written to OUT_PATH.
@@ -32,8 +32,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve, join } from "node:path";
 import { chromium } from "@playwright/test";
 
-const OWNER = process.env.GITHUB_OWNER || "whme";
-const REPO = process.env.GITHUB_REPO || "csshw";
+const OWNER = process.env.GITHUB_OWNER || "whmade";
+const REPO = process.env.GITHUB_REPO || "cssh-rs";
 const OUT_PATH = process.env.OUT_PATH;
 if (!OUT_PATH) {
   console.error("OUT_PATH environment variable is required.");
@@ -41,8 +41,8 @@ if (!OUT_PATH) {
 }
 
 const TEMPLATE_PATH = "templates/social-preview.html";
-const LOGO_PATH = "res/csshw.svg";
-const FONT_PATH = "res/dejavu-sans-mono.book.ttf";
+const LOGO_PATH = "cssh-rs/res/cssh-rs.svg";
+const FONT_PATH = "cssh-rs/res/dejavu-sans-mono.book.ttf";
 // ozh/github-colors is a long-running community mirror of the colors
 // embedded in github-linguist/linguist's `languages.yml`, published as
 // plain JSON. Using it at runtime keeps us from committing and manually
@@ -101,7 +101,7 @@ async function githubFetch(pathname) {
   const url = `https://api.github.com/${pathname}`;
   const headers = {
     Accept: "application/vnd.github+json",
-    "User-Agent": "csshw-social-preview",
+    "User-Agent": "cssh-rs-social-preview",
     "X-GitHub-Api-Version": "2022-11-28",
   };
   if (process.env.GITHUB_TOKEN) {

@@ -1,18 +1,18 @@
-# Contributing to csshW
+# Contributing to cssh-rs
 
-Thank you for considering contributing to csshW! It's people like you that make csshW a robust and reliable cluster SSH tool for Windows users.
+Thank you for considering contributing to cssh-rs! It's people like you that make cssh-rs a robust and reliable cross-platform cluster SSH tool.
 
 Following these guidelines helps to communicate that you respect the time of the developers managing and developing this open source project. In return, they should reciprocate that respect in addressing your issue, assessing changes, and helping you finalize your pull requests.
 
 ### What kinds of contributions we're looking for
 
-csshW is an open source project and we love to receive contributions from our community - you! There are many ways to contribute, from writing blog posts, improving the documentation, submitting bug reports and feature requests or writing code which can be incorporated into csshW itself.
+cssh-rs is an open source project and we love to receive contributions from our community - you! There are many ways to contribute, from writing blog posts, improving the documentation, submitting bug reports and feature requests or writing code which can be incorporated into cssh-rs itself.
 
 ## Ground Rules
 
 ### Technical Responsibilities
 
-Before contributing code to csshW, please ensure you understand and can meet these requirements:
+Before contributing code to cssh-rs, please ensure you understand and can meet these requirements:
 
 - **Complete Documentation**: All code must be documented - modules, functions, structs, constants, everything
 - **Testing Requirements**: All tests must pass (`cargo doc-tests && cargo test`)
@@ -31,7 +31,7 @@ Before contributing code to csshW, please ensure you understand and can meet the
 
 ## Your First Contribution
 
-Unsure where to begin contributing to csshW? Here are some suggestions:
+Unsure where to begin contributing to cssh-rs? Here are some suggestions:
 
 - **Documentation improvements** - Look for areas where explanations could be clearer
 - **Test coverage** - Add tests for edge cases or improve existing test patterns
@@ -43,14 +43,14 @@ Unsure where to begin contributing to csshW? Here are some suggestions:
 ### Development Environment Setup
 
 1. **Prerequisites**:
-   - Rust (we use [`rust-toolchain.toml`](https://github.com/whme/csshw/blob/main/rust-toolchain.toml) to configure the desired rust version/toolchain)
+   - Rust (we use [`rust-toolchain.toml`](https://github.com/whmade/cssh-rs/blob/main/rust-toolchain.toml) to configure the desired rust version/toolchain)
    - Git
    - A Windows development environment
 
 2. **Clone and Setup**:
    ```cmd
-   git clone https://github.com/whme/csshw.git
-   cd csshw
+   git clone https://github.com/whmade/cssh-rs.git
+   cd cssh-rs
    git config --local core.hooksPath .githooks/
    ```
 
@@ -66,7 +66,7 @@ force-push to `main`. You can scope an agent down by providing a
    <https://github.com/settings/personal-access-tokens/new> with
    `Contents`, `Pull requests`, and `Issues` set to *Read and write*
    (and only those - leave everything else at *No access*). Restrict it
-   to your fork of `csshw`. Set a short expiration.
+   to your fork of `cssh-rs`. Set a short expiration.
 2. Save the full token (including the `github_pat_` prefix) to
    `.paseo/gh-token` in your source checkout (not in a worktree). The
    `.paseo/` directory is checked into the repository so the file
@@ -86,7 +86,7 @@ permissions. Any other content is rejected. To rotate, overwrite
 
 ### Development Workflow
 
-csshW uses cargo aliases and the [`xtask`](https://github.com/matklad/cargo-xtask) crate for development automation. Key commands:
+cssh-rs uses cargo aliases and the [`xtask`](https://github.com/matklad/cargo-xtask) crate for development automation. Key commands:
 
 - `cargo fmt` - Format code
 - `cargo lint` - Run clippy linting
@@ -95,7 +95,7 @@ csshW uses cargo aliases and the [`xtask`](https://github.com/matklad/cargo-xtas
 
 ### Pre-commit Hooks
 
-csshW uses pre-commit git hooks to enforce code quality. These are automatically installed when you set the hooks path as shown above. The hooks will:
+cssh-rs uses pre-commit git hooks to enforce code quality. These are automatically installed when you set the hooks path as shown above. The hooks will:
 
 - Format your code with `cargo fmt`
 - Run linting with `cargo lint`
@@ -170,13 +170,13 @@ If a pull request shows no activity for 2 weeks after feedback, it may be closed
 
 ### Maintainers
 
-csshW is maintained by [@whme](https://github.com/whme). Response times may vary based on availability and workload.
+cssh-rs is maintained by [@whme](https://github.com/whme). Response times may vary based on availability and workload.
 
 ## Code, Commit Message and other Conventions
 
 ### Code Style
 
-csshW follows standard Rust conventions with some specific requirements:
+cssh-rs follows standard Rust conventions with some specific requirements:
 
 - **Follow clippy suggestions** - all warnings must be resolved
 - **Document everything** - modules, functions, structs, constants
@@ -192,7 +192,7 @@ csshW follows standard Rust conventions with some specific requirements:
 
 ### Testing Patterns
 
-csshW has no integration tests (yet). The following applies to unit tests.
+cssh-rs has no integration tests (yet). The following applies to unit tests.
 
 - **Tests in `cssh-rs-core/src/tests/`** with `test_*.rs` naming convention
 - **Use `mockall`** for Windows API mocking
@@ -202,7 +202,7 @@ csshW has no integration tests (yet). The following applies to unit tests.
 
 For easy manual testing on Windows we recommend the following setup:
 - Enable OpenSSH Server - [docs](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse?tabs=gui&pivots=windows-10)
-- Run csshw against `localhost`:
+- Run cssh-rs against `localhost`:
 
     ```powershell
     cargo run -- -u $env:USERNAME localhost localhost
@@ -219,11 +219,11 @@ For easy manual testing on Windows we recommend the following setup:
 
 ### xtask Subcommands
 
-csshW uses `cargo xtask` subcommands for automation - run as part of the pre-commit githook, in the GitHub Actions CI, or locally. See `cargo xtask --help` for the full list.
+cssh-rs uses `cargo xtask` subcommands for automation - run as part of the pre-commit githook, in the GitHub Actions CI, or locally. See `cargo xtask --help` for the full list.
 
 ### Release Process
 
-csshW follows a structured release process:
+cssh-rs follows a structured release process:
 
 1. **Prepare release** with `cargo xtask prepare-release`
 2. **Create pull request** from maintenance branch to main
@@ -234,4 +234,4 @@ Contributors don't need to worry about releases - maintainers handle this proces
 
 ---
 
-Thank you for contributing to csshW! Your efforts help make cluster management on Windows better for everyone.
+Thank you for contributing to cssh-rs! Your efforts help make cluster management on Windows better for everyone.

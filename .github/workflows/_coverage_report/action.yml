@@ -1,5 +1,5 @@
 #
-#   csshw coverage-report
+#   cssh-rs coverage-report
 #
 # Based on https://github.com/insightsengineering/coverage-action
 # but simplified to only generate the coverage report without

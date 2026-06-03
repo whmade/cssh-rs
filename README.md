@@ -1,36 +1,36 @@
-<p align="center"><a href="https://github.com/whme/csshw"><img src="https://raw.githubusercontent.com/whme/csshw/refs/heads/main/cssh-rs/res/csshw.svg" width="100" alt="csshW Logo"></img></a></p>
-<h1 align="center">csshW</h3>
-<p align="center"><i>Cluster SSH tool for Windows inspired by <a href="https://github.com/brockgr/csshx">csshX</a></i></p>
+<p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="100" alt="cssh-rs Logo" /></a></p>
+<h1 align="center">cssh-rs</h1>
+<p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
-  <a href="https://github.com/whme/csshw/releases/latest"><img src="https://img.shields.io/github/v/release/whme/csshw.svg"></a>
-  <a href="https://github.com/whme/csshw/releases"><img src="https://img.shields.io/github/downloads/whme/csshw/total"></a><br>
-  <a href="https://github.com/whme/csshw/actions/workflows/post-submit.yml"><img src="https://github.com/whme/csshw/actions/workflows/post-submit.yml/badge.svg"></a>
-  <a href="https://github.com/whme/csshw/actions/workflows/deploy_github_pages.yml"><img src="https://github.com/whme/csshw/actions/workflows/deploy_github_pages.yml/badge.svg"></a>
+  <a href="https://github.com/whmade/cssh-rs/releases/latest"><img src="https://img.shields.io/github/v/release/whmade/cssh-rs.svg"></a>
+  <a href="https://github.com/whmade/cssh-rs/releases"><img src="https://img.shields.io/github/downloads/whmade/cssh-rs/total"></a><br>
+  <a href="https://github.com/whmade/cssh-rs/actions/workflows/post-submit.yml"><img src="https://github.com/whmade/cssh-rs/actions/workflows/post-submit.yml/badge.svg"></a>
+  <a href="https://github.com/whmade/cssh-rs/actions/workflows/deploy_github_pages.yml"><img src="https://github.com/whmade/cssh-rs/actions/workflows/deploy_github_pages.yml/badge.svg"></a>
   <!--TODO: Add link to coverage once coverage data looks better: https://github.com/insightsengineering/coverage-action/issues/28#issuecomment-1743910648 -->
 </p>
 
-![csshw demo](https://raw.githubusercontent.com/whme/csshw/refs/heads/main/demo/csshw.gif)[^1][^2][^3]
+![cssh-rs demo](https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/demo/cssh-rs.gif)[^1][^2][^3]
 
 ## Pre-requisite
 - Any SSH client (Windows 10 and Windows 11 already include a built-in SSH server and client - [docs](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh))
 
 ## Overview
-csshW will launch 1 daemon and N client windows (with N being the number of hosts to SSH onto).<br>
+cssh-rs will launch 1 daemon and N client windows (with N being the number of hosts to SSH onto).<br>
 Key-strokes performed while having the daemon console focussed will be sent to all clients simoultaneously and be replayed by them.<br>
 Focussing a client will cause any key-strokes to be sent to this client only.
 
 ## Download/Installation
-csshW is a portable application and is not installed.<br>
-To download the csshW application refer to the [Releases 📦](https://github.com/whme/csshw/releases) page.
+cssh-rs is a portable application and is not installed.<br>
+To download the cssh-rs application refer to the [Releases 📦](https://github.com/whmade/cssh-rs/releases) page.
 
 > [!NOTE]
-> The released `csshw.exe` is not code-signed. On first launch Windows
+> The released `cssh-rs.exe` is not code-signed. On first launch Windows
 > SmartScreen shows a "Windows protected your PC" warning because the
 > binary was downloaded from the internet and has no recognized
 > publisher. To run it: click `More info` -> `Run anyway`, or
-> right-click `csshw.exe` -> `Properties` -> tick `Unblock` ->
-> `Apply`. Equivalent from PowerShell: `Unblock-File .\csshw.exe`.
+> right-click `cssh-rs.exe` -> `Properties` -> tick `Unblock` ->
+> `Apply`. Equivalent from PowerShell: `Unblock-File .\cssh-rs.exe`.
 >
 > The release `.zip` itself (0.19.0 and later) is signed with a
 > [GitHub build attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds);
@@ -44,7 +44,7 @@ To download the csshW application refer to the [Releases 📦](https://github.co
 <!-- HELP_OUTPUT_START -->
 ```cmd
 cssh-rs.exe --help
-Cluster SSH tool for Windows inspired by csshX
+Cross-platform cluster SSH tool
 
 Usage: cssh-rs.exe [OPTIONS] [HOSTS]... [COMMAND]
 
@@ -89,13 +89,13 @@ Options:
 ```
 <!-- HELP_OUTPUT_END -->
 Example:
-`csshw.exe -u root hosta.dev hostb.dev hostc.dev`
+`cssh-rs.exe -u root hosta.dev hostb.dev hostc.dev`
 
 We recommend using the [ssh_config](https://linux.die.net/man/5/ssh_config) for any configurations like default username etc.
 
 ## Configuration
 
-`csshw-config.toml` contains all relevant configurations and is located in the same directory as the executable.
+`cssh-rs-config.toml` contains all relevant configurations and is located in the same directory as the executable.
 It is automatically created with default values if not present.
 
 ### `clusters`
@@ -176,7 +176,7 @@ The highlight wins over [`disabled_console_color`](#disabled_console_color); pre
 * `'wrap'` - the highlight wraps to the opposite edge of the same row (Left/Right) or column (Up/Down).
 
 ## Contributing
-csshW uses pre-commit githooks to enforce good code style.<br>
+cssh-rs uses pre-commit githooks to enforce good code style.<br>
 Install them via ``git config --local core.hooksPath .githooks/``.
 
 ## Releases
@@ -186,6 +186,6 @@ Step by step guide to create a new release:
 - `cargo xtask create-release-tag` and follow the instructions
 - Revise the automatically created Release Draft and publish it
 
-[^1]: The searchbar used to launch csshw in the demo clip is [keypirinha](https://keypirinha.com/).
+[^1]: The searchbar used to launch cssh-rs in the demo clip is [keypirinha](https://keypirinha.com/).
 [^2]: The tool to show key presses in the demo clip is [carnac the magnificent](https://github.com/Code52/carnac).
 [^3]: The tool used to record the screen as GIF is [ScreenToGif](https://github.com/NickeManarin/ScreenToGif).

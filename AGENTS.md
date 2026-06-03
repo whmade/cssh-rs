@@ -1,8 +1,8 @@
-# csshW - Agent Instructions
+# cssh-rs - Agent Instructions
 
 ## Project Overview
 
-csshW is a Rust-based cluster SSH tool for Windows inspired by csshX. It enables users to SSH into
+cssh-rs is a Rust-based cross-platform cluster SSH tool. It enables users to SSH into
 multiple hosts simultaneously with synchronized keystroke distribution.
 
 ## Architecture
@@ -14,7 +14,7 @@ multiple hosts simultaneously with synchronized keystroke distribution.
 
 ## Key Design Philosophy
 
-- **Windows-Specific**: Not designed for cross-platform compatibility - embraces Windows APIs directly
+- **Cross-Platform via Trait Abstraction**: Platform-specific behaviour is hidden behind the `cssh-rs-platform` trait, with per-OS implementations in `cssh-rs-platform-windows`, `cssh-rs-platform-linux`, and `cssh-rs-platform-macos`
 - **User Experience**: Automatic configuration generation, sensible defaults, graceful degradation
 - **Configuration-Driven**: TOML-based configuration with auto-generation of defaults
 - **Safety First**: Extensive use of Result types and proper error handling

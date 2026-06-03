@@ -1090,7 +1090,7 @@ pub fn set_console_color(api: &dyn WindowsApi, color: CONSOLE_CHARACTER_ATTRIBUT
         .unwrap();
     // The console client area can contain a sub-cell-sized pixel sliver at
     // the right and/or bottom edge when the OS window pixel dimensions do
-    // not divide evenly into the cell grid (csshw clients are sized in
+    // not divide evenly into the cell grid (cssh-rs clients are sized in
     // pixels via MoveWindow). Those slivers are not backed by any buffer
     // cell, so the fill above cannot reach them, and conhost does not
     // repaint them on an attribute-only update - they keep the old color

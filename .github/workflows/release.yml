@@ -1,5 +1,5 @@
 #
-#   csshw Release Automation
+#   cssh-rs Release Automation
 #
 # Triggered by tag pushes matching semantic version pattern.
 # Creates optimized release builds and draft GitHub releases.
@@ -27,8 +27,8 @@ jobs:
       - name: Upload release binary
         uses: &upload-artifact-action actions/upload-artifact@v7
         with:
-          name: csshw-binary
-          path: target/release/csshw.exe
+          name: cssh-rs-binary
+          path: target/release/cssh-rs.exe
           retention-days: 1
 
   package-release:
@@ -44,7 +44,7 @@ jobs:
       - name: Download release binary
         uses: &download-artifact-action actions/download-artifact@v8
         with:
-          name: csshw-binary
+          name: cssh-rs-binary
           path: ./artifacts
 
       - name: Create release package
@@ -55,30 +55,30 @@ jobs:
           mkdir -p package
 
           # Copy binary. The version is carried by the zip filename below;
-          # the executable inside the archive keeps its plain `csshw.exe`
+          # the executable inside the archive keeps its plain `cssh-rs.exe`
           # name so users can drop it straight onto PATH.
-          cp artifacts/csshw.exe package/csshw.exe
+          cp artifacts/cssh-rs.exe package/cssh-rs.exe
 
           # Copy documentation
           cp README.md package/
           cp LICENSE.txt package/
 
           # Create zip archive with maximum compression
-          (cd package && zip -9 "../csshw.${VERSION}.zip" ./*)
+          (cd package && zip -9 "../cssh-rs.${VERSION}.zip" ./*)
 
           # Get file size for logging
-          SIZE=$(stat -c%s "csshw.${VERSION}.zip")
+          SIZE=$(stat -c%s "cssh-rs.${VERSION}.zip")
           echo "Package size: ${SIZE} bytes"
 
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: "csshw.${{ github.ref_name }}.zip"
+          subject-path: "cssh-rs.${{ github.ref_name }}.zip"
 
       - name: Upload release package
         uses: *upload-artifact-action
         with:
           name: release-package
-          path: csshw.${{ github.ref_name }}.zip
+          path: cssh-rs.${{ github.ref_name }}.zip
           retention-days: 1
 
   create-draft-release:
@@ -165,14 +165,14 @@ jobs:
             console.log('Draft release created:', release.data.html_url);
 
             // Upload release asset
-            const assetPath = path.join(process.cwd(), 'artifacts', `csshw.${version}.zip`);
+            const assetPath = path.join(process.cwd(), 'artifacts', `cssh-rs.${version}.zip`);
             const assetData = fs.readFileSync(assetPath);
 
             await github.rest.repos.uploadReleaseAsset({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.data.id,
-              name: `csshw.${version}.zip`,
+              name: `cssh-rs.${version}.zip`,
               data: assetData,
               headers: {
                 'content-type': 'application/zip',

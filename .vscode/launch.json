@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'csshw'",
+            "name": "Debug executable 'cssh-rs'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=csshw",
-                    "--package=csshw"
+                    "--bin=cssh-rs",
+                    "--package=cssh-rs"
                 ],
                 "filter": {
-                    "name": "csshw",
+                    "name": "cssh-rs",
                     "kind": "bin"
                 }
             },
@@ -25,15 +25,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'csshw-daemon'",
+            "name": "Debug executable 'cssh-rs-daemon'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=csshw",
-                    "--package=csshw"
+                    "--bin=cssh-rs",
+                    "--package=cssh-rs"
                 ],
                 "filter": {
-                    "name": "csshw",
+                    "name": "cssh-rs",
                     "kind": "bin"
                 }
             },
@@ -43,15 +43,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'csshw'",
+            "name": "Debug executable 'cssh-rs'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=csshw",
-                    "--package=csshw"
+                    "--bin=cssh-rs",
+                    "--package=cssh-rs"
                 ],
                 "filter": {
-                    "name": "csshw",
+                    "name": "cssh-rs",
                     "kind": "bin"
                 }
             },

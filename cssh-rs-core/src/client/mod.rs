@@ -668,7 +668,7 @@ fn split_host_and_inline_port(host: &str) -> (&str, Option<u16>) {
 ///
 /// # Returns
 ///
-/// The console title string in `csshw - user@host[:port]` form.
+/// The console title string in `cssh-rs - user@host[:port]` form.
 fn build_console_title(resolved_username: &str, host: &str, port: Option<u16>) -> String {
     let title_host = if let Some(port) = port {
         format!("{host}:{port}")

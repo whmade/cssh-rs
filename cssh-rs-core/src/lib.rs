@@ -1,4 +1,4 @@
-//! Cluster SSH tool for Windows inspired by csshX
+//! Cross-platform cluster SSH tool
 
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
@@ -320,7 +320,7 @@ pub fn spawn_console_process<W: WindowsApi>(
 ///
 /// Used when spawning child daemon/client consoles so that they invoke the same
 /// binary that is currently running, regardless of how the user has named the
-/// executable on disk. Hard-coding `csshw.exe` would break any deployment that
+/// executable on disk. Hard-coding `cssh-rs.exe` would break any deployment that
 /// renames the binary (e.g. release artifacts that embed the version number).
 ///
 /// # Returns

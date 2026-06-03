@@ -324,7 +324,7 @@ mod cli_main_test {
     /// Helper function to set up common Environment mocks
     fn setup_common_environment_mocks(mock_environment: &mut MockEnvironment) {
         mock_environment.expect_current_exe().returning(|| {
-            return Ok(std::path::PathBuf::from("C:\\test\\csshw.exe"));
+            return Ok(std::path::PathBuf::from("C:\\test\\cssh-rs.exe"));
         });
         mock_environment
             .expect_set_current_dir()
@@ -684,7 +684,7 @@ mod cli_main_test {
         // Set up logger initialization expectation
         mock_logger_initializer
             .expect_init_logger()
-            .with(mockall::predicate::eq("csshw_client_testhost"))
+            .with(mockall::predicate::eq("cssh-rs_client_testhost"))
             .times(1)
             .returning(|_| {});
 
@@ -754,7 +754,7 @@ mod cli_main_test {
         // Set up logger initialization expectation
         mock_logger_initializer
             .expect_init_logger()
-            .with(mockall::predicate::eq("csshw_daemon"))
+            .with(mockall::predicate::eq("cssh-rs_daemon"))
             .times(1)
             .returning(|_| {});
 
@@ -1114,7 +1114,7 @@ mod execute_parsed_command_test {
         // Set up expectations for logger initialization
         mock_logger_initializer
             .expect_init_logger()
-            .with(eq("csshw_client_debughost"))
+            .with(eq("cssh-rs_client_debughost"))
             .times(1)
             .returning(|_| {});
 
@@ -1215,7 +1215,7 @@ mod execute_parsed_command_test {
         // Set up expectations for logger initialization
         mock_logger_initializer
             .expect_init_logger()
-            .with(eq("csshw_daemon"))
+            .with(eq("cssh-rs_daemon"))
             .times(1)
             .returning(|_| {});
 
@@ -1871,7 +1871,7 @@ mod interactive_mode_test {
         // Set up expectations for logger initialization
         mock_logger_initializer
             .expect_init_logger()
-            .with(eq("csshw_daemon"))
+            .with(eq("cssh-rs_daemon"))
             .times(1)
             .returning(|_| {});
 

@@ -16,7 +16,7 @@ use windows::Win32::UI::HiDpi::PROCESS_PER_MONITOR_DPI_AWARE;
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
-/// Cluster SSH tool for Windows inspired by csshX
+/// Cross-platform cluster SSH tool
 ///
 /// The main CLI arguments
 #[derive(Parser, Debug)]
@@ -393,7 +393,7 @@ async fn execute_parsed_command<
     match &parsed_args.command {
         Some(Commands::Client { host }) => {
             if parsed_args.debug {
-                logger_initializer.init_logger(&format!("csshw_client_{host}"));
+                logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));
             }
             entrypoint
                 .client_main(
@@ -407,7 +407,7 @@ async fn execute_parsed_command<
         }
         Some(Commands::Daemon {}) => {
             if parsed_args.debug {
-                logger_initializer.init_logger("csshw_daemon");
+                logger_initializer.init_logger("cssh-rs_daemon");
             }
             entrypoint
                 .daemon_main(
@@ -562,7 +562,7 @@ pub async fn main<
     match &args.command {
         Some(Commands::Client { host }) => {
             if args.debug {
-                logger_initializer.init_logger(&format!("csshw_client_{host}"));
+                logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));
             }
             entrypoint
                 .client_main(
@@ -576,7 +576,7 @@ pub async fn main<
         }
         Some(Commands::Daemon {}) => {
             if args.debug {
-                logger_initializer.init_logger("csshw_daemon");
+                logger_initializer.init_logger("cssh-rs_daemon");
             }
             entrypoint
                 .daemon_main(

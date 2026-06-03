@@ -1,9 +1,9 @@
 order = ["security", "feature", "bugfix", "deprecation", "removal"]
 
 [context]
-name = "csshw"
+name = "cssh-rs"
 version = "0.19.1"
-url = "https://github.com/whme/csshw"
+url = "https://github.com/whmade/cssh-rs"
 
 [paths]
 directory = "news"

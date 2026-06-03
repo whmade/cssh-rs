@@ -1,5 +1,5 @@
 #
-#   csshw Post-Submit CI
+#   cssh-rs Post-Submit CI
 #
 # Runs on `main` and `*-maintenance` branches after merges with full
 # coverage collection. For pull requests, see pre-submit.yml which

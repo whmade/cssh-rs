@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Write a git commit message that follows csshW's subject/body/trailer conventions, including the mandatory Co-authored-by trailer for AI-generated commits.
+description: Write a git commit message that follows cssh-rs's subject/body/trailer conventions, including the mandatory Co-authored-by trailer for AI-generated commits.
 ---
 
 # Commit Messages
