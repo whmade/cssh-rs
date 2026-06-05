@@ -73,8 +73,8 @@ cssh-rs is designed to run on Windows, Linux, and macOS.
 </table>
 
 **Linux Wayland scope:** Wayland support targets wlroots (Sway,
-Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma). Mutter (GNOME on
-Wayland) is [![not planned](https://img.shields.io/badge/-not%20planned%20%28v1%29-red)](#cross-platform) for v1.
+Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma).
+Mutter (GNOME on Wayland) is currently not planned.
 
 ## Download/Installation
 cssh-rs is a portable application and is not installed.<br>
