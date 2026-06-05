@@ -2,9 +2,9 @@
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
-  <img height="40" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows">
-  <img height="40" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux">
-  <img height="40" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS">
+  <img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows">
+  <img height="60" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux">
+  <img height="60" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS">
 </p>
 <p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
@@ -25,51 +25,47 @@ Focussing a client will cause any key-strokes to be sent to this client only.
 ## Cross-platform
 cssh-rs is designed to run on Windows, Linux, and macOS.
 
-<div align="center">
-<table>
-<tr>
-<td valign="top" align="center">
-
-<img height="40" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows">
-
-| Terminal | Status |
-|---|---|
-| conhost | ![implemented](https://img.shields.io/badge/-implemented-brightgreen) |
-| Windows Terminal | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| WezTerm | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| Ghostty | ![planned](https://img.shields.io/badge/-planned-yellow) |
-
-</td>
-<td valign="top" align="center">
-
-<img height="40" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux">
-
-| Terminal | Status |
-|---|---|
-| GNOME Terminal | ![planned](https://img.shields.io/badge/-planned-yellow) (X11) |
-| Alacritty | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
-| Kitty | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
-| WezTerm | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
-| Ghostty | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
-
-</td>
-<td valign="top" align="center">
-
-<img height="40" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS">
-
-| Terminal | Status |
-|---|---|
-| Alacritty | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| Kitty | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| WezTerm | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| Ghostty | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| Terminal.app | ![planned](https://img.shields.io/badge/-planned-yellow) |
-| iTerm2 | ![planned](https://img.shields.io/badge/-planned-yellow) |
-
-</td>
-</tr>
+<table align="left">
+  <thead>
+    <tr><th colspan="2" align="center"><img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows"></th></tr>
+    <tr><th>Terminal</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>conhost</td><td><img src="https://img.shields.io/badge/-implemented-brightgreen" alt="implemented"></td></tr>
+    <tr><td>Windows Terminal</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>WezTerm</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>Ghostty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+  </tbody>
 </table>
-</div>
+<table align="left">
+  <thead>
+    <tr><th colspan="2" align="center"><img height="60" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux"></th></tr>
+    <tr><th>Terminal</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>GNOME Terminal</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"> (X11)</td></tr>
+    <tr><td>Alacritty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"> (X11, Wayland)</td></tr>
+    <tr><td>Kitty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"> (X11, Wayland)</td></tr>
+    <tr><td>WezTerm</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"> (X11, Wayland)</td></tr>
+    <tr><td>Ghostty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"> (X11, Wayland)</td></tr>
+  </tbody>
+</table>
+<table align="left">
+  <thead>
+    <tr><th colspan="2" align="center"><img height="60" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS"></th></tr>
+    <tr><th>Terminal</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Alacritty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>Kitty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>WezTerm</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>Ghostty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>Terminal.app</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+    <tr><td>iTerm2</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
+  </tbody>
+</table>
+
+<br clear="all">
 
 **Linux Wayland scope:** Wayland support targets wlroots (Sway,
 Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma). Mutter (GNOME on
