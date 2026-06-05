@@ -2,6 +2,11 @@
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
+  <img height="40" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows">
+  <img height="40" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux">
+  <img height="40" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS">
+</p>
+<p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
   <a href="https://github.com/whmade/cssh-rs/releases/latest"><img src="https://img.shields.io/github/v/release/whmade/cssh-rs.svg"></a>
   <a href="https://github.com/whmade/cssh-rs/releases"><img src="https://img.shields.io/github/downloads/whmade/cssh-rs/total"></a><br>
@@ -20,22 +25,51 @@ Focussing a client will cause any key-strokes to be sent to this client only.
 ## Cross-platform
 cssh-rs is designed to run on Windows, Linux, and macOS.
 
-The matrix below tracks supported terminal emulators per OS; cross-platform
-emulators (WezTerm, Ghostty) appear in multiple columns. See the
-[architecture design](https://github.com/whmade/cssh-rs/issues/1) for the
-full plugin-system rationale and Linux Wayland scope.
+<div align="center">
+<table>
+<tr>
+<td valign="top" align="center">
 
-| Terminal emulator | ![Windows](https://img.shields.io/badge/-Windows-0078D6?logo=windows&logoColor=white) | ![Linux](https://img.shields.io/badge/-Linux-FCC624?logo=linux&logoColor=black) | ![macOS](https://img.shields.io/badge/-macOS-000000?logo=apple&logoColor=white) |
-|---|---|---|---|
-| conhost          | ![implemented](https://img.shields.io/badge/-implemented-brightgreen) | -                                                                       | -                                                                       |
-| Windows Terminal | ![planned](https://img.shields.io/badge/-planned-yellow)              | -                                                                       | -                                                                       |
-| GNOME Terminal   | -                                                                     | ![planned](https://img.shields.io/badge/-planned-yellow) (X11)          | -                                                                       |
-| Alacritty        | -                                                                     | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
-| Kitty            | -                                                                     | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
-| WezTerm          | ![planned](https://img.shields.io/badge/-planned-yellow)              | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
-| Ghostty          | ![planned](https://img.shields.io/badge/-planned-yellow)              | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) | ![planned](https://img.shields.io/badge/-planned-yellow)                |
-| Terminal.app     | -                                                                     | -                                                                       | ![planned](https://img.shields.io/badge/-planned-yellow)                |
-| iTerm2           | -                                                                     | -                                                                       | ![planned](https://img.shields.io/badge/-planned-yellow)                |
+<img height="40" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows">
+
+| Terminal | Status |
+|---|---|
+| conhost | ![implemented](https://img.shields.io/badge/-implemented-brightgreen) |
+| Windows Terminal | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| WezTerm | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| Ghostty | ![planned](https://img.shields.io/badge/-planned-yellow) |
+
+</td>
+<td valign="top" align="center">
+
+<img height="40" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux">
+
+| Terminal | Status |
+|---|---|
+| GNOME Terminal | ![planned](https://img.shields.io/badge/-planned-yellow) (X11) |
+| Alacritty | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
+| Kitty | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
+| WezTerm | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
+| Ghostty | ![planned](https://img.shields.io/badge/-planned-yellow) (X11, Wayland) |
+
+</td>
+<td valign="top" align="center">
+
+<img height="40" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS">
+
+| Terminal | Status |
+|---|---|
+| Alacritty | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| Kitty | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| WezTerm | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| Ghostty | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| Terminal.app | ![planned](https://img.shields.io/badge/-planned-yellow) |
+| iTerm2 | ![planned](https://img.shields.io/badge/-planned-yellow) |
+
+</td>
+</tr>
+</table>
+</div>
 
 **Linux Wayland scope:** Wayland support targets wlroots (Sway,
 Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma). Mutter (GNOME on
