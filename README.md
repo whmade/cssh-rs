@@ -2,9 +2,9 @@
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
-  <img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows">
-  <img height="60" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux">
-  <img height="60" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS">
+  <img src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows">
+  <img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux">
+  <img src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS">
 </p>
 <p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
@@ -25,7 +25,11 @@ Focussing a client will cause any key-strokes to be sent to this client only.
 ## Cross-platform
 cssh-rs is designed to run on Windows, Linux, and macOS.
 
-<table align="left">
+<table align="center" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td>
+
+<table>
   <thead>
     <tr><th colspan="2" align="center"><img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows"></th></tr>
     <tr><th>Terminal</th><th>Status</th></tr>
@@ -37,7 +41,11 @@ cssh-rs is designed to run on Windows, Linux, and macOS.
     <tr><td>Ghostty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></td></tr>
   </tbody>
 </table>
-<table align="left">
+
+</td>
+    <td>
+
+<table>
   <thead>
     <tr><th colspan="2" align="center"><img height="60" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux"></th></tr>
     <tr><th>Terminal</th><th>Status</th></tr>
@@ -50,7 +58,11 @@ cssh-rs is designed to run on Windows, Linux, and macOS.
     <tr><td>Ghostty</td><td><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"> (X11, Wayland)</td></tr>
   </tbody>
 </table>
-<table align="left">
+
+</td>
+    <td>
+
+<table>
   <thead>
     <tr><th colspan="2" align="center"><img height="60" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS"></th></tr>
     <tr><th>Terminal</th><th>Status</th></tr>
@@ -65,7 +77,9 @@ cssh-rs is designed to run on Windows, Linux, and macOS.
   </tbody>
 </table>
 
-<br clear="all">
+</td>
+  </tr>
+</table>
 
 **Linux Wayland scope:** Wayland support targets wlroots (Sway,
 Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma). Mutter (GNOME on
