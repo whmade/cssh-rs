@@ -14,7 +14,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 cli-clipboard = "0.4.0"
 cssh-rs-platform-windows = { path = "../cssh-rs-platform-windows" }
 cssh-rs-protocol = { path = "../cssh-rs-protocol" }
-log = "0.4.30"
+log = "0.4.31"
 log-panics = "2.1.0"
 os_info = { version = "3.15.0", default-features = false }
 registry = "1.3.0"
