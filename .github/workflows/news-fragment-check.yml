@@ -13,6 +13,10 @@ on:
       - main
       - "*-maintenance"
 
+concurrency:
+  group: news-fragment-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   OVERRIDE_LABEL: "no-news-fragment-needed"
   NEWS_FRAGMENT_PATTERN: '^news/.*\.(feature|bugfix|security|deprecation|removal)\.md$'
