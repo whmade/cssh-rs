@@ -2,6 +2,11 @@
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
+  <a href="#cross-platform"><img src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows"></a>
+  <a href="#cross-platform"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux"></a>
+  <a href="#cross-platform"><img src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS"></a>
+</p>
+<p align="center">
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
   <a href="https://github.com/whmade/cssh-rs/releases/latest"><img src="https://img.shields.io/github/v/release/whmade/cssh-rs.svg"></a>
   <a href="https://github.com/whmade/cssh-rs/releases"><img src="https://img.shields.io/github/downloads/whmade/cssh-rs/total"></a><br>
@@ -12,13 +17,64 @@
 
 ![cssh-rs demo](https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/demo/cssh-rs.gif)[^1][^2][^3]
 
-## Pre-requisite
-- Any SSH client (Windows 10 and Windows 11 already include a built-in SSH server and client - [docs](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh))
-
 ## Overview
 cssh-rs will launch 1 daemon and N client windows (with N being the number of hosts to SSH onto).<br>
 Key-strokes performed while having the daemon console focussed will be sent to all clients simoultaneously and be replayed by them.<br>
 Focussing a client will cause any key-strokes to be sent to this client only.
+
+## Cross-platform
+cssh-rs is designed to run on Windows, Linux, and macOS.
+
+<table align="center">
+  <thead>
+    <tr>
+      <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows"></a></th>
+      <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux"></a></th>
+      <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS"></a></th>
+    </tr>
+    <tr>
+      <th>Terminal</th><th>Status</th>
+      <th>Terminal</th><th>Status</th>
+      <th>Terminal</th><th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr valign="top">
+      <td>conhost</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-implemented-brightgreen" alt="implemented"></a></td>
+      <td>GNOME Terminal</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11)</td>
+      <td>Alacritty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+    </tr>
+    <tr valign="top">
+      <td>Windows Terminal</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+      <td>Alacritty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
+      <td>Kitty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+    </tr>
+    <tr valign="top">
+      <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+      <td>Kitty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
+      <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+    </tr>
+    <tr valign="top">
+      <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+      <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
+      <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+    </tr>
+    <tr valign="top">
+      <td colspan="2"></td>
+      <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
+      <td>Terminal.app</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+    </tr>
+    <tr valign="top">
+      <td colspan="2"></td>
+      <td colspan="2"></td>
+      <td>iTerm2</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+    </tr>
+  </tbody>
+</table>
+
+**Linux Wayland scope:** Wayland support targets wlroots (Sway,
+Hyprland, river, Niri, COSMIC) and KWin (KDE Plasma).
+Mutter (GNOME on Wayland) is currently not planned.
 
 ## Download/Installation
 cssh-rs is a portable application and is not installed.<br>
@@ -38,6 +94,9 @@ To download the cssh-rs application refer to the [Releases 📦](https://github.
 > proves the archive came from this project's release workflow at the
 > tagged commit, but does not change SmartScreen's behavior for the
 > unsigned `.exe` inside.
+
+## Pre-requisite
+- Any SSH client (Windows 10 and Windows 11 already include a built-in SSH server and client - [docs](https://learn.microsoft.com/en-us/windows/terminal/tutorials/ssh))
 
 ## Usage
 
