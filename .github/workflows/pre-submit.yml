@@ -12,6 +12,10 @@ on:
       - main
       - "*-maintenance"
 
+concurrency:
+  group: pre-submit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   detect-changes:
     runs-on: &runner ubuntu-latest
