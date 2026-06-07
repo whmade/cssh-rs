@@ -12,9 +12,7 @@ release = "build -r"
 rustdocflags = ["--document-private-items"]
 
 # Statically link the MSVC C runtime so cssh-rs.exe runs on Windows hosts
-# that do not have the Visual C++ Redistributable installed. Without this
-# the binary fails to launch with `VCRUNTIME140.dll was not found`.
-# See https://github.com/whmade/cssh-rs/issues/136 and
-# https://rust-lang.github.io/rfcs/1721-crt-static.html.
-[target.x86_64-pc-windows-msvc]
+# that do not have the Visual C++ Redistributable installed.
+# See https://github.com/whmade/cssh-rs/issues/136
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]
