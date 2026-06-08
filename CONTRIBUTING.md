@@ -93,6 +93,16 @@ cssh-rs uses cargo aliases and the [`xtask`](https://github.com/matklad/cargo-xt
 - `cargo test` - Run all tests
 - `cargo build` - Build the project
 
+### Cross-compiling
+
+cssh-rs ships a cross-build xtask so contributors can produce a binary for any supported target from any supported host:
+
+```sh
+cargo xtask cross-build <target>
+```
+
+Run `cargo xtask cross-build --help` for the list of supported targets. The xtask installs the required toolchain on first use.
+
 ### Pre-commit Hooks
 
 cssh-rs uses pre-commit git hooks to enforce code quality. These are automatically installed when you set the hooks path as shown above. The hooks will:
