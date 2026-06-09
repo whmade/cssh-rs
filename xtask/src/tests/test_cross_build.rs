@@ -25,7 +25,6 @@ mock! {
 }
 
 const TRIPLE: &str = "x86_64-pc-windows-msvc";
-const PINNED_XWIN_VERSION: &str = "0.18.6";
 
 /// Build a mock with `print_info` swallowing any call. Callers
 /// configure the remaining expectations.
@@ -186,10 +185,14 @@ fn test_cross_build_installs_missing_cargo_xwin_at_pinned_version() {
     // cargo --list does not include xwin.
     mock.expect_list_cargo_subcommands()
         .returning(|| Ok("Installed Commands:\n    build\n    test\n".to_owned()));
+    // Sentinel string - the test asserts the value returned by
+    // `read_cargo_xwin_version` is threaded verbatim into
+    // `install_cargo_subcommand`; the literal version is irrelevant.
+    const SENTINEL: &str = "0.0.0-test";
     mock.expect_read_cargo_xwin_version()
-        .returning(|| Ok(PINNED_XWIN_VERSION.to_owned()));
+        .returning(|| Ok(SENTINEL.to_owned()));
     mock.expect_install_cargo_subcommand()
-        .withf(|c, v| c == "cargo-xwin" && v == PINNED_XWIN_VERSION)
+        .withf(|c, v| c == "cargo-xwin" && v == SENTINEL)
         .times(1)
         .returning(|_, _| Ok(()));
     mock.expect_run_cargo_xwin_build().returning(|_, _| Ok(()));
@@ -206,12 +209,9 @@ fn test_cross_build_unsupported_host_errors_before_any_build_work() {
     // Arrange
     let mut mock = base_mock();
     mock.expect_host_os().returning(|| "freebsd");
-    // The rust target install is still attempted (the triple may be
-    // valid on the host even when the build path is not), but no
-    // build or helper-tool call should fire when the (host, target)
-    // pair is unsupported.
-    mock.expect_list_installed_targets()
-        .returning(|| Ok(format!("{TRIPLE}\n")));
+    // The strategy bails on an unsupported host before any rustup,
+    // cargo-list, or build subprocess is touched.
+    mock.expect_list_installed_targets().never();
     mock.expect_install_target().never();
     mock.expect_list_cargo_subcommands().never();
     mock.expect_install_cargo_subcommand().never();
