@@ -7,6 +7,7 @@
 
 mod changelog;
 mod coverage;
+mod cross_build;
 mod inject_agent_token;
 mod readme;
 mod release;
@@ -14,7 +15,9 @@ mod social_preview;
 mod typography;
 mod worktree_teardown;
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -73,9 +76,41 @@ enum Command {
     /// invoked from `paseo.json`'s `worktree.teardown` so the same
     /// entry works on Windows (PowerShell) and Linux/macOS (bash).
     WorktreeTeardown,
+    /// Cross-build a binary of cssh-rs for the given target.
+    /// Detects the host OS and dispatches to the right toolchain
+    /// (native `cargo build` or `cargo xwin build`); installs the
+    /// Rust target and any required helper crate on first use.
+    /// Defaults to a debug build; pass `--release` for an optimized
+    /// binary.
+    CrossBuild {
+        /// Target triple to build for. Run with `--help` for the
+        /// list of supported targets.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+        /// Build with `--release` for an optimized binary. Defaults
+        /// to a debug build so contributor iteration stays fast.
+        #[arg(short, long)]
+        release: bool,
+    },
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            // {:#} prints the full anyhow error chain. ANSI red on
+            // TTYs only, so logs and CI captures stay clean.
+            if std::io::stderr().is_terminal() {
+                eprintln!("\x1b[1;31mERROR\x1b[0m - {err:#}");
+            } else {
+                eprintln!("ERROR - {err:#}");
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
     let args = Args::parse();
     match args.command {
         Command::CheckReadmeHelp => {
@@ -111,6 +146,9 @@ fn main() -> Result<()> {
         }
         Command::WorktreeTeardown => {
             worktree_teardown::worktree_teardown(&worktree_teardown::RealSystem)?;
+        }
+        Command::CrossBuild { target, release } => {
+            cross_build::run_cross_build(&cross_build::RealSystem, target, release)?;
         }
     }
     Ok(())
