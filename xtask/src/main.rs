@@ -76,15 +76,21 @@ enum Command {
     /// invoked from `paseo.json`'s `worktree.teardown` so the same
     /// entry works on Windows (PowerShell) and Linux/macOS (bash).
     WorktreeTeardown,
-    /// Cross-build a release binary of cssh-rs for the given target.
+    /// Cross-build a binary of cssh-rs for the given target.
     /// Detects the host OS and dispatches to the right toolchain
     /// (native `cargo build` or `cargo xwin build`); installs the
     /// Rust target and any required helper crate on first use.
+    /// Defaults to a debug build; pass `--release` for an optimized
+    /// binary.
     CrossBuild {
         /// Target triple to build for. Run with `--help` for the
         /// list of supported targets.
         #[arg(value_enum)]
         target: cross_build::Target,
+        /// Build with `--release` for an optimized binary. Defaults
+        /// to a debug build so contributor iteration stays fast.
+        #[arg(short, long)]
+        release: bool,
     },
 }
 
@@ -141,8 +147,8 @@ fn run() -> Result<()> {
         Command::WorktreeTeardown => {
             worktree_teardown::worktree_teardown(&worktree_teardown::RealSystem)?;
         }
-        Command::CrossBuild { target } => {
-            cross_build::run_cross_build(&cross_build::RealSystem, target)?;
+        Command::CrossBuild { target, release } => {
+            cross_build::run_cross_build(&cross_build::RealSystem, target, release)?;
         }
     }
     Ok(())

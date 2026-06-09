@@ -33,8 +33,9 @@ multiple hosts simultaneously with synchronized keystroke distribution.
 - **Config**: `.config/` - grouped, shared single-line marker files consumed
   by both `xtask` and CI. Currently holds `.config/coverage/` (pinned
   nightly toolchain, pinned Python tools `diff-cover` / `pycobertura`, and
-  the coverage ignore-filename regex). Filenames follow
-  `<identifier>.<kind>` where `<kind>` is `version` or `regex`.
+  the coverage ignore-filename regex) and `.config/cross-build/` (pinned
+  `cargo-xwin` version used by `cargo xtask cross-build`). Filenames
+  follow `<identifier>.<kind>` where `<kind>` is `version` or `regex`.
 
 ## Build & Test Commands
 
