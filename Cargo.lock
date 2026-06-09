@@ -317,6 +317,7 @@ version = "0.19.1"
 dependencies = [
  "clap",
  "cssh-rs-core",
+ "cssh-rs-meta",
  "embed-resource",
  "svg_to_ico",
  "tokio",
@@ -331,6 +332,7 @@ dependencies = [
  "clap",
  "cli-clipboard",
  "confy",
+ "cssh-rs-meta",
  "cssh-rs-platform-windows",
  "cssh-rs-protocol",
  "log",
@@ -347,6 +349,10 @@ dependencies = [
  "toml 1.1.2+spec-1.1.0",
  "windows 0.62.2",
 ]
+
+[[package]]
+name = "cssh-rs-meta"
+version = "0.19.1"
 
 [[package]]
 name = "cssh-rs-platform"
@@ -2994,6 +3000,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "cssh-rs-meta",
  "mockall",
  "semver",
  "toml_edit",

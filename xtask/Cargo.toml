@@ -10,10 +10,11 @@ path = "src/main.rs"
 
 [dependencies]
 # Shared: CLI parsing, error handling, TOML editing, semver bumps.
-anyhow    = "1"
-clap      = { version = "4", features = ["derive"] }
-toml_edit = "0.25"
-semver    = "1.0"
+anyhow        = "1"
+clap          = { version = "4", features = ["derive"] }
+cssh-rs-meta  = { path = "../cssh-rs-meta" }
+toml_edit     = "0.25"
+semver        = "1.0"
 
 [dev-dependencies]
 mockall = "0.14"

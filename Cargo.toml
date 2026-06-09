@@ -2,6 +2,7 @@
 members = [
     "cssh-rs",
     "cssh-rs-core",
+    "cssh-rs-meta",
     "cssh-rs-platform",
     "cssh-rs-platform-linux",
     "cssh-rs-platform-macos",

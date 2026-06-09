@@ -28,7 +28,9 @@ use cssh_rs_protocol::{
     DaemonToClientMessage, SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH,
 };
 
-use crate::utils::constants::{PIPE_NAME, PKG_NAME};
+use cssh_rs_meta::PACKAGE_NAME;
+
+use crate::utils::constants::PIPE_NAME;
 
 /// Possible results when reading from the named pipe and writing to the
 /// current process's stdinput.
@@ -675,7 +677,7 @@ fn build_console_title(resolved_username: &str, host: &str, port: Option<u16>) -
     } else {
         host.to_string()
     };
-    return format!("{PKG_NAME} - {resolved_username}@{title_host}");
+    return format!("{PACKAGE_NAME} - {resolved_username}@{title_host}");
 }
 
 /// Keeps the console window title pinned to `console_title`, since

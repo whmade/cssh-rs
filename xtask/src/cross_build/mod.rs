@@ -13,10 +13,16 @@
 pub mod strategy;
 pub mod system;
 
+use std::sync::LazyLock;
+
 use anyhow::Result;
 use clap::ValueEnum;
+use cssh_rs_meta::PACKAGE_NAME;
 
 pub use system::{CrossBuildSystem, RealSystem};
+
+static X86_64_PC_WINDOWS_MSVC_BINARY: LazyLock<String> =
+    LazyLock::new(|| format!("{PACKAGE_NAME}.exe"));
 
 /// Supported cross-build target triples.
 ///
@@ -47,7 +53,7 @@ impl Target {
     /// including any platform-specific extension (e.g. `.exe`).
     pub fn binary_filename(self) -> &'static str {
         match self {
-            Self::X86_64PcWindowsMsvc => "cssh-rs.exe",
+            Self::X86_64PcWindowsMsvc => X86_64_PC_WINDOWS_MSVC_BINARY.as_str(),
         }
     }
 }
