@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use anyhow::Result;
+use log::Level;
 use mockall::mock;
 
 use crate::typography::{
@@ -277,6 +278,7 @@ fn test_check_typography_fails_on_em_dash() {
 fn test_check_typography_skips_oversized_file() {
     // Arrange: a tracked file larger than the cap should be skipped
     // with a warning rather than blocking the run.
+    testing_logger::setup();
     let mut mock = MockTypographySystemMock::new();
     mock.expect_list_tracked_files()
         .returning(|| Ok(vec!["huge.md".to_owned()]));
@@ -288,11 +290,18 @@ fn test_check_typography_skips_oversized_file() {
 
     // Assert
     assert!(result.is_ok());
+    testing_logger::validate(|logs| {
+        let warnings: Vec<_> = logs.iter().filter(|l| l.level == Level::Warn).collect();
+        assert_eq!(warnings.len(), 1, "expected one skip warning");
+        assert!(warnings[0].body.contains("huge.md"));
+        assert!(warnings[0].body.contains("exceeds"));
+    });
 }
 
 #[test]
 fn test_check_typography_skips_non_utf8_file() {
     // Arrange
+    testing_logger::setup();
     let mut mock = MockTypographySystemMock::new();
     mock.expect_list_tracked_files()
         .returning(|| Ok(vec!["weird.md".to_owned()]));
@@ -305,4 +314,10 @@ fn test_check_typography_skips_non_utf8_file() {
 
     // Assert
     assert!(result.is_ok());
+    testing_logger::validate(|logs| {
+        let warnings: Vec<_> = logs.iter().filter(|l| l.level == Level::Warn).collect();
+        assert_eq!(warnings.len(), 1, "expected one skip warning");
+        assert!(warnings[0].body.contains("weird.md"));
+        assert!(warnings[0].body.contains("not valid UTF-8"));
+    });
 }

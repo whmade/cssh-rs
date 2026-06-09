@@ -496,12 +496,13 @@ impl ReleaseSystem for RealSystem {
 
     fn prompt_user(&self, message: &str) -> Result<String> {
         use std::io::Write;
-        // Interactive prompt: write the question directly to stdout (no
-        // timestamp/level prefix from the logger) and flush so the
+        // Interactive prompt: written directly to stdout so it lacks the
+        // timestamp/level prefix the logger would add, and flushed so the
         // cursor sits next to the prompt before stdin is read.
-        let mut stdout = std::io::stdout();
-        write!(stdout, "{message}").context("failed to write prompt")?;
-        stdout.flush().context("failed to flush stdout")?;
+        print!("{message}");
+        std::io::stdout()
+            .flush()
+            .context("failed to flush stdout")?;
         let mut input = String::new();
         std::io::stdin()
             .read_line(&mut input)
