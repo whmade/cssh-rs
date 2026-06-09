@@ -17,8 +17,6 @@ mock! {
         fn docker_image_exists(&self, image: &str) -> bool;
         fn docker_pull(&self, image: &str) -> anyhow::Result<()>;
         fn run_docker(&self, args: &[String], envs: &[(String, String)]) -> anyhow::Result<()>;
-        fn print_info(&self, message: &str);
-        fn print_debug(&self, message: &str);
     }
 }
 
@@ -29,8 +27,8 @@ fn workspace_root() -> PathBuf {
     PathBuf::from("ws-root")
 }
 
-/// Build a mock with `workspace_root`, `print_info`, and a no-op
-/// `ensure_parent_dir`. Callers configure env/docker expectations.
+/// Build a mock with `workspace_root` and a no-op `ensure_parent_dir`.
+/// Callers configure env/docker expectations.
 fn base_mock() -> MockSocialPreviewSystemMock {
     let mut mock = MockSocialPreviewSystemMock::new();
     mock.expect_workspace_root()
@@ -38,8 +36,6 @@ fn base_mock() -> MockSocialPreviewSystemMock {
     mock.expect_check_docker_ready().returning(|| Ok(()));
     mock.expect_docker_image_exists().returning(|_| true);
     mock.expect_ensure_parent_dir().returning(|_| Ok(()));
-    mock.expect_print_info().returning(|_| ());
-    mock.expect_print_debug().returning(|_| ());
     mock
 }
 
@@ -165,8 +161,6 @@ fn test_generate_custom_out_drives_ensure_parent_and_container_path() {
     mock.expect_check_docker_ready().returning(|| Ok(()));
     mock.expect_docker_image_exists().returning(|_| true);
     mock.expect_env_var().returning(|_| None);
-    mock.expect_print_info().returning(|_| ());
-    mock.expect_print_debug().returning(|_| ());
     let ensured = Arc::new(Mutex::new(PathBuf::new()));
     let ensured_c = ensured.clone();
     mock.expect_ensure_parent_dir()
@@ -291,8 +285,6 @@ fn test_generate_pulls_image_when_missing() {
         .returning(|| Ok(workspace_root()));
     mock.expect_check_docker_ready().returning(|| Ok(()));
     mock.expect_env_var().returning(|_| None);
-    mock.expect_print_info().returning(|_| ());
-    mock.expect_print_debug().returning(|_| ());
     mock.expect_ensure_parent_dir().returning(|_| Ok(()));
     mock.expect_docker_image_exists()
         .withf(|img| img.starts_with("mcr.microsoft.com/playwright:"))
@@ -331,7 +323,6 @@ fn test_generate_surfaces_docker_not_ready_without_running_container() {
     let mut mock = MockSocialPreviewSystemMock::new();
     mock.expect_workspace_root()
         .returning(|| Ok(workspace_root()));
-    mock.expect_print_info().returning(|_| ());
     mock.expect_check_docker_ready()
         .returning(|| anyhow::bail!("Docker daemon not reachable"));
     // Nothing downstream should run once the readiness check fails.

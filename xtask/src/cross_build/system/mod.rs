@@ -15,9 +15,6 @@ pub trait CrossBuildSystem {
     /// Return the host OS identifier (matches [`std::env::consts::OS`]).
     fn host_os(&self) -> &'static str;
 
-    /// Print an informational message to stdout.
-    fn print_info(&self, message: &str);
-
     /// Run `rustup target list --installed` and return its stdout.
     ///
     /// # Errors
@@ -74,10 +71,6 @@ pub struct RealSystem;
 impl CrossBuildSystem for RealSystem {
     fn host_os(&self) -> &'static str {
         std::env::consts::OS
-    }
-
-    fn print_info(&self, message: &str) {
-        println!("INFO - {message}");
     }
 
     fn list_installed_targets(&self) -> Result<String> {

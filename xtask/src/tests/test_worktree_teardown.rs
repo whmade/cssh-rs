@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use log::Level;
 use mockall::mock;
 
 use crate::worktree_teardown::{worktree_teardown, WorktreeTeardownSystem};
@@ -12,7 +13,6 @@ mock! {
     impl WorktreeTeardownSystem for WorktreeTeardownSystemMock {
         fn env_var(&self, key: &str) -> Option<String>;
         fn run_git(&self, repo_path: &Path, args: Vec<String>) -> anyhow::Result<i32>;
-        fn log(&self, msg: &str);
     }
 }
 
@@ -38,6 +38,7 @@ fn expect_env(
 #[test]
 fn test_full_env_runs_both_git_commands() {
     // Arrange
+    testing_logger::setup();
     let mut mock = MockWorktreeTeardownSystemMock::new();
     expect_env(
         &mut mock,
@@ -53,8 +54,6 @@ fn test_full_env_runs_both_git_commands() {
         calls_clone.lock().unwrap().push((path.to_path_buf(), args));
         Ok(0)
     });
-
-    mock.expect_log().never();
 
     // Act
     let result = worktree_teardown(&mock);
@@ -73,11 +72,15 @@ fn test_full_env_runs_both_git_commands() {
         calls[1].1,
         vec!["branch".to_owned(), "-D".to_owned(), "feature/x".to_owned()]
     );
+    testing_logger::validate(|logs| {
+        assert_eq!(logs.len(), 0, "no log messages expected on the happy path");
+    });
 }
 
 #[test]
 fn test_nonzero_exit_logs_and_continues() {
     // Arrange
+    testing_logger::setup();
     let mut mock = MockWorktreeTeardownSystemMock::new();
     expect_env(
         &mut mock,
@@ -94,29 +97,27 @@ fn test_nonzero_exit_logs_and_continues() {
         Ok(1)
     });
 
-    let logs = Arc::new(Mutex::new(Vec::<String>::new()));
-    let logs_clone = logs.clone();
-    mock.expect_log().returning(move |msg| {
-        logs_clone.lock().unwrap().push(msg.to_owned());
-    });
-
     // Act
     let result = worktree_teardown(&mock);
 
     // Assert
     assert!(result.is_ok());
     assert_eq!(*invocations.lock().unwrap(), 2);
-    let logs = logs.lock().unwrap();
-    assert_eq!(logs.len(), 2);
-    assert!(logs[0].contains("checkout --detach"));
-    assert!(logs[0].contains("code 1"));
-    assert!(logs[1].contains("branch -D feature/x"));
-    assert!(logs[1].contains("code 1"));
+    testing_logger::validate(|logs| {
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].level, Level::Warn);
+        assert!(logs[0].body.contains("checkout --detach"));
+        assert!(logs[0].body.contains("code 1"));
+        assert_eq!(logs[1].level, Level::Warn);
+        assert!(logs[1].body.contains("branch -D feature/x"));
+        assert!(logs[1].body.contains("code 1"));
+    });
 }
 
 #[test]
 fn test_missing_worktree_path_skips_detach() {
     // Arrange
+    testing_logger::setup();
     let mut mock = MockWorktreeTeardownSystemMock::new();
     expect_env(&mut mock, None, Some("/tmp/source"), Some("feature/x"));
 
@@ -127,12 +128,6 @@ fn test_missing_worktree_path_skips_detach() {
         Ok(0)
     });
 
-    let logs = Arc::new(Mutex::new(Vec::<String>::new()));
-    let logs_clone = logs.clone();
-    mock.expect_log().returning(move |msg| {
-        logs_clone.lock().unwrap().push(msg.to_owned());
-    });
-
     // Act
     let result = worktree_teardown(&mock);
 
@@ -141,14 +136,17 @@ fn test_missing_worktree_path_skips_detach() {
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0], PathBuf::from("/tmp/source"));
-    let logs = logs.lock().unwrap();
-    assert_eq!(logs.len(), 1);
-    assert!(logs[0].contains("PASEO_WORKTREE_PATH not set"));
+    testing_logger::validate(|logs| {
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, Level::Info);
+        assert!(logs[0].body.contains("PASEO_WORKTREE_PATH not set"));
+    });
 }
 
 #[test]
 fn test_missing_branch_or_source_skips_branch_delete() {
     // Arrange
+    testing_logger::setup();
     let mut mock = MockWorktreeTeardownSystemMock::new();
     expect_env(&mut mock, Some("/tmp/worktree"), Some("/tmp/source"), None);
 
@@ -159,12 +157,6 @@ fn test_missing_branch_or_source_skips_branch_delete() {
         Ok(0)
     });
 
-    let logs = Arc::new(Mutex::new(Vec::<String>::new()));
-    let logs_clone = logs.clone();
-    mock.expect_log().returning(move |msg| {
-        logs_clone.lock().unwrap().push(msg.to_owned());
-    });
-
     // Act
     let result = worktree_teardown(&mock);
 
@@ -173,14 +165,19 @@ fn test_missing_branch_or_source_skips_branch_delete() {
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0], vec!["checkout".to_owned(), "--detach".to_owned()]);
-    let logs = logs.lock().unwrap();
-    assert_eq!(logs.len(), 1);
-    assert!(logs[0].contains("PASEO_SOURCE_CHECKOUT_PATH or PASEO_BRANCH_NAME not set"));
+    testing_logger::validate(|logs| {
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, Level::Info);
+        assert!(logs[0]
+            .body
+            .contains("PASEO_SOURCE_CHECKOUT_PATH or PASEO_BRANCH_NAME not set"));
+    });
 }
 
 #[test]
 fn test_run_git_spawn_failure_logs_and_continues() {
     // Arrange
+    testing_logger::setup();
     let mut mock = MockWorktreeTeardownSystemMock::new();
     expect_env(
         &mut mock,
@@ -196,22 +193,19 @@ fn test_run_git_spawn_failure_logs_and_continues() {
         Err(anyhow::anyhow!("git binary missing"))
     });
 
-    let logs = Arc::new(Mutex::new(Vec::<String>::new()));
-    let logs_clone = logs.clone();
-    mock.expect_log().returning(move |msg| {
-        logs_clone.lock().unwrap().push(msg.to_owned());
-    });
-
     // Act
     let result = worktree_teardown(&mock);
 
     // Assert
     assert!(result.is_ok());
     assert_eq!(*invocations.lock().unwrap(), 2);
-    let logs = logs.lock().unwrap();
-    assert_eq!(logs.len(), 2);
-    assert!(logs[0].contains("checkout --detach"));
-    assert!(logs[0].contains("git binary missing"));
-    assert!(logs[1].contains("branch -D feature/x"));
-    assert!(logs[1].contains("git binary missing"));
+    testing_logger::validate(|logs| {
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].level, Level::Warn);
+        assert!(logs[0].body.contains("checkout --detach"));
+        assert!(logs[0].body.contains("git binary missing"));
+        assert_eq!(logs[1].level, Level::Warn);
+        assert!(logs[1].body.contains("branch -D feature/x"));
+        assert!(logs[1].body.contains("git binary missing"));
+    });
 }

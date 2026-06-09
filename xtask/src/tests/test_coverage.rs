@@ -12,21 +12,19 @@ mock! {
         fn list_installed_toolchains(&self) -> anyhow::Result<String>;
         fn install_toolchain(&self, toolchain: &str) -> anyhow::Result<()>;
         fn run_cargo_llvm_cov(&self, toolchain: &str, args: &[String]) -> anyhow::Result<()>;
-        fn print_info(&self, message: &str);
     }
 }
 
 const TOOLCHAIN: &str = "nightly-2026-04-20";
 
-/// Build a mock with the version file returning [`TOOLCHAIN`] and `print_info`
-/// accepting any call. Callers configure the remaining expectations.
+/// Build a mock with the version file returning [`TOOLCHAIN`].
+/// Callers configure the remaining expectations.
 fn base_mock() -> MockCoverageSystemMock {
     let mut mock = MockCoverageSystemMock::new();
     mock.expect_read_nightly_version_file()
         .returning(|| Ok(TOOLCHAIN.to_owned()));
     mock.expect_read_ignore_regex_file()
         .returning(|| Ok(r"((src[/\\]main\.rs$)|(src[/\\]utils[/\\]debug\.rs$))".to_owned()));
-    mock.expect_print_info().returning(|_| ());
     mock
 }
 
@@ -122,7 +120,6 @@ fn test_run_coverage_fails_on_version_file_read_error() {
     let mut mock = MockCoverageSystemMock::new();
     mock.expect_read_nightly_version_file()
         .returning(|| anyhow::bail!("file not found"));
-    mock.expect_print_info().returning(|_| ());
 
     // Act
     let result = run_coverage(&mock);

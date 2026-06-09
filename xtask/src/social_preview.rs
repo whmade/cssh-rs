@@ -93,16 +93,6 @@ pub trait SocialPreviewSystem {
     /// Returns an error if the process cannot be started or exits with a
     /// non-zero status.
     fn run_docker(&self, args: &[String], envs: &[(String, String)]) -> Result<()>;
-
-    /// Print an informational message to stdout.
-    fn print_info(&self, message: &str);
-
-    /// Print a debug-level message. Intended for low-level command
-    /// traces (e.g. the exact `docker` invocation) that would be noisy by
-    /// default but useful when troubleshooting. The production
-    /// implementation only emits the message when `CSSH_RS_XTASK_VERBOSE`
-    /// is set to a non-empty value.
-    fn print_debug(&self, message: &str);
 }
 
 /// Production implementation of [`SocialPreviewSystem`].
@@ -194,19 +184,6 @@ impl SocialPreviewSystem for RealSystem {
             bail!("`docker {}` failed with status {status}", args.join(" "));
         }
         Ok(())
-    }
-
-    fn print_info(&self, message: &str) {
-        println!("INFO - {message}");
-    }
-
-    fn print_debug(&self, message: &str) {
-        if std::env::var("CSSH_RS_XTASK_VERBOSE")
-            .map(|v| !v.is_empty())
-            .unwrap_or(false)
-        {
-            eprintln!("DEBUG - {message}");
-        }
     }
 }
 
@@ -381,15 +358,10 @@ pub fn generate_social_preview<S: SocialPreviewSystem>(
 ) -> Result<()> {
     let workspace_root = system.workspace_root()?;
     let (host_out, relative_out) = resolve_out_paths(&workspace_root, out)?;
-    system.print_info(&format!(
-        "Generating social preview -> {}",
-        host_out.display()
-    ));
+    log::info!("Generating social preview -> {}", host_out.display());
     system.check_docker_ready()?;
     if !system.docker_image_exists(PLAYWRIGHT_IMAGE) {
-        system.print_info(&format!(
-            "Pulling Playwright image {PLAYWRIGHT_IMAGE} (first run only)"
-        ));
+        log::info!("Pulling Playwright image {PLAYWRIGHT_IMAGE} (first run only)");
         system.docker_pull(PLAYWRIGHT_IMAGE)?;
     }
     system.ensure_parent_dir(&host_out)?;
@@ -404,10 +376,10 @@ pub fn generate_social_preview<S: SocialPreviewSystem>(
         .map(|t| ("GITHUB_TOKEN".to_owned(), t))
         .collect();
 
-    system.print_info(&format!("Starting Playwright container {PLAYWRIGHT_IMAGE}"));
-    system.print_debug(&format!("+ docker {}", shell_quote_args(&args)));
+    log::info!("Starting Playwright container {PLAYWRIGHT_IMAGE}");
+    log::debug!("+ docker {}", shell_quote_args(&args));
     system.run_docker(&args, &envs)?;
-    system.print_info(&format!("Wrote {}", host_out.display()));
+    log::info!("Wrote {}", host_out.display());
     Ok(())
 }
 

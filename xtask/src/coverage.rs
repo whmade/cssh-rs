@@ -59,9 +59,6 @@ pub trait CoverageSystem {
     ///
     /// Returns an error if the file cannot be read.
     fn read_ignore_regex_file(&self) -> Result<String>;
-
-    /// Print an informational message to stdout.
-    fn print_info(&self, message: &str);
 }
 
 /// Production implementation of [`CoverageSystem`].
@@ -127,10 +124,6 @@ impl CoverageSystem for RealSystem {
             .context("failed to read .config/coverage/ignore-filename.regex")
             .map(|s| s.trim().to_owned())
     }
-
-    fn print_info(&self, message: &str) {
-        println!("INFO - {message}");
-    }
 }
 
 /// Convert a slice of string literals to a `Vec<String>`.
@@ -155,24 +148,24 @@ fn args(values: &[&str]) -> Vec<String> {
 /// install failure, test failure, or report generation failure).
 pub fn run_coverage<S: CoverageSystem>(system: &S) -> Result<()> {
     let toolchain = system.read_nightly_version_file()?;
-    system.print_info(&format!("Using nightly toolchain: {toolchain}"));
+    log::info!("Using nightly toolchain: {toolchain}");
     let ignore_regex = system.read_ignore_regex_file()?;
 
     // Ensure toolchain is installed.
     let installed = system.list_installed_toolchains()?;
     if installed.lines().any(|line| line.starts_with(&toolchain)) {
-        system.print_info("Toolchain already installed");
+        log::info!("Toolchain already installed");
     } else {
-        system.print_info(&format!("Installing toolchain: {toolchain}"));
+        log::info!("Installing toolchain: {toolchain}");
         system.install_toolchain(&toolchain)?;
     }
 
     // Clean previous coverage data.
-    system.print_info("Cleaning previous coverage data");
+    log::info!("Cleaning previous coverage data");
     system.run_cargo_llvm_cov(&toolchain, &args(&["clean", "--workspace"]))?;
 
     // Run tests with coverage instrumentation.
-    system.print_info("Running tests with coverage");
+    log::info!("Running tests with coverage");
     system.run_cargo_llvm_cov(
         &toolchain,
         &args(&[
@@ -185,7 +178,7 @@ pub fn run_coverage<S: CoverageSystem>(system: &S) -> Result<()> {
     )?;
 
     // Generate Cobertura XML report.
-    system.print_info("Generating Cobertura XML report");
+    log::info!("Generating Cobertura XML report");
     system.run_cargo_llvm_cov(
         &toolchain,
         &args(&[
@@ -199,7 +192,7 @@ pub fn run_coverage<S: CoverageSystem>(system: &S) -> Result<()> {
     )?;
 
     // Generate HTML report.
-    system.print_info("Generating HTML report");
+    log::info!("Generating HTML report");
     system.run_cargo_llvm_cov(
         &toolchain,
         &args(&[
@@ -212,9 +205,9 @@ pub fn run_coverage<S: CoverageSystem>(system: &S) -> Result<()> {
         ]),
     )?;
 
-    system.print_info("Coverage reports generated:");
-    system.print_info("  XML:  coverage.xml");
-    system.print_info("  HTML: coverage_html/index.html");
+    log::info!("Coverage reports generated:");
+    log::info!("  XML:  coverage.xml");
+    log::info!("  HTML: coverage_html/index.html");
     Ok(())
 }
 

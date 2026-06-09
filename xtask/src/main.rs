@@ -15,17 +15,23 @@ mod social_preview;
 mod typography;
 mod worktree_teardown;
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use log::LevelFilter;
+use simplelog::{format_description, ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
 
 /// Developer automation tasks for cssh-rs.
 #[derive(Parser)]
 #[clap(name = "xtask")]
 struct Args {
+    /// Increase log verbosity (`-v` = debug, `-vv` = trace). Overridden
+    /// by `RUST_LOG` when that env var parses as a log level.
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[clap(subcommand)]
     command: Command,
 }
@@ -98,13 +104,9 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            // {:#} prints the full anyhow error chain. ANSI red on
-            // TTYs only, so logs and CI captures stay clean.
-            if std::io::stderr().is_terminal() {
-                eprintln!("\x1b[1;31mERROR\x1b[0m - {err:#}");
-            } else {
-                eprintln!("ERROR - {err:#}");
-            }
+            // {:#} prints the full anyhow error chain. TermLogger colors
+            // the ERROR level red on TTYs and emits plain text on non-TTYs.
+            log::error!("{err:#}");
             ExitCode::FAILURE
         }
     }
@@ -112,6 +114,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     let args = Args::parse();
+    init_logger(args.verbose);
     match args.command {
         Command::CheckReadmeHelp => {
             readme::check_readme_help(&readme::RealSystem)?;
@@ -152,4 +155,33 @@ fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Initialize the terminal logger.
+///
+/// Reuses the `ConfigBuilder` setup from `cssh-rs-core` so xtask output
+/// and the app's log files share one `HH:MM:SS.subsecond` timestamp
+/// format. Precedence: `RUST_LOG` (if parses as a level) > `-v` count >
+/// `Info` default.
+///
+/// # Arguments
+/// * `verbose` - Count of `-v` flags passed on the command line.
+fn init_logger(verbose: u8) {
+    let level = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|s| s.parse::<LevelFilter>().ok())
+        .unwrap_or(match verbose {
+            0 => LevelFilter::Info,
+            1 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        });
+    let _ = TermLogger::init(
+        level,
+        ConfigBuilder::new()
+            .set_time_format_custom(format_description!("[hour]:[minute]:[second].[subsecond]"))
+            .build(),
+        TerminalMode::Mixed,
+        ColorChoice::Auto,
+    );
+    log_panics::init();
 }

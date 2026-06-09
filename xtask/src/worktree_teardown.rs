@@ -73,13 +73,6 @@ pub trait WorktreeTeardownSystem {
     /// Returns an error if the `git` binary cannot be spawned (for
     /// example, when it is not on `PATH`).
     fn run_git(&self, repo_path: &Path, args: Vec<String>) -> Result<i32>;
-
-    /// Emit an informational or warning message to the user.
-    ///
-    /// # Arguments
-    ///
-    /// * `msg` - Message to display.
-    fn log(&self, msg: &str);
 }
 
 /// Production implementation of [`WorktreeTeardownSystem`].
@@ -99,10 +92,6 @@ impl WorktreeTeardownSystem for RealSystem {
             .status()
             .with_context(|| format!("failed to spawn `git` for {}", repo_path.display()))?;
         Ok(status.code().unwrap_or(-1))
-    }
-
-    fn log(&self, msg: &str) {
-        println!("{msg}");
     }
 }
 
@@ -135,9 +124,7 @@ pub fn worktree_teardown<S: WorktreeTeardownSystem>(system: &S) -> Result<()> {
             &format!("`git checkout --detach` in {path}"),
         );
     } else {
-        system.log(&format!(
-            "INFO - paseo worktree teardown: {ENV_WORKTREE_PATH} not set; skipping HEAD detach."
-        ));
+        log::info!("paseo worktree teardown: {ENV_WORKTREE_PATH} not set; skipping HEAD detach.");
     }
 
     match (source_path.as_deref(), branch_name.as_deref()) {
@@ -150,9 +137,9 @@ pub fn worktree_teardown<S: WorktreeTeardownSystem>(system: &S) -> Result<()> {
             );
         }
         _ => {
-            system.log(&format!(
-                "INFO - paseo worktree teardown: {ENV_SOURCE_CHECKOUT_PATH} or {ENV_BRANCH_NAME} not set; skipping branch delete."
-            ));
+            log::info!(
+                "paseo worktree teardown: {ENV_SOURCE_CHECKOUT_PATH} or {ENV_BRANCH_NAME} not set; skipping branch delete."
+            );
         }
     }
 
@@ -168,14 +155,14 @@ fn run_git_best_effort<S: WorktreeTeardownSystem>(
     match system.run_git(repo_path, args) {
         Ok(0) => {}
         Ok(code) => {
-            system.log(&format!(
-                "WARN - paseo worktree teardown: {description} exited with code {code}; continuing."
-            ));
+            log::warn!(
+                "paseo worktree teardown: {description} exited with code {code}; continuing."
+            );
         }
         Err(err) => {
-            system.log(&format!(
-                "WARN - paseo worktree teardown: {description} failed to spawn `git`: {err:#}; continuing."
-            ));
+            log::warn!(
+                "paseo worktree teardown: {description} failed to spawn `git`: {err:#}; continuing."
+            );
         }
     }
 }
