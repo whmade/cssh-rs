@@ -112,13 +112,6 @@ pub trait InjectAgentTokenSystem {
     ///
     /// Returns an error if directory creation or the write fails.
     fn write_settings(&self, path: &Path, contents: &str) -> Result<()>;
-
-    /// Emit an informational or warning message to the user.
-    ///
-    /// # Arguments
-    ///
-    /// * `msg` - Message to display.
-    fn log(&self, msg: &str);
 }
 
 /// Production implementation of [`InjectAgentTokenSystem`].
@@ -150,10 +143,6 @@ impl InjectAgentTokenSystem for RealSystem {
         std::fs::write(path, contents)
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
-    }
-
-    fn log(&self, msg: &str) {
-        println!("{msg}");
     }
 }
 
@@ -292,10 +281,10 @@ pub fn inject_agent_token<S: InjectAgentTokenSystem>(system: &S) -> Result<()> {
     let token_file = source.join(TOKEN_FILE_REL_PATH);
 
     let Some(raw) = system.read_token_file(&token_file)? else {
-        system.log(&format!(
-            "INFO - paseo agent GitHub auth: no {} found; agents will use your existing gh login. See CONTRIBUTING.md.",
+        log::info!(
+            "paseo agent GitHub auth: no {} found; agents will use your existing gh login. See CONTRIBUTING.md.",
             token_file.display()
-        ));
+        );
         return Ok(());
     };
 
@@ -332,27 +321,27 @@ pub fn inject_agent_token<S: InjectAgentTokenSystem>(system: &S) -> Result<()> {
 
     match kind {
         TokenKind::FineGrained => {
-            system.log(&format!(
-                "INFO - paseo agent GitHub auth: wrote {} from {} (scoped PAT)",
+            log::info!(
+                "paseo agent GitHub auth: wrote {} from {} (scoped PAT)",
                 settings_path.display(),
-                token_file.display()
-            ));
+                token_file.display(),
+            );
         }
         TokenKind::Classic => {
-            system.log(&format!(
-                "WARN - paseo agent GitHub auth: detected a classic token in {}; wrote {} but fine-grained PATs (prefix `{}`) are recommended because they can be restricted to specific repositories and permissions, while classic tokens cannot. See CONTRIBUTING.md.",
+            log::warn!(
+                "paseo agent GitHub auth: detected a classic token in {}; wrote {} but fine-grained PATs (prefix `{}`) are recommended because they can be restricted to specific repositories and permissions, while classic tokens cannot. See CONTRIBUTING.md.",
                 token_file.display(),
                 settings_path.display(),
                 FINE_GRAINED_PREFIX,
-            ));
+            );
         }
         TokenKind::OAuth => {
-            system.log(&format!(
-                "WARN - paseo agent GitHub auth: detected an OAuth token in {}; wrote {} but fine-grained PATs (prefix `{}`) are recommended because they can be restricted to specific repositories and permissions, while OAuth tokens cannot. See CONTRIBUTING.md.",
+            log::warn!(
+                "paseo agent GitHub auth: detected an OAuth token in {}; wrote {} but fine-grained PATs (prefix `{}`) are recommended because they can be restricted to specific repositories and permissions, while OAuth tokens cannot. See CONTRIBUTING.md.",
                 token_file.display(),
                 settings_path.display(),
                 FINE_GRAINED_PREFIX,
-            ));
+            );
         }
     }
 

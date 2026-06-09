@@ -10,7 +10,6 @@ mock! {
     CrossBuildSystemMock {}
     impl CrossBuildSystem for CrossBuildSystemMock {
         fn host_os(&self) -> &'static str;
-        fn print_info(&self, message: &str);
         fn list_installed_targets(&self) -> anyhow::Result<String>;
         fn install_target(&self, triple: &str) -> anyhow::Result<()>;
         fn is_executable_in_path(&self, name: &str) -> bool;
@@ -26,12 +25,9 @@ mock! {
 
 const TRIPLE: &str = "x86_64-pc-windows-msvc";
 
-/// Build a mock with `print_info` swallowing any call. Callers
-/// configure the remaining expectations.
+/// Build a mock with no expectations. Callers configure them.
 fn base_mock() -> MockCrossBuildSystemMock {
-    let mut mock = MockCrossBuildSystemMock::new();
-    mock.expect_print_info().returning(|_| ());
-    mock
+    MockCrossBuildSystemMock::new()
 }
 
 #[test]

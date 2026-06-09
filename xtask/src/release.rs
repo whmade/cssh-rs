@@ -496,10 +496,12 @@ impl ReleaseSystem for RealSystem {
 
     fn prompt_user(&self, message: &str) -> Result<String> {
         use std::io::Write;
-        print!("{message}");
-        std::io::stdout()
-            .flush()
-            .context("failed to flush stdout")?;
+        // Interactive prompt: write the question directly to stdout (no
+        // timestamp/level prefix from the logger) and flush so the
+        // cursor sits next to the prompt before stdin is read.
+        let mut stdout = std::io::stdout();
+        write!(stdout, "{message}").context("failed to write prompt")?;
+        stdout.flush().context("failed to flush stdout")?;
         let mut input = String::new();
         std::io::stdin()
             .read_line(&mut input)
@@ -622,7 +624,7 @@ fn ensure_maintenance_branch_ready<S: ReleaseSystem>(
     system: &S,
     maintenance_branch: &str,
 ) -> Result<()> {
-    println!("INFO - Fetching origin to check maintenance branch state");
+    log::info!("Fetching origin to check maintenance branch state");
     system
         .git_fetch()
         .context("failed to fetch from origin - cannot determine maintenance branch state")?;
@@ -632,8 +634,8 @@ fn ensure_maintenance_branch_ready<S: ReleaseSystem>(
 
     match (local_exists, origin_exists) {
         (false, false) => {
-            println!(
-                "INFO - Maintenance branch {maintenance_branch} does not exist; \
+            log::info!(
+                "Maintenance branch {maintenance_branch} does not exist; \
                  creating from current HEAD and pushing to origin"
             );
             system.git_checkout_new_branch(maintenance_branch)?;
@@ -644,8 +646,8 @@ fn ensure_maintenance_branch_ready<S: ReleaseSystem>(
             ])?;
         }
         (true, false) => {
-            println!(
-                "INFO - Maintenance branch {maintenance_branch} exists locally only; \
+            log::info!(
+                "Maintenance branch {maintenance_branch} exists locally only; \
                  switching to it and pushing to origin"
             );
             system.git_checkout(maintenance_branch)?;
@@ -656,15 +658,15 @@ fn ensure_maintenance_branch_ready<S: ReleaseSystem>(
             ])?;
         }
         (false, true) => {
-            println!(
-                "INFO - Maintenance branch {maintenance_branch} exists on origin only; \
+            log::info!(
+                "Maintenance branch {maintenance_branch} exists on origin only; \
                  creating a local tracking branch"
             );
             system.git_checkout(maintenance_branch)?;
         }
         (true, true) => {
-            println!(
-                "INFO - Maintenance branch {maintenance_branch} exists locally and on \
+            log::info!(
+                "Maintenance branch {maintenance_branch} exists locally and on \
                  origin; switching to local branch"
             );
             system.git_checkout(maintenance_branch)?;
@@ -729,8 +731,8 @@ pub fn prepare_release<S: ReleaseSystem>(system: &S) -> Result<()> {
         .parse()
         .context("failed to parse current version as semver")?;
 
-    println!("INFO - Current branch: {current_branch}");
-    println!("INFO - Current version: {current_version}");
+    log::info!("Current branch: {current_branch}");
+    log::info!("Current version: {current_version}");
 
     let (suggested_type, suggested_version) =
         suggest_next_version(&current_version, &current_branch)?;
@@ -772,30 +774,30 @@ pub fn prepare_release<S: ReleaseSystem>(system: &S) -> Result<()> {
     };
     let pr_branch = opens_pr.then(|| format!("release-{next_version}"));
 
-    println!("INFO - Preparing {actual_type} release: {current_version} -> {next_version}");
-    println!("INFO - Maintenance branch: {maintenance_branch}");
+    log::info!("Preparing {actual_type} release: {current_version} -> {next_version}");
+    log::info!("Maintenance branch: {maintenance_branch}");
 
     if releases_from_main {
         ensure_maintenance_branch_ready(system, &maintenance_branch)?;
     }
 
     if let Some(pr_branch_name) = pr_branch.as_deref() {
-        println!("INFO - Creating release branch: {pr_branch_name}");
+        log::info!("Creating release branch: {pr_branch_name}");
         system.git_checkout_new_branch(pr_branch_name)?;
     }
 
-    println!("INFO - Updating Cargo.toml version to {next_version}");
+    log::info!("Updating Cargo.toml version to {next_version}");
     let updated_cargo = set_cargo_toml_version(&cargo_toml, &next_version.to_string())?;
     system.write_cargo_toml(&updated_cargo)?;
 
-    println!("INFO - Updating Cargo.lock");
+    log::info!("Updating Cargo.lock");
     system.cargo_update_workspace()?;
 
-    println!("INFO - Generating changelog");
+    log::info!("Generating changelog");
     system.generate_changelog()?;
 
     let commit_message = format!("Version {next_version}");
-    println!("INFO - Committing: {commit_message}");
+    log::info!("Committing: {commit_message}");
     system.git_add(&[
         "Cargo.toml".to_owned(),
         "Cargo.lock".to_owned(),
@@ -808,30 +810,30 @@ pub fn prepare_release<S: ReleaseSystem>(system: &S) -> Result<()> {
     system.git_commit(&commit_message, true)?;
 
     if let Some(pr_branch_name) = pr_branch.as_deref() {
-        println!("INFO - Pushing release branch: {pr_branch_name}");
+        log::info!("Pushing release branch: {pr_branch_name}");
         system.git_push(&[
             "-u".to_owned(),
             "origin".to_owned(),
             pr_branch_name.to_owned(),
         ])?;
 
-        println!("INFO - Opening PR against {maintenance_branch}");
+        log::info!("Opening PR against {maintenance_branch}");
         system.gh_pr_create(&maintenance_branch)?;
 
-        println!(
-            "INFO - Release {next_version} prepared on branch {pr_branch_name} \
+        log::info!(
+            "Release {next_version} prepared on branch {pr_branch_name} \
              with PR against {maintenance_branch}"
         );
-        println!(
-            "INFO - After the PR is merged, switch to {maintenance_branch}, \
+        log::info!(
+            "After the PR is merged, switch to {maintenance_branch}, \
              pull, and run `cargo xtask create-release-tag` to tag the release"
         );
     } else {
-        println!("INFO - Pushing to remote");
+        log::info!("Pushing to remote");
         system.git_push(&[])?;
 
-        println!("INFO - Release {next_version} prepared on branch {maintenance_branch}");
-        println!("INFO - Run `cargo xtask create-release-tag` to tag the release");
+        log::info!("Release {next_version} prepared on branch {maintenance_branch}");
+        log::info!("Run `cargo xtask create-release-tag` to tag the release");
     }
     Ok(())
 }
@@ -869,8 +871,8 @@ pub fn create_release_tag<S: ReleaseSystem>(system: &S) -> Result<()> {
         .parse()
         .context("failed to parse version as semver")?;
 
-    println!("INFO - Current branch: {current_branch}");
-    println!("INFO - Version to tag: {version}");
+    log::info!("Current branch: {current_branch}");
+    log::info!("Version to tag: {version}");
 
     let existing_tag = system.git_tag_list(&version.to_string())?;
     if !existing_tag.trim().is_empty() {
@@ -888,9 +890,9 @@ pub fn create_release_tag<S: ReleaseSystem>(system: &S) -> Result<()> {
         );
     }
 
-    println!("INFO - Fetching latest changes from remote");
+    log::info!("Fetching latest changes from remote");
     if let Err(e) = system.git_fetch() {
-        eprintln!("WARN - Failed to fetch from remote, continuing anyway: {e}");
+        log::warn!("Failed to fetch from remote, continuing anyway: {e}");
     }
 
     let behind = system.git_rev_list_count_behind(&current_branch)?;
@@ -902,19 +904,19 @@ pub fn create_release_tag<S: ReleaseSystem>(system: &S) -> Result<()> {
         "About to create and push tag '{version}'. Continue? [Y/n]: "
     ))?;
     if answer.eq_ignore_ascii_case("n") || answer.eq_ignore_ascii_case("no") {
-        println!("INFO - Tag creation cancelled");
+        log::info!("Tag creation cancelled");
         return Ok(());
     }
 
     let tag_message = format!("Version {version}");
-    println!("INFO - Creating annotated tag: {version}");
+    log::info!("Creating annotated tag: {version}");
     system.git_create_annotated_tag(&version.to_string(), &tag_message)?;
 
-    println!("INFO - Pushing tag to remote");
+    log::info!("Pushing tag to remote");
     system.git_push_tag(&version.to_string())?;
 
-    println!("INFO - Tag '{version}' created and pushed");
-    println!("INFO - Check: https://github.com/whmade/cssh-rs/actions/workflows/release.yml");
+    log::info!("Tag '{version}' created and pushed");
+    log::info!("Check: https://github.com/whmade/cssh-rs/actions/workflows/release.yml");
     Ok(())
 }
 

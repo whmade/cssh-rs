@@ -86,13 +86,6 @@ pub trait TypographySystem {
     ///
     /// Returns an error if the file cannot be read.
     fn read_file(&self, path: &Path) -> Result<Vec<u8>>;
-
-    /// Emit a message to the user (informational or warning).
-    ///
-    /// # Arguments
-    ///
-    /// * `msg` - Message to display.
-    fn log(&self, msg: &str);
 }
 
 /// Production implementation of [`TypographySystem`].
@@ -128,10 +121,6 @@ impl TypographySystem for RealSystem {
 
     fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
         std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))
-    }
-
-    fn log(&self, msg: &str) {
-        eprintln!("{msg}");
     }
 }
 
@@ -301,38 +290,41 @@ pub fn check_typography<S: TypographySystem>(system: &S) -> Result<()> {
         let path = PathBuf::from(&rel);
         let size = system.file_size(&path)?;
         if size > MAX_FILE_BYTES {
-            system.log(&format!(
-                "WARNING - skipping {rel}: {size} bytes exceeds {MAX_FILE_BYTES} byte cap"
-            ));
+            log::warn!("skipping {rel}: {size} bytes exceeds {MAX_FILE_BYTES} byte cap");
             continue;
         }
         let bytes = system.read_file(&path)?;
         let (mut found, non_utf8) = scan_bytes(&rel, &bytes);
         if non_utf8 {
-            system.log(&format!("WARNING - skipping {rel}: not valid UTF-8"));
+            log::warn!("skipping {rel}: not valid UTF-8");
             continue;
         }
         violations.append(&mut found);
     }
 
     if violations.is_empty() {
-        println!("INFO - check-typography: no forbidden Unicode found.");
+        log::info!("check-typography: no forbidden Unicode found.");
         return Ok(());
     }
 
-    eprintln!(
-        "ERROR - check-typography: found {} forbidden Unicode character(s).",
-        violations.len()
+    let listing = violations
+        .iter()
+        .map(|v| {
+            format!(
+                "{}:{}:{} U+{:04X} {:?}",
+                v.path, v.line, v.column, v.character as u32, v.character
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    log::error!(
+        "check-typography: found {} forbidden Unicode character(s).\n\
+         Replace them with their ASCII equivalents (em/en-dashes -> '-',\n\
+         smart quotes -> ' or \", ellipsis -> ..., arrows -> -> / <-, etc.).\n\
+         \n\
+         {listing}",
+        violations.len(),
     );
-    eprintln!("        Replace them with their ASCII equivalents (em/en-dashes -> '-',");
-    eprintln!("        smart quotes -> ' or \", ellipsis -> ..., arrows -> -> / <-, etc.).");
-    eprintln!();
-    for v in &violations {
-        eprintln!(
-            "{}:{}:{} U+{:04X} {:?}",
-            v.path, v.line, v.column, v.character as u32, v.character
-        );
-    }
     bail!("found {} forbidden Unicode character(s)", violations.len())
 }
 

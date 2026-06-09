@@ -48,26 +48,26 @@ enum BuildPath {
 }
 
 fn build_native<S: WindowsMsvcSystem>(system: &S, release: bool) -> Result<()> {
-    system.print_info(&format!(
+    log::info!(
         "Running `cargo build {}--target {TRIPLE}`",
         if release { "--release " } else { "" }
-    ));
+    );
     system.run_cargo_build(TRIPLE, release)
 }
 
 fn build_via_xwin<S: WindowsMsvcSystem>(system: &S, host: &str, release: bool) -> Result<()> {
     ensure_llvm_tooling_available(system, host)?;
     ensure_cargo_xwin_installed(system)?;
-    system.print_info(concat!(
-        "Invoking cargo-xwin with XWIN_ACCEPT_LICENSE=1 to accept the ",
-        "Microsoft Software License Terms for the MSVC CRT and Windows SDK. ",
-        "cargo-xwin downloads them into your local cache on first use; ",
-        "nothing is checked into this repository.",
-    ));
-    system.print_info(&format!(
+    log::info!(
+        "Invoking cargo-xwin with XWIN_ACCEPT_LICENSE=1 to accept the \
+         Microsoft Software License Terms for the MSVC CRT and Windows SDK. \
+         cargo-xwin downloads them into your local cache on first use; \
+         nothing is checked into this repository."
+    );
+    log::info!(
         "Running `cargo xwin build {}--target {TRIPLE}`",
         if release { "--release " } else { "" }
-    ));
+    );
     system.run_cargo_xwin_build(TRIPLE, release)
 }
 
@@ -83,7 +83,7 @@ fn ensure_llvm_tooling_available<S: CrossBuildSystem>(system: &S, host: &str) ->
         .filter(|tool| !system.is_executable_in_path(tool))
         .collect();
     if missing.is_empty() {
-        system.print_info("LLVM tooling (llvm-rc, clang, lld-link) found in PATH");
+        log::info!("LLVM tooling (llvm-rc, clang, lld-link) found in PATH");
         return Ok(());
     }
     let hint = match host {
@@ -115,10 +115,10 @@ fn ensure_cargo_xwin_installed<S: WindowsMsvcSystem>(system: &S) -> Result<()> {
         .lines()
         .any(|line| line.split_whitespace().next() == Some("xwin"));
     if has_xwin {
-        system.print_info("cargo-xwin already installed");
+        log::info!("cargo-xwin already installed");
     } else {
         let version = system.read_cargo_xwin_version()?;
-        system.print_info(&format!("Installing cargo-xwin {version}"));
+        log::info!("Installing cargo-xwin {version}");
         system.install_cargo_subcommand("cargo-xwin", &version)?;
     }
     Ok(())

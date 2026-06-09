@@ -189,21 +189,23 @@ pub fn check_readme_help<S: ReadmeSystem>(system: &S) -> Result<()> {
     let readme_help = extract_readme_help_section(&readme)?;
 
     if actual_help == readme_help {
-        println!("INFO - README.md help output is up to date.");
+        log::info!("README.md help output is up to date.");
         return Ok(());
     }
 
-    eprintln!("ERROR - README.md help output is outdated!");
-    eprintln!();
-    eprintln!("Differences found:");
-    eprintln!("==================");
-    eprintln!("README has:");
-    eprintln!("{readme_help}");
-    eprintln!();
-    eprintln!("Current --help output:");
-    eprintln!("{actual_help}");
-    eprintln!();
-    eprintln!("==> Run `cargo xtask update-readme-help` to fix this.");
+    log::error!(
+        "README.md help output is outdated!\n\
+         \n\
+         Differences found:\n\
+         ==================\n\
+         README has:\n\
+         {readme_help}\n\
+         \n\
+         Current --help output:\n\
+         {actual_help}\n\
+         \n\
+         ==> Run `cargo xtask update-readme-help` to fix this."
+    );
 
     bail!("README.md help output is outdated")
 }
@@ -231,14 +233,14 @@ pub fn update_readme_help<S: ReadmeSystem>(system: &S) -> Result<bool> {
     let readme_help = extract_readme_help_section(&readme)?;
 
     if actual_help == readme_help {
-        println!("INFO - README.md help section is up to date, nothing to be done.");
+        log::info!("README.md help section is up to date, nothing to be done.");
         return Ok(false);
     }
 
-    println!("WARNING - README.md help section is outdated - fixing it.");
+    log::warn!("README.md help section is outdated - fixing it.");
     let new_readme = replace_readme_help_section(&readme, &actual_help)?;
     system.write_readme(&new_readme)?;
-    println!("INFO - README.md help section has been updated with current --help output.");
+    log::info!("README.md help section has been updated with current --help output.");
 
     Ok(true)
 }

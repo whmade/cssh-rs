@@ -136,7 +136,7 @@ pub fn set_changelogging_version(changelogging_content: &str, version: &str) -> 
 pub fn generate_changelog<S: ChangelogSystem>(system: &S) -> Result<()> {
     let cargo_toml = system.read_cargo_toml()?;
     let version = extract_version_from_cargo_toml(&cargo_toml)?;
-    println!("Generating changelog for version {version}");
+    log::info!("Generating changelog for version {version}");
 
     let changelogging_toml = system.read_changelogging_toml()?;
     let updated = set_changelogging_version(&changelogging_toml, &version)?;

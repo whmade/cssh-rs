@@ -75,18 +75,16 @@ where
     let host = system.host_os();
     let triple = target.triple();
     let profile = if release { "release" } else { "debug" };
-    system.print_info(&format!(
-        "Cross-building {triple} from {host} host ({profile} profile)"
-    ));
+    log::info!("Cross-building {triple} from {host} host ({profile} profile)");
 
     match target {
         Target::X86_64PcWindowsMsvc => strategy::windows_msvc::build(system, release)?,
     }
 
-    system.print_info(&format!(
+    log::info!(
         "Binary built: target/{triple}/{profile}/{}",
         target.binary_filename()
-    ));
+    );
     Ok(())
 }
 
@@ -100,9 +98,9 @@ pub(crate) fn ensure_rust_target_installed<S: CrossBuildSystem>(
 ) -> Result<()> {
     let installed = system.list_installed_targets()?;
     if installed.lines().any(|line| line.trim() == triple) {
-        system.print_info(&format!("Rust target {triple} already installed"));
+        log::info!("Rust target {triple} already installed");
     } else {
-        system.print_info(&format!("Installing Rust target {triple}"));
+        log::info!("Installing Rust target {triple}");
         system.install_target(triple)?;
     }
     Ok(())

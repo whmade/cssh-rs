@@ -15,7 +15,6 @@ mock! {
         fn list_tracked_files(&self) -> Result<Vec<String>>;
         fn file_size(&self, path: &Path) -> Result<u64>;
         fn read_file(&self, path: &Path) -> Result<Vec<u8>>;
-        fn log(&self, msg: &str);
     }
 }
 
@@ -282,7 +281,6 @@ fn test_check_typography_skips_oversized_file() {
     mock.expect_list_tracked_files()
         .returning(|| Ok(vec!["huge.md".to_owned()]));
     mock.expect_file_size().returning(|_| Ok(10 * 1024 * 1024));
-    mock.expect_log().returning(|_| ());
     // read_file must NOT be called for an oversized file.
 
     // Act
@@ -301,7 +299,6 @@ fn test_check_typography_skips_non_utf8_file() {
     mock.expect_file_size().returning(|_| Ok(4));
     mock.expect_read_file()
         .returning(|_| Ok(vec![0x66, 0x6F, 0x80, 0x6F]));
-    mock.expect_log().returning(|_| ());
 
     // Act
     let result = check_typography(&mock);

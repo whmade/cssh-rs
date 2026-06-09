@@ -15,9 +15,18 @@ clap          = { version = "4", features = ["derive"] }
 cssh-rs-meta  = { path = "../cssh-rs-meta" }
 toml_edit     = "0.25"
 semver        = "1.0"
+# Logging: same crates + versions as cssh-rs-core, so xtask output and
+# the app's log files share one timestamp/level format.
+log           = "0.4.31"
+log-panics    = "2.1.0"
+simplelog     = "0.12.2"
+# `time` provides the types that `simplelog::format_description!` expands to.
+time          = "0.3.47"
 
 [dev-dependencies]
-mockall = "0.14"
+mockall         = "0.14"
+# Thread-local log capture for tests that assert on log output.
+testing_logger  = "0.1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
