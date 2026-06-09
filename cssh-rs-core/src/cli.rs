@@ -14,7 +14,7 @@ use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use mockall::{automock, predicate::*};
 use windows::Win32::UI::HiDpi::PROCESS_PER_MONITOR_DPI_AWARE;
 
-const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+use cssh_rs_meta::PACKAGE_NAME;
 
 /// Cross-platform cluster SSH tool
 ///
@@ -324,7 +324,7 @@ impl Entrypoint for MainEntrypoint {
 fn show_interactive_prompt<O: Output>(output: &mut O) {
     output.println("\n=== Interactive Mode ===");
     output.println(&format!(
-        "Enter your {PKG_NAME} arguments (or press Enter to exit):"
+        "Enter your {PACKAGE_NAME} arguments (or press Enter to exit):"
     ));
     output.println("Example: -u myuser host1 host2 host3");
     output.println("Example: --help");
@@ -470,7 +470,7 @@ async fn run_interactive_mode<
 
                 // Parse the input as command line arguments
                 let input_args: Vec<&str> = input_str.split_whitespace().collect();
-                let mut full_args = vec![PKG_NAME];
+                let mut full_args = vec![PACKAGE_NAME];
                 full_args.extend(input_args);
 
                 match Args::try_parse_from(full_args) {
@@ -555,7 +555,7 @@ pub async fn main<
         }
     }
 
-    let config_path = format!("{PKG_NAME}-config.toml");
+    let config_path = format!("{PACKAGE_NAME}-config.toml");
     let config_on_disk: ConfigOpt = config_manager.load_config(&config_path).unwrap();
     let config: Config = config_on_disk.into();
 

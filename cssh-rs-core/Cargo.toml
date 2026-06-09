@@ -12,6 +12,7 @@ bracoxide = "0.1.8"
 chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive"] }
 cli-clipboard = "0.4.0"
+cssh-rs-meta = { path = "../cssh-rs-meta" }
 cssh-rs-platform-windows = { path = "../cssh-rs-platform-windows" }
 cssh-rs-protocol = { path = "../cssh-rs-protocol" }
 log = "0.4.31"

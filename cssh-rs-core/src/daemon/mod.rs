@@ -16,10 +16,12 @@ use crate::get_console_window_handle;
 use crate::utils::config::{Cluster, DaemonConfig, EdgeBehavior};
 use crate::utils::debug::StringRepr;
 use crate::utils::windows::{clear_screen, set_console_color, WindowsApi};
+use cssh_rs_meta::PACKAGE_NAME;
+
 use crate::{
     current_exe_path, spawn_console_process,
     utils::{
-        constants::{PIPE_NAME, PKG_NAME},
+        constants::PIPE_NAME,
         windows::{
             arrange_console, get_console_input_buffer, read_keyboard_input,
             set_console_border_color,
@@ -591,7 +593,7 @@ impl<'a> Daemon<'a> {
     /// is moved to the foreground and receives focus.
     async fn launch<W: WindowsApi + Clone + 'static>(mut self, windows_api: &W) {
         windows_api
-            .set_console_title(format!("{PKG_NAME} daemon").as_str())
+            .set_console_title(format!("{PACKAGE_NAME} daemon").as_str())
             .unwrap();
         set_console_color(
             windows_api,

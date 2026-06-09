@@ -1,5 +1,6 @@
 //! Tests for the release module.
 
+use cssh_rs_meta::PACKAGE_NAME;
 use mockall::mock;
 use semver::Version;
 
@@ -38,7 +39,7 @@ mock! {
 
 fn cargo_toml_with_version(version: &str) -> String {
     format!(
-        "[workspace]\nmembers = [\"xtask\"]\n\n[package]\nname = \"cssh-rs\"\nversion = \"{version}\"\nedition = \"2021\"\n"
+        "[workspace]\nmembers = [\"xtask\"]\n\n[package]\nname = \"{PACKAGE_NAME}\"\nversion = \"{version}\"\nedition = \"2021\"\n"
     )
 }
 
@@ -137,7 +138,7 @@ fn test_set_cargo_toml_version_preserves_other_fields() {
 
     // Assert
     let doc: toml_edit::DocumentMut = result.parse().unwrap();
-    assert_eq!(doc["package"]["name"].as_str().unwrap(), "cssh-rs");
+    assert_eq!(doc["package"]["name"].as_str().unwrap(), PACKAGE_NAME);
     assert_eq!(doc["package"]["edition"].as_str().unwrap(), "2021");
 }
 

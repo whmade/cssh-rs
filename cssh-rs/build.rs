@@ -1,16 +1,15 @@
-use std::path::Path;
+use cssh_rs_meta::PACKAGE_NAME;
+use std::path::PathBuf;
 use svg_to_ico::svg_to_ico;
 extern crate embed_resource;
 
 fn main() {
-    svg_to_ico(
-        Path::new("res/cssh-rs.svg"),
-        96.0,
-        Path::new("res/cssh-rs.ico"),
-        &[16, 24, 32, 48, 64, 128, 256],
-    )
-    .expect("Failed to convert SVG to ICO");
-    embed_resource::compile_for("res/cssh-rs.rc", ["cssh-rs"], embed_resource::NONE)
+    let svg_path = PathBuf::from(format!("res/{PACKAGE_NAME}.svg"));
+    let ico_path = PathBuf::from(format!("res/{PACKAGE_NAME}.ico"));
+    let rc_path = format!("res/{PACKAGE_NAME}.rc");
+    svg_to_ico(&svg_path, 96.0, &ico_path, &[16, 24, 32, 48, 64, 128, 256])
+        .expect("Failed to convert SVG to ICO");
+    embed_resource::compile_for(&rc_path, [PACKAGE_NAME], embed_resource::NONE)
         .manifest_required()
         .unwrap();
 }

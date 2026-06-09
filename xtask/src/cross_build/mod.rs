@@ -15,6 +15,7 @@ pub mod system;
 
 use anyhow::Result;
 use clap::ValueEnum;
+use cssh_rs_meta::PACKAGE_NAME;
 
 pub use system::{CrossBuildSystem, RealSystem};
 
@@ -45,9 +46,9 @@ impl Target {
 
     /// Return the executable filename cargo emits for this target,
     /// including any platform-specific extension (e.g. `.exe`).
-    pub fn binary_filename(self) -> &'static str {
+    pub fn binary_filename(self) -> String {
         match self {
-            Self::X86_64PcWindowsMsvc => "cssh-rs.exe",
+            Self::X86_64PcWindowsMsvc => format!("{PACKAGE_NAME}.exe"),
         }
     }
 }

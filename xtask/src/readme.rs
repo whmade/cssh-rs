@@ -15,11 +15,15 @@
 //! output. [`update_readme_help`] rewrites the README when they differ and
 //! signals the change to the caller so a pre-commit hook can abort.
 
+use std::sync::LazyLock;
+
 use anyhow::{bail, Context, Result};
+use cssh_rs_meta::PACKAGE_NAME;
 
 const START_MARKER: &str = "<!-- HELP_OUTPUT_START -->";
 const END_MARKER: &str = "<!-- HELP_OUTPUT_END -->";
-const PREAMBLE: &str = "\r\n```cmd\r\ncssh-rs.exe --help\r\n";
+static PREAMBLE: LazyLock<String> =
+    LazyLock::new(|| format!("\r\n```cmd\r\n{PACKAGE_NAME}.exe --help\r\n"));
 const POSTAMBLE: &str = "\r\n```\r\n";
 
 /// All side-effecting operations required by this module.
@@ -56,9 +60,11 @@ pub struct RealSystem;
 impl ReadmeSystem for RealSystem {
     fn get_help_output(&self) -> Result<String> {
         let output = std::process::Command::new("cargo")
-            .args(["run", "--package", "cssh-rs", "--", "--help"])
+            .args(["run", "--package", PACKAGE_NAME, "--", "--help"])
             .output()
-            .context("failed to run `cargo run --package cssh-rs -- --help`")?;
+            .with_context(|| {
+                format!("failed to run `cargo run --package {PACKAGE_NAME} -- --help`")
+            })?;
         let raw = String::from_utf8_lossy(&output.stdout).into_owned();
         Ok(raw)
     }

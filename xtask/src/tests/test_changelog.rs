@@ -1,5 +1,8 @@
 //! Tests for the changelog module.
 
+use std::sync::LazyLock;
+
+use cssh_rs_meta::PACKAGE_NAME;
 use mockall::mock;
 
 use crate::changelog::{
@@ -16,25 +19,20 @@ mock! {
     }
 }
 
-const CARGO_TOML: &str = r#"[package]
-name = "cssh-rs"
-version = "1.2.3"
-edition = "2021"
-"#;
+static CARGO_TOML: LazyLock<String> = LazyLock::new(|| {
+    format!("[package]\nname = \"{PACKAGE_NAME}\"\nversion = \"1.2.3\"\nedition = \"2021\"\n")
+});
 
-const CHANGELOGGING_TOML: &str = r#"[context]
-name = "cssh-rs"
-version = "0.0.0"
-url = "https://github.com/whmade/cssh-rs"
-
-[paths]
-directory = "news"
-"#;
+static CHANGELOGGING_TOML: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "[context]\nname = \"{PACKAGE_NAME}\"\nversion = \"0.0.0\"\nurl = \"https://github.com/whmade/cssh-rs\"\n\n[paths]\ndirectory = \"news\"\n"
+    )
+});
 
 #[test]
 fn test_extract_version_from_cargo_toml_valid() {
     // Arrange / Act
-    let result = extract_version_from_cargo_toml(CARGO_TOML).unwrap();
+    let result = extract_version_from_cargo_toml(&CARGO_TOML).unwrap();
 
     // Assert
     assert_eq!(result, "1.2.3");
@@ -43,10 +41,10 @@ fn test_extract_version_from_cargo_toml_valid() {
 #[test]
 fn test_extract_version_from_cargo_toml_missing_key() {
     // Arrange
-    let content = "[package]\nname = \"cssh-rs\"\n";
+    let content = format!("[package]\nname = \"{PACKAGE_NAME}\"\n");
 
     // Act
-    let result = extract_version_from_cargo_toml(content);
+    let result = extract_version_from_cargo_toml(&content);
 
     // Assert
     assert!(result.is_err());
@@ -67,7 +65,7 @@ fn test_extract_version_from_cargo_toml_invalid_toml() {
 #[test]
 fn test_set_changelogging_version_updates_version() {
     // Arrange / Act
-    let result = set_changelogging_version(CHANGELOGGING_TOML, "1.2.3").unwrap();
+    let result = set_changelogging_version(&CHANGELOGGING_TOML, "1.2.3").unwrap();
 
     // Assert
     let doc: toml_edit::DocumentMut = result.parse().unwrap();
@@ -77,11 +75,11 @@ fn test_set_changelogging_version_updates_version() {
 #[test]
 fn test_set_changelogging_version_preserves_other_keys() {
     // Arrange / Act
-    let result = set_changelogging_version(CHANGELOGGING_TOML, "1.2.3").unwrap();
+    let result = set_changelogging_version(&CHANGELOGGING_TOML, "1.2.3").unwrap();
 
     // Assert
     let doc: toml_edit::DocumentMut = result.parse().unwrap();
-    assert_eq!(doc["context"]["name"].as_str().unwrap(), "cssh-rs");
+    assert_eq!(doc["context"]["name"].as_str().unwrap(), PACKAGE_NAME);
     assert_eq!(
         doc["context"]["url"].as_str().unwrap(),
         "https://github.com/whmade/cssh-rs"
