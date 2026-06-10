@@ -60,6 +60,7 @@ features = [
 [dev-dependencies]
 cssh-rs-platform-windows = { path = "../cssh-rs-platform-windows", features = ["mock"] }
 mockall = "0.14.0"
+tokio = { version = "1.52.3", features = ["test-util"] }
 toml = "1.1"
 
 [lints.rust]

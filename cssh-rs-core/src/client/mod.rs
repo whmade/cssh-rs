@@ -8,6 +8,7 @@ use log::{error, info, warn};
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
+use std::process::ExitStatus;
 use std::time::Duration;
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
 
@@ -19,8 +20,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::{io::Interest, net::windows::named_pipe::ClientOptions};
 use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD,
-    LEFT_ALT_PRESSED, RIGHT_ALT_PRESSED, SHIFT_PRESSED,
+    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
+    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, RIGHT_ALT_PRESSED, SHIFT_PRESSED,
 };
 
 use cssh_rs_protocol::{
@@ -63,6 +64,10 @@ enum ReadWriteResult {
 /// Duration of the action-feedback flash painted on a highlighted client
 /// when the user toggles the state.
 const HIGHLIGHT_FLASH_DURATION: Duration = Duration::from_millis(250);
+
+/// Grace period for the SSH child to exit after CTRL_C_EVENT before
+/// [`shutdown_child`] force-kills it.
+const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
 /// Resolve the console color for a `(state, highlighted)` combination;
 /// highlight overlays the disabled color.
@@ -335,6 +340,10 @@ async fn launch_ssh_process(
     let arguments = build_ssh_arguments(username, host, port, config);
     let child = Command::new(&config.program)
         .args(arguments.clone())
+        // Last-resort backstop: if the client exits without reaching
+        // [`shutdown_child`] (e.g. a panic), the runtime still terminates
+        // the child so no orphan keeps the console window alive.
+        .kill_on_drop(true)
         .spawn()
         .unwrap_or_else(|err| {
             let args: String = arguments.join(" ");
@@ -345,6 +354,98 @@ async fn launch_ssh_process(
             )
         });
     return child;
+}
+
+/// Minimal view of the SSH child process used by [`shutdown_child`].
+///
+/// Abstracts [`Child`] so the shutdown sequence can be tested without
+/// spawning real processes.
+trait ChildProcess {
+    /// Wait until the child exits.
+    ///
+    /// # Returns
+    ///
+    /// The child's [`ExitStatus`], or the error reported while waiting.
+    async fn wait(&mut self) -> io::Result<ExitStatus>;
+
+    /// Force-kill the child and wait until it has terminated.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` once the child has been terminated, or the error reported
+    /// by the kill.
+    async fn kill(&mut self) -> io::Result<()>;
+}
+
+impl ChildProcess for Child {
+    async fn wait(&mut self) -> io::Result<ExitStatus> {
+        return Child::wait(self).await;
+    }
+
+    async fn kill(&mut self) -> io::Result<()> {
+        return Child::kill(self).await;
+    }
+}
+
+/// Guarantee the SSH child terminates once the client's run loop has ended.
+///
+/// Sends CTRL_C_EVENT to every process attached to this console so a
+/// cooperative child (e.g. ssh.exe) can exit gracefully, waits up to
+/// [`CHILD_EXIT_GRACE_PERIOD`], then force-kills the child if it is still
+/// running. Without the force-kill, children that handle CTRL+C themselves
+/// (e.g. cmd.exe) stay attached to the console and keep the client window
+/// open indefinitely.
+///
+/// # Arguments
+///
+/// * `api`   - The Windows API implementation to use.
+/// * `child` - Handle to the SSH child process.
+async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
+    // GenerateConsoleCtrlEvent with process group 0 signals every process
+    // attached to this console, including this client process itself.
+    // Shield the client first so it survives its own CTRL_C_EVENT long
+    // enough to enforce the kill below; if the shield cannot be
+    // installed, skip the graceful signal entirely and rely on the
+    // force-kill path so the client does not race its own CTRL_C_EVENT.
+    // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
+    let shielded = match api.set_console_ctrl_handler(true) {
+        Ok(()) => true,
+        Err(err) => {
+            warn!(
+                "Failed to shield client from its own CTRL_C_EVENT; \
+                 skipping graceful signal and force-killing the child: {}",
+                err
+            );
+            false
+        }
+    };
+    if shielded {
+        if let Err(err) = api.generate_console_ctrl_event(CTRL_C_EVENT, 0) {
+            warn!(
+                "Failed to send CTRL_C_EVENT to console process group: {}",
+                err
+            );
+        }
+        match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
+            Ok(Ok(exit_status)) => {
+                info!("Child exited after CTRL_C_EVENT: {}", exit_status);
+                return;
+            }
+            Ok(Err(err)) => {
+                warn!("Failed to wait for child exit: {}", err);
+            }
+            Err(_) => {
+                warn!(
+                    "Child still running {}ms after CTRL_C_EVENT; force-killing it",
+                    CHILD_EXIT_GRACE_PERIOD.as_millis()
+                );
+            }
+        }
+    }
+    if let Err(err) = child.kill().await {
+        error!("Failed to kill child process: {}", err);
+    }
+    return;
 }
 
 /// Read all available daemon-to-client messages from the named pipe and apply them.
@@ -824,7 +925,7 @@ pub async fn main(
 
     // The title and visuals tasks are infinite by construction; if either
     // ever completes, that is a logic bug, not a shutdown path.
-    let child = tokio::select! {
+    let mut child = tokio::select! {
         child = child_task => child,
         _ = title_task => {
             panic!("Title task should never complete");
@@ -834,11 +935,7 @@ pub async fn main(
         }
     };
 
-    api.generate_console_ctrl_event(0, 0).unwrap_or_else(|err| {
-        error!("{}", err);
-        panic!("Failed to send `ctrl + c` to remaining client windows",)
-    });
-    drop(child);
+    shutdown_child(api, &mut child).await;
 }
 
 #[cfg(test)]

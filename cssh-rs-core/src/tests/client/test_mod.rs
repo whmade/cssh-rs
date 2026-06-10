@@ -12,7 +12,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
 use crate::client::{
     build_ssh_arguments, get_effective_color, get_flash_color, is_alt_shift_c_combination,
     paint_console_color, read_write_loop, resolve_username, run_visuals_loop, send_pid_handshake,
-    write_console_input, ReadWriteResult,
+    shutdown_child, write_console_input, ChildProcess, ReadWriteResult,
 };
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::MockWindowsApi;
@@ -1034,4 +1034,137 @@ async fn test_send_pid_handshake() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(deserialize_pid(&buf), std::process::id());
     handshake.await?;
     return Ok(());
+}
+
+/// Scripted [`ChildProcess`] stand-in for the [`shutdown_child`] tests.
+struct FakeChild {
+    /// Outcome `wait` resolves to; `None` makes `wait` pend forever,
+    /// simulating a child that survives CTRL_C_EVENT.
+    wait_outcome: Option<std::io::Result<std::process::ExitStatus>>,
+    /// Whether `kill` was invoked.
+    killed: bool,
+}
+
+impl ChildProcess for FakeChild {
+    async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        match self.wait_outcome.take() {
+            Some(outcome) => return outcome,
+            None => return std::future::pending().await,
+        }
+    }
+
+    async fn kill(&mut self) -> std::io::Result<()> {
+        self.killed = true;
+        return Ok(());
+    }
+}
+
+#[tokio::test]
+async fn test_shutdown_child_shields_then_signals_and_skips_kill_on_graceful_exit() {
+    use mockall::predicate::eq;
+    use std::os::windows::process::ExitStatusExt;
+    use windows::Win32::System::Console::CTRL_C_EVENT;
+
+    let mut sequence = mockall::Sequence::new();
+    let mut mock_api = MockWindowsApi::new();
+    // The shield must be installed before the group-0 CTRL_C_EVENT is
+    // generated - otherwise the client can be killed by its own signal
+    // before it can enforce the child's termination.
+    mock_api
+        .expect_set_console_ctrl_handler()
+        .times(1)
+        .with(eq(true))
+        .in_sequence(&mut sequence)
+        .returning(|_| return Ok(()));
+    mock_api
+        .expect_generate_console_ctrl_event()
+        .times(1)
+        .with(eq(CTRL_C_EVENT), eq(0u32))
+        .in_sequence(&mut sequence)
+        .returning(|_, _| return Ok(()));
+
+    let mut child = FakeChild {
+        wait_outcome: Some(Ok(std::process::ExitStatus::from_raw(0))),
+        killed: false,
+    };
+
+    shutdown_child(&mock_api, &mut child).await;
+
+    assert!(!child.killed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_shutdown_child_force_kills_child_that_survives_ctrl_c() {
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_set_console_ctrl_handler()
+        .times(1)
+        .returning(|_| return Ok(()));
+    mock_api
+        .expect_generate_console_ctrl_event()
+        .times(1)
+        .returning(|_, _| return Ok(()));
+
+    // A child that never exits on its own (e.g. cmd.exe handling CTRL+C)
+    // must be force-killed once the grace period elapses.
+    let mut child = FakeChild {
+        wait_outcome: None,
+        killed: false,
+    };
+
+    // start_paused freezes the tokio clock, so we must explicitly advance
+    // past the 500ms grace period to drive the timeout to completion.
+    tokio::join!(shutdown_child(&mock_api, &mut child), async {
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_millis(600)).await;
+    });
+
+    assert!(child.killed);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_shutdown_child_force_kills_child_when_shield_fails() {
+    let mut mock_api = MockWindowsApi::new();
+    // When the shield cannot be installed, the client must NOT generate a
+    // group-0 CTRL_C_EVENT - otherwise it would race its own signal and
+    // could be terminated before reaching the force-kill below. The shield
+    // failure must drive shutdown straight to the kill path.
+    mock_api
+        .expect_set_console_ctrl_handler()
+        .times(1)
+        .returning(|_| return Err(windows::core::Error::from_thread()));
+    mock_api.expect_generate_console_ctrl_event().times(0);
+
+    let mut child = FakeChild {
+        wait_outcome: None,
+        killed: false,
+    };
+
+    // Time is paused, but the unshielded path skips the timeout entirely
+    // and force-kills immediately - no clock advance is required.
+    shutdown_child(&mock_api, &mut child).await;
+
+    assert!(child.killed);
+}
+
+#[tokio::test]
+async fn test_shutdown_child_force_kills_child_when_wait_fails() {
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_set_console_ctrl_handler()
+        .times(1)
+        .returning(|_| return Ok(()));
+    mock_api
+        .expect_generate_console_ctrl_event()
+        .times(1)
+        .returning(|_, _| return Ok(()));
+
+    let mut child = FakeChild {
+        wait_outcome: Some(Err(std::io::Error::other("wait failed"))),
+        killed: false,
+    };
+
+    shutdown_child(&mock_api, &mut child).await;
+
+    assert!(child.killed);
 }
