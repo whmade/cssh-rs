@@ -383,7 +383,9 @@ impl ChildProcess for Child {
     }
 
     async fn kill(&mut self) -> io::Result<()> {
-        return Child::kill(self).await;
+        Child::start_kill(self)?;
+        Child::wait(self).await?;
+        return Ok(());
     }
 }
 
