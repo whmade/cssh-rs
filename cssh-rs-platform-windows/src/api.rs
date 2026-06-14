@@ -14,9 +14,9 @@ use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::Console::{
     FillConsoleOutputAttribute, GetConsoleProcessList, GetConsoleScreenBufferInfo,
-    GetConsoleWindow, GetStdHandle, ReadConsoleInputW, SetConsoleTextAttribute,
-    CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD, INPUT_RECORD, INPUT_RECORD_0,
-    STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    GetConsoleWindow, GetStdHandle, ReadConsoleInputW, SetConsoleCtrlHandler,
+    SetConsoleTextAttribute, CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD,
+    INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE};
 use windows::Win32::System::Console::{
@@ -241,6 +241,18 @@ pub trait WindowsApi: Send + Sync {
         ctrl_event: u32,
         process_group_id: u32,
     ) -> windows::core::Result<()>;
+
+    /// Sets whether the calling process ignores CTRL+C events.
+    ///
+    /// # Arguments
+    ///
+    /// * `ignore` - `true` to make the process ignore CTRL+C, `false` to
+    ///              restore default handling.
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure of the operation
+    fn set_console_ctrl_handler(&self, ignore: bool) -> windows::core::Result<()>;
 
     /// Get standard output handle
     ///
@@ -722,6 +734,12 @@ impl WindowsApi for DefaultWindowsApi {
         return unsafe {
             windows::Win32::System::Console::GenerateConsoleCtrlEvent(ctrl_event, process_group_id)
         };
+    }
+
+    fn set_console_ctrl_handler(&self, ignore: bool) -> windows::core::Result<()> {
+        // A null HandlerRoutine toggles whether this process ignores CTRL+C:
+        // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
+        return unsafe { SetConsoleCtrlHandler(None, ignore) };
     }
 
     fn get_stdout_handle(&self) -> windows::core::Result<HANDLE> {
