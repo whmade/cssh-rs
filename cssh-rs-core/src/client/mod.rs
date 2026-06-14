@@ -340,9 +340,7 @@ async fn launch_ssh_process(
     let arguments = build_ssh_arguments(username, host, port, config);
     let child = Command::new(&config.program)
         .args(arguments.clone())
-        // Last-resort backstop: if the client exits without reaching
-        // [`shutdown_child`] (e.g. a panic), the runtime still terminates
-        // the child so no orphan keeps the console window alive.
+        // Backstop for paths that bypass `shutdown_child` (e.g. a panic).
         .kill_on_drop(true)
         .spawn()
         .unwrap_or_else(|err| {
@@ -356,10 +354,7 @@ async fn launch_ssh_process(
     return child;
 }
 
-/// Minimal view of the SSH child process used by [`shutdown_child`].
-///
-/// Abstracts [`Child`] so the shutdown sequence can be tested without
-/// spawning real processes.
+/// Testable view of the SSH child process used by [`shutdown_child`].
 trait ChildProcess {
     /// Wait until the child exits.
     ///
@@ -372,8 +367,7 @@ trait ChildProcess {
     ///
     /// # Returns
     ///
-    /// `Ok(())` once the child has been terminated, or the error reported
-    /// by the kill.
+    /// `Ok(())` once terminated, or the error reported by the kill.
     async fn kill(&mut self) -> io::Result<()>;
 }
 
@@ -391,25 +385,18 @@ impl ChildProcess for Child {
 
 /// Guarantee the SSH child terminates once the client's run loop has ended.
 ///
-/// Sends CTRL_C_EVENT to every process attached to this console so a
-/// cooperative child (e.g. ssh.exe) can exit gracefully, waits up to
-/// [`CHILD_EXIT_GRACE_PERIOD`], then force-kills the child if it is still
-/// running. Without the force-kill, children that handle CTRL+C themselves
-/// (e.g. cmd.exe) stay attached to the console and keep the client window
-/// open indefinitely.
+/// Signals CTRL_C_EVENT for a graceful exit, then force-kills after
+/// [`CHILD_EXIT_GRACE_PERIOD`]; children that handle CTRL+C themselves
+/// (e.g. cmd.exe) would otherwise keep the client window open forever.
 ///
 /// # Arguments
 ///
 /// * `api`   - The Windows API implementation to use.
 /// * `child` - Handle to the SSH child process.
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // GenerateConsoleCtrlEvent with process group 0 signals every process
-    // attached to this console, including this client process itself.
-    // Shield the client first so it survives its own CTRL_C_EVENT long
-    // enough to enforce the kill below; if the shield cannot be
-    // installed, skip the graceful signal entirely and rely on the
-    // force-kill path so the client does not race its own CTRL_C_EVENT.
-    // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
+    // Group-0 CTRL_C_EVENT also signals this client, so shield it first to
+    // survive long enough to enforce the kill; skip the signal if shielding
+    // fails. https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
     let shielded = match api.set_console_ctrl_handler(true) {
         Ok(()) => true,
         Err(err) => {
