@@ -555,11 +555,7 @@ fn test_replay_input_record_signals_ctrl_c_in_processed_mode() {
     mock_api
         .expect_get_console_mode()
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
-    mock_api
-        .expect_set_console_ctrl_handler()
-        .times(1)
-        .with(eq(true))
-        .returning(|_| return Ok(()));
+    mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)
@@ -588,10 +584,7 @@ fn test_replay_input_record_signals_ctrl_break_in_processed_mode() {
     mock_api
         .expect_get_console_mode()
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
-    mock_api
-        .expect_set_console_ctrl_handler()
-        .times(1)
-        .returning(|_| return Ok(()));
+    mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)
@@ -617,7 +610,7 @@ fn test_replay_input_record_drops_ctrl_c_key_up_in_processed_mode() {
         .expect_get_console_mode()
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
     // Key-up must neither signal nor inject the record.
-    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api.expect_generate_console_ctrl_event().times(0);
     mock_api.expect_write_console_input().times(0);
 
@@ -639,7 +632,7 @@ fn test_replay_input_record_writes_ctrl_c_in_raw_mode() {
     mock_api
         .expect_get_console_mode()
         .returning(|_| return Ok(CONSOLE_MODE::default()));
-    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api.expect_generate_console_ctrl_event().times(0);
     mock_api
         .expect_write_console_input()
@@ -663,7 +656,7 @@ fn test_replay_input_record_writes_plain_key_without_querying_mode() {
     // A plain key is never a control event, so the mode is never queried.
     mock_api.expect_get_std_handle().times(0);
     mock_api.expect_get_console_mode().times(0);
-    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api.expect_generate_console_ctrl_event().times(0);
     mock_api
         .expect_write_console_input()
@@ -687,7 +680,7 @@ fn test_replay_input_record_falls_back_to_write_on_mode_query_error() {
     mock_api
         .expect_get_console_mode()
         .returning(|_| return Err(windows::core::Error::from_thread()));
-    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api.expect_generate_console_ctrl_event().times(0);
     mock_api
         .expect_write_console_input()
@@ -1262,24 +1255,16 @@ impl ChildProcess for FakeChild {
 }
 
 #[tokio::test]
-async fn test_shutdown_child_shields_then_signals_and_skips_kill_on_graceful_exit() {
+async fn test_shutdown_child_signals_and_skips_kill_on_graceful_exit() {
     use mockall::predicate::eq;
     use std::os::windows::process::ExitStatusExt;
     use windows::Win32::System::Console::CTRL_C_EVENT;
 
-    let mut sequence = mockall::Sequence::new();
     let mut mock_api = MockWindowsApi::new();
-    mock_api
-        .expect_set_console_ctrl_handler()
-        .times(1)
-        .with(eq(true))
-        .in_sequence(&mut sequence)
-        .returning(|_| return Ok(()));
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)
         .with(eq(CTRL_C_EVENT), eq(0u32))
-        .in_sequence(&mut sequence)
         .returning(|_, _| return Ok(()));
 
     let mut child = FakeChild {
@@ -1295,10 +1280,6 @@ async fn test_shutdown_child_shields_then_signals_and_skips_kill_on_graceful_exi
 #[tokio::test(start_paused = true)]
 async fn test_shutdown_child_force_kills_child_that_survives_ctrl_c() {
     let mut mock_api = MockWindowsApi::new();
-    mock_api
-        .expect_set_console_ctrl_handler()
-        .times(1)
-        .returning(|_| return Ok(()));
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)
@@ -1319,33 +1300,9 @@ async fn test_shutdown_child_force_kills_child_that_survives_ctrl_c() {
     assert!(child.killed);
 }
 
-#[tokio::test(start_paused = true)]
-async fn test_shutdown_child_force_kills_child_when_shield_fails() {
-    let mut mock_api = MockWindowsApi::new();
-    // No shield means no group-0 signal: it would race the client's own kill.
-    mock_api
-        .expect_set_console_ctrl_handler()
-        .times(1)
-        .returning(|_| return Err(windows::core::Error::from_thread()));
-    mock_api.expect_generate_console_ctrl_event().times(0);
-
-    let mut child = FakeChild {
-        wait_outcome: None,
-        killed: false,
-    };
-
-    shutdown_child(&mock_api, &mut child).await;
-
-    assert!(child.killed);
-}
-
 #[tokio::test]
 async fn test_shutdown_child_force_kills_child_when_wait_fails() {
     let mut mock_api = MockWindowsApi::new();
-    mock_api
-        .expect_set_console_ctrl_handler()
-        .times(1)
-        .returning(|_| return Ok(()));
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)

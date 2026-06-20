@@ -303,16 +303,9 @@ fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
 /// * `ctrl_event` - The control event to generate (`CTRL_C_EVENT` or
 ///                  `CTRL_BREAK_EVENT`).
 fn signal_console_ctrl_event(api: &dyn WindowsApi, ctrl_event: u32) {
-    // Group-0 signals every process on the console, including this client;
-    // shield first so the relay survives.
-    // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
-    if let Err(err) = api.set_console_ctrl_handler(true) {
-        warn!(
-            "Failed to shield client before relaying control event; dropping it: {}",
-            err
-        );
-        return;
-    }
+    // Group-0 signals every process on the console, including this client; the
+    // handler installed at startup shields the client so only the SSH child
+    // reacts. https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent
     if let Err(err) = api.generate_console_ctrl_event(ctrl_event, 0) {
         warn!("Failed to relay console control event: {}", err);
     }
@@ -489,41 +482,28 @@ impl ChildProcess for Child {
 /// * `api`   - The Windows API implementation to use.
 /// * `child` - Handle to the SSH child process.
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // Group-0 CTRL_C_EVENT also signals this client, so shield it first to
-    // survive long enough to enforce the kill; skip the signal if shielding
-    // fails. https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
-    let shielded = match api.set_console_ctrl_handler(true) {
-        Ok(()) => true,
-        Err(err) => {
-            warn!(
-                "Failed to shield client from its own CTRL_C_EVENT; \
-                 skipping graceful signal and force-killing the child: {}",
-                err
-            );
-            false
+    // Group-0 CTRL_C_EVENT also signals this client, but the handler installed
+    // at startup shields it, so the client survives to enforce the kill.
+    // https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent
+    if let Err(err) = api.generate_console_ctrl_event(CTRL_C_EVENT, 0) {
+        warn!(
+            "Failed to send CTRL_C_EVENT to console process group: {}",
+            err
+        );
+    }
+    match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
+        Ok(Ok(exit_status)) => {
+            info!("Child exited after CTRL_C_EVENT: {}", exit_status);
+            return;
         }
-    };
-    if shielded {
-        if let Err(err) = api.generate_console_ctrl_event(CTRL_C_EVENT, 0) {
-            warn!(
-                "Failed to send CTRL_C_EVENT to console process group: {}",
-                err
-            );
+        Ok(Err(err)) => {
+            warn!("Failed to wait for child exit: {}", err);
         }
-        match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
-            Ok(Ok(exit_status)) => {
-                info!("Child exited after CTRL_C_EVENT: {}", exit_status);
-                return;
-            }
-            Ok(Err(err)) => {
-                warn!("Failed to wait for child exit: {}", err);
-            }
-            Err(_) => {
-                warn!(
-                    "Child still running {}ms after CTRL_C_EVENT; force-killing it",
-                    CHILD_EXIT_GRACE_PERIOD.as_millis()
-                );
-            }
+        Err(_) => {
+            warn!(
+                "Child still running {}ms after CTRL_C_EVENT; force-killing it",
+                CHILD_EXIT_GRACE_PERIOD.as_millis()
+            );
         }
     }
     if let Err(err) = child.kill().await {
@@ -981,6 +961,12 @@ pub async fn main(
     cli_port: Option<u16>,
     config: &ClientConfig,
 ) {
+    // Shield the client from CTRL+C and CTRL+Break before any are relayed to
+    // the console process group, so only the SSH child reacts to them.
+    if let Err(err) = api.install_console_ctrl_handler() {
+        warn!("Failed to install console control handler: {}", err);
+    }
+
     let original_console_color = capture_original_console_color(api);
 
     let (state_sender, state_receiver) = watch::channel(ClientState::Active);
