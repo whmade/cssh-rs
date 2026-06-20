@@ -15,13 +15,25 @@ use serde_derive::{Deserialize, Serialize};
 
 /// Kind of plugin a manifest describes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum PluginKind {
     /// Opens a terminal window per host and launches the cssh-rs client
     /// inside it.
     Spawner,
     /// Places, raises, and retitles client windows after spawn.
     WindowManager,
+}
+
+/// Operating system a plugin can declare support for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Platform {
+    /// Microsoft Windows.
+    Windows,
+    /// Linux.
+    Linux,
+    /// Apple macOS.
+    Macos,
 }
 
 /// Parsed `cssh-rs-plugin.toml` manifest.
@@ -79,8 +91,8 @@ pub struct Capabilities {
 /// Operating systems a plugin supports (the `[platforms]` section).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Platforms {
-    /// Supported OS identifiers (e.g. `"windows"`, `"linux"`, `"macos"`).
-    pub supported: Vec<String>,
+    /// Operating systems the plugin runs on.
+    pub supported: Vec<Platform>,
 }
 
 /// How to launch the plugin executable (the `[runtime]` section).
