@@ -80,7 +80,8 @@ Mutter (GNOME on Wayland) is currently not planned.
 cssh-rs is a portable application and is not installed.<br>
 To download the cssh-rs application refer to the [Releases 📦](https://github.com/whmade/cssh-rs/releases) page.
 Each release ships a `cssh-rs-v<version>-x86_64-pc-windows-msvc.zip` archive
-with a `.sha256` checksum sibling you can verify with `sha256sum -c`.
+with a `.sha256` checksum sibling you can verify with
+`sha256sum -c <release-archive>.sha256`.
 
 > [!NOTE]
 > The released `cssh-rs.exe` is not code-signed. On first launch Windows
