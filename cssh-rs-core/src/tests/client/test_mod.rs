@@ -10,9 +10,10 @@ use windows::Win32::System::Console::{
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
 
 use crate::client::{
-    build_ssh_arguments, get_effective_color, get_flash_color, is_alt_shift_c_combination,
-    paint_console_color, read_write_loop, resolve_username, run_visuals_loop, send_pid_handshake,
-    shutdown_child, write_console_input, ChildProcess, ReadWriteResult,
+    build_ssh_arguments, console_ctrl_event_for, get_effective_color, get_flash_color,
+    is_alt_shift_c_combination, paint_console_color, read_write_loop, replay_input_record,
+    resolve_username, run_visuals_loop, send_pid_handshake, shutdown_child, write_console_input,
+    ChildProcess, ReadWriteResult,
 };
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::MockWindowsApi;
@@ -497,6 +498,209 @@ fn test_write_console_input() {
         // Execute the function under test
         write_console_input(&mock_api, test_input_record);
     }
+}
+
+/// Wrap a key event in an [`INPUT_RECORD_0`] for the replay tests.
+fn make_input_record(
+    virtual_key_code: u16,
+    control_key_state: u32,
+    key_down: bool,
+) -> windows::Win32::System::Console::INPUT_RECORD_0 {
+    return windows::Win32::System::Console::INPUT_RECORD_0 {
+        KeyEvent: create_test_key_event(key_down, virtual_key_code, control_key_state),
+    };
+}
+
+/// Return a mock std-input handle for the replay tests.
+fn fake_std_handle() -> windows::Win32::Foundation::HANDLE {
+    return windows::Win32::Foundation::HANDLE(0x1234 as *mut std::ffi::c_void);
+}
+
+#[test]
+fn test_console_ctrl_event_for_maps_ctrl_c_and_ctrl_break() {
+    use windows::Win32::System::Console::{
+        CTRL_BREAK_EVENT, CTRL_C_EVENT, LEFT_CTRL_PRESSED, RIGHT_CTRL_PRESSED,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_CANCEL};
+
+    let ctrl_c = create_test_key_event(true, VK_C.0, LEFT_CTRL_PRESSED);
+    assert_eq!(console_ctrl_event_for(&ctrl_c), Some(CTRL_C_EVENT));
+
+    let ctrl_c_right = create_test_key_event(true, VK_C.0, RIGHT_CTRL_PRESSED);
+    assert_eq!(console_ctrl_event_for(&ctrl_c_right), Some(CTRL_C_EVENT));
+
+    let ctrl_break = create_test_key_event(true, VK_CANCEL.0, LEFT_CTRL_PRESSED);
+    assert_eq!(console_ctrl_event_for(&ctrl_break), Some(CTRL_BREAK_EVENT));
+
+    // Bare C without Ctrl -> not a control event.
+    let bare_c = create_test_key_event(true, VK_C.0, 0);
+    assert_eq!(console_ctrl_event_for(&bare_c), None);
+
+    // Ctrl held but a different key -> not a control event.
+    let ctrl_a = create_test_key_event(true, VK_A.0, LEFT_CTRL_PRESSED);
+    assert_eq!(console_ctrl_event_for(&ctrl_a), None);
+}
+
+#[test]
+fn test_replay_input_record_signals_ctrl_c_in_processed_mode() {
+    use mockall::predicate::eq;
+    use windows::Win32::System::Console::{
+        CTRL_C_EVENT, ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED,
+    };
+
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_get_std_handle()
+        .returning(|_| return Ok(fake_std_handle()));
+    mock_api
+        .expect_get_console_mode()
+        .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
+    mock_api
+        .expect_set_console_ctrl_handler()
+        .times(1)
+        .with(eq(true))
+        .returning(|_| return Ok(()));
+    mock_api
+        .expect_generate_console_ctrl_event()
+        .times(1)
+        .with(eq(CTRL_C_EVENT), eq(0u32))
+        .returning(|_, _| return Ok(()));
+    mock_api.expect_write_console_input().times(0);
+
+    replay_input_record(
+        &mock_api,
+        make_input_record(VK_C.0, LEFT_CTRL_PRESSED, true),
+    );
+}
+
+#[test]
+fn test_replay_input_record_signals_ctrl_break_in_processed_mode() {
+    use mockall::predicate::eq;
+    use windows::Win32::System::Console::{
+        CTRL_BREAK_EVENT, ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL;
+
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_get_std_handle()
+        .returning(|_| return Ok(fake_std_handle()));
+    mock_api
+        .expect_get_console_mode()
+        .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
+    mock_api
+        .expect_set_console_ctrl_handler()
+        .times(1)
+        .returning(|_| return Ok(()));
+    mock_api
+        .expect_generate_console_ctrl_event()
+        .times(1)
+        .with(eq(CTRL_BREAK_EVENT), eq(0u32))
+        .returning(|_, _| return Ok(()));
+    mock_api.expect_write_console_input().times(0);
+
+    replay_input_record(
+        &mock_api,
+        make_input_record(VK_CANCEL.0, LEFT_CTRL_PRESSED, true),
+    );
+}
+
+#[test]
+fn test_replay_input_record_drops_ctrl_c_key_up_in_processed_mode() {
+    use windows::Win32::System::Console::{ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED};
+
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_get_std_handle()
+        .returning(|_| return Ok(fake_std_handle()));
+    mock_api
+        .expect_get_console_mode()
+        .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
+    // Key-up must neither signal nor inject the record.
+    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api.expect_write_console_input().times(0);
+
+    replay_input_record(
+        &mock_api,
+        make_input_record(VK_C.0, LEFT_CTRL_PRESSED, false),
+    );
+}
+
+#[test]
+fn test_replay_input_record_writes_ctrl_c_in_raw_mode() {
+    use windows::Win32::System::Console::{CONSOLE_MODE, LEFT_CTRL_PRESSED};
+
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_get_std_handle()
+        .returning(|_| return Ok(fake_std_handle()));
+    // Raw mode: ENABLE_PROCESSED_INPUT cleared.
+    mock_api
+        .expect_get_console_mode()
+        .returning(|_| return Ok(CONSOLE_MODE::default()));
+    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api
+        .expect_write_console_input()
+        .times(1)
+        .returning(|_, number_written| {
+            *number_written = 1;
+            return Ok(());
+        });
+
+    replay_input_record(
+        &mock_api,
+        make_input_record(VK_C.0, LEFT_CTRL_PRESSED, true),
+    );
+}
+
+#[test]
+fn test_replay_input_record_writes_plain_key_without_querying_mode() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_A;
+
+    let mut mock_api = MockWindowsApi::new();
+    // A plain key is never a control event, so the mode is never queried.
+    mock_api.expect_get_std_handle().times(0);
+    mock_api.expect_get_console_mode().times(0);
+    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api
+        .expect_write_console_input()
+        .times(1)
+        .returning(|_, number_written| {
+            *number_written = 1;
+            return Ok(());
+        });
+
+    replay_input_record(&mock_api, make_input_record(VK_A.0, 0, true));
+}
+
+#[test]
+fn test_replay_input_record_falls_back_to_write_on_mode_query_error() {
+    use windows::Win32::System::Console::LEFT_CTRL_PRESSED;
+
+    let mut mock_api = MockWindowsApi::new();
+    mock_api
+        .expect_get_std_handle()
+        .returning(|_| return Ok(fake_std_handle()));
+    mock_api
+        .expect_get_console_mode()
+        .returning(|_| return Err(windows::core::Error::from_thread()));
+    mock_api.expect_set_console_ctrl_handler().times(0);
+    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api
+        .expect_write_console_input()
+        .times(1)
+        .returning(|_, number_written| {
+            *number_written = 1;
+            return Ok(());
+        });
+
+    replay_input_record(
+        &mock_api,
+        make_input_record(VK_C.0, LEFT_CTRL_PRESSED, true),
+    );
 }
 
 #[tokio::test]

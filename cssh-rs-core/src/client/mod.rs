@@ -10,7 +10,7 @@ use std::io::{self, BufReader};
 use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
-use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
+use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_C, VK_CANCEL};
 
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::{get_console_title, set_console_color, WindowsApi};
@@ -20,8 +20,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::{io::Interest, net::windows::named_pipe::ClientOptions};
 use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
-    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, RIGHT_ALT_PRESSED, SHIFT_PRESSED,
+    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_BREAK_EVENT, CTRL_C_EVENT, ENABLE_PROCESSED_INPUT,
+    INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED,
+    RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED, STD_INPUT_HANDLE,
 };
 
 use cssh_rs_protocol::{
@@ -247,6 +248,100 @@ fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
             error!("{:?}", api.get_last_error());
         }
     };
+}
+
+/// Map a forwarded key event to the console control event conhost would
+/// have raised for it, if any.
+///
+/// # Arguments
+///
+/// * `key_event` - The key event record forwarded by the daemon.
+///
+/// # Returns
+///
+/// `Some(CTRL_C_EVENT)` / `Some(CTRL_BREAK_EVENT)` for a Ctrl-modified C or
+/// Break key, `None` otherwise.
+fn console_ctrl_event_for(key_event: &KEY_EVENT_RECORD) -> Option<u32> {
+    let ctrl_held = key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0;
+    if !ctrl_held {
+        return None;
+    }
+    // Only Ctrl+C and Ctrl+Break are translated by conhost into console control signals (and the only events GenerateConsoleCtrlEvent accepts); every other key is plain console input.
+    return match VIRTUAL_KEY(key_event.wVirtualKeyCode) {
+        VK_C => Some(CTRL_C_EVENT),
+        VK_CANCEL => Some(CTRL_BREAK_EVENT),
+        _ => None,
+    };
+}
+
+/// Report whether the console input buffer has processed input enabled.
+///
+/// # Arguments
+///
+/// * `api` - The Windows API implementation to use.
+///
+/// # Returns
+///
+/// `true` when `ENABLE_PROCESSED_INPUT` is set; `false` on that flag being
+/// cleared or any query failure (so the caller falls back to a raw write).
+fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
+    let handle = match api.get_std_handle(STD_INPUT_HANDLE) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    return match api.get_console_mode(handle) {
+        Ok(mode) => mode.0 & ENABLE_PROCESSED_INPUT.0 != 0,
+        Err(_) => false,
+    };
+}
+
+/// Re-raise a console control event for the current console process group.
+///
+/// # Arguments
+///
+/// * `api`        - The Windows API implementation to use.
+/// * `ctrl_event` - The control event to generate (`CTRL_C_EVENT` or
+///                  `CTRL_BREAK_EVENT`).
+fn signal_console_ctrl_event(api: &dyn WindowsApi, ctrl_event: u32) {
+    // Group-0 signals every process on the console, including this client;
+    // shield first so the relay survives.
+    // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
+    if let Err(err) = api.set_console_ctrl_handler(true) {
+        warn!(
+            "Failed to shield client before relaying control event; dropping it: {}",
+            err
+        );
+        return;
+    }
+    if let Err(err) = api.generate_console_ctrl_event(ctrl_event, 0) {
+        warn!("Failed to relay console control event: {}", err);
+    }
+}
+
+/// Replay one daemon-forwarded key event into the client console.
+///
+/// Ctrl+C and Ctrl+Break injected via `WriteConsoleInputW` never raise a
+/// console control signal, so when the input buffer has processed input
+/// enabled they are re-raised via `GenerateConsoleCtrlEvent`; all other
+/// records (and raw-mode consoles) are written verbatim.
+///
+/// # Arguments
+///
+/// * `api`          - The Windows API implementation to use.
+/// * `input_record` - The [INPUT_RECORD_0].`KeyEvent` record to replay.
+fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
+    let key_event = unsafe { input_record.KeyEvent };
+    if let Some(ctrl_event) = console_ctrl_event_for(&key_event) {
+        if processed_input_enabled(api) {
+            // Raise the signal once on key-down; drop both down/up records so
+            // no stray 0x03 reaches the cooked-input child.
+            if key_event.bKeyDown.as_bool() {
+                signal_console_ctrl_event(api, ctrl_event);
+            }
+            return;
+        }
+    }
+    write_console_input(api, input_record);
 }
 
 /// Resolve the username from the provided value or SSH config.
@@ -490,7 +585,7 @@ async fn read_write_loop(
             for message in messages {
                 match message {
                     DaemonToClientMessage::InputRecord(input_record) => {
-                        write_console_input(api, input_record);
+                        replay_input_record(api, input_record);
                         key_event_records.push(unsafe { input_record.KeyEvent });
                     }
                     DaemonToClientMessage::StateChange(state) => {
