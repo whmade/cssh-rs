@@ -1,0 +1,11 @@
+[package]
+name = "cssh-rs-plugin-sdk"
+version = "0.19.1"
+edition = "2021"
+license-file = "../LICENSE.txt"
+
+[dependencies]
+cssh-rs-plugin-api = { path = "../cssh-rs-plugin-api" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }

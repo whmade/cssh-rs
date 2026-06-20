@@ -7,6 +7,9 @@ members = [
     "cssh-rs-platform-linux",
     "cssh-rs-platform-macos",
     "cssh-rs-platform-windows",
+    "cssh-rs-plugin-api",
+    "cssh-rs-plugin-host",
+    "cssh-rs-plugin-sdk",
     "cssh-rs-protocol",
     "xtask",
 ]

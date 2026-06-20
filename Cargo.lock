@@ -385,6 +385,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "cssh-rs-plugin-api"
+version = "0.19.1"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
+name = "cssh-rs-plugin-host"
+version = "0.19.1"
+dependencies = [
+ "cssh-rs-plugin-api",
+]
+
+[[package]]
+name = "cssh-rs-plugin-sdk"
+version = "0.19.1"
+dependencies = [
+ "cssh-rs-plugin-api",
+]
+
+[[package]]
 name = "cssh-rs-protocol"
 version = "0.19.1"
 dependencies = [
