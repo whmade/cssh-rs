@@ -48,6 +48,13 @@ def test_type_text_defaults_interval_to_zero(fake_pyautogui: _FakePyAutoGui) -> 
     assert fake_pyautogui.calls == [("write", ("hello",), {"interval": 0.0})]
 
 
+def test_type_text_rejects_negative_interval(fake_pyautogui: _FakePyAutoGui) -> None:
+    with pytest.raises(KeystrokesError, match="non-negative"):
+        Keystrokes().type_text("hello", interval=-0.1)
+
+    assert fake_pyautogui.calls == []
+
+
 def test_type_line_types_text_then_presses_enter(fake_pyautogui: _FakePyAutoGui) -> None:
     Keystrokes().type_line("payload", interval=0.01)
 
@@ -79,6 +86,13 @@ def test_send_hotkey_forwards_all_keys(fake_pyautogui: _FakePyAutoGui) -> None:
 def test_send_hotkey_rejects_no_keys(fake_pyautogui: _FakePyAutoGui) -> None:
     with pytest.raises(KeystrokesError, match="at least one key"):
         Keystrokes().send_hotkey()
+
+    assert fake_pyautogui.calls == []
+
+
+def test_send_hotkey_rejects_empty_key(fake_pyautogui: _FakePyAutoGui) -> None:
+    with pytest.raises(KeystrokesError, match="non-empty"):
+        Keystrokes().send_hotkey("ctrl", "")
 
     assert fake_pyautogui.calls == []
 

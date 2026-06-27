@@ -32,6 +32,8 @@ class Keystrokes:
             interval: Seconds between characters; raise it if a terminal drops
                 fast input.
         """
+        if interval < 0:
+            raise KeystrokesError(f"interval must be non-negative, got {interval}")
         self._pyautogui().write(text, interval=interval)
 
     def type_line(self, text: str, interval: float = 0.0) -> None:
@@ -62,6 +64,8 @@ class Keystrokes:
         """
         if not keys:
             raise KeystrokesError("send_hotkey requires at least one key")
+        if not all(keys):
+            raise KeystrokesError("hotkey keys must be non-empty strings")
         self._pyautogui().hotkey(*keys)
 
     @staticmethod
