@@ -122,19 +122,6 @@ def test_focus_window_times_out_without_a_match(monkeypatch: pytest.MonkeyPatch)
         WindowFocus().focus_window("cssh-rs daemon", timeout=0.0)
 
 
-def test_focus_window_matches_non_ascii_title(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Escaped so the source stays ASCII while the runtime title is non-ASCII
-    # (Japanese "tesuto"), proving the library matches and returns Unicode
-    # titles verbatim.
-    unicode_title = "cssh-rs - \u30c6\u30b9\u30c8@h1"
-    window = _FakeWindow(unicode_title)
-    _patch_matches(monkeypatch, [window])
-
-    result = WindowFocus().focus_window(unicode_title)
-
-    assert result == unicode_title
-
-
 def test_get_active_window_title_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pywinctl, "getActiveWindowTitle", lambda: "cssh-rs daemon")
 

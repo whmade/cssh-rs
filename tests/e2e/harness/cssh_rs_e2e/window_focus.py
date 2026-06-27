@@ -5,9 +5,6 @@ keystroke library lands in the intended target: the daemon window for fan-out
 tests, or one client window for control-mode tests. cssh-rs sets deterministic
 titles (``cssh-rs daemon`` and ``cssh-rs - <user>@<host>[:port]``), so suites
 pass those verbatim.
-
-Matching is exact by default; ``substring`` is opt-in. More than one match is
-always an error, never a silent first-pick.
 """
 
 from __future__ import annotations
@@ -52,8 +49,6 @@ class WindowFocus:
         Returns:
             The matched window's title.
         """
-        # Validate before importing pywinctl so a bad argument fails fast
-        # without spinning up the display/GUI machinery the import pulls in.
         if match_mode not in _VALID_MATCH_MODES:
             raise WindowFocusError(
                 f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
@@ -63,9 +58,9 @@ class WindowFocus:
         if poll_interval < 0:
             raise WindowFocusError(f"poll_interval must be non-negative, got {poll_interval}")
 
-        # Imported lazily for the same reason: both the package __init__ (which
-        # re-exports this module) and the SSH-invoked marker writer must stay
-        # display-free.
+        # Imported lazily, not at module top: cssh_rs_e2e/__init__ re-exports
+        # this module and is itself imported by the SSH-invoked marker writer,
+        # which must stay free of pywinctl's display/GUI dependencies.
         import pywinctl
 
         condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
