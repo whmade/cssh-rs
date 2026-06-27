@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  cssh-rs - Cross-platform cluster SSH (Linux variant)
+
+  App icon for Linux. Same "leader + secondaries" stack as the Windows
+  icon (res/windows/cssh-rs.svg) - two stylized terminal windows offset
+  by (+16, +12) - but each window is reshaped to read as a native
+  GNOME / Adwaita object. Linux has no single desktop design language;
+  GNOME is the default environment of the most common distros and leads
+  the Linux column of the README support matrix, so it is the reference
+  here (the way the macOS variant references Terminal.app).
+
+  Canvas: 60x60. Two terminal windows:
+    - secondary  -> the back window (dark, dimmed, no cursor).
+    - leader     -> the front window (red, bright, with the prompt
+                    cursor), offset by (+16, +12).
+  Colors, gradients and the red broadcasting tint are shared verbatim
+  with the Windows variant so the icon stays part of one family; no Tux
+  yellow is introduced.
+
+  Linux / GNOME identity
+  ======================
+  Distilled from the GNOME Human Interface Guidelines and libadwaita:
+
+  1. "$_" PROMPT. The Windows ">" chevron is replaced by a "$" - the
+     Unix / Linux user shell prompt, the single most recognizable
+     "this is a Linux shell" glyph (">" reads as Windows CMD /
+     PowerShell). The leader keeps the underscore cursor so it reads
+     "$_"; the secondary shows a dimmed "$". The "$" outline is the
+     dollar glyph of the repo's own DejaVu Sans Mono (the font used for
+     the social preview), scaled into place and slightly emboldened, so
+     its proportions match a real monospace prompt.
+
+  2. SINGLE ROUND CLOSE BUTTON, on the RIGHT of each header bar - the
+     Adwaita client-side-decoration hallmark, distinct from the Windows
+     three-control set and the macOS left traffic lights. Coloured on
+     the focused leader, greyed on the unfocused secondary.
+
+  3. ROUNDED WINDOWS. Circular corners on all four sides (libadwaita),
+     rounder than the squarer Windows frame but not the macOS
+     superellipse.
+
+  Single source of truth
+  ======================
+  All theming values - colors, gradient stops, opacity - are declared
+  exactly once as CSS class rules in the <style> block. Glyph paths
+  (title bar shell, body shell, "$" prompt, underscore cursor) are
+  defined once in <defs> and referenced via <use> from both windows.
+
+  The glyph shadow offset (1.6 SVG units, south-east) is expressed as an
+  SVG transform attribute rather than CSS - CSS transforms on SVG
+  elements are not reliably applied by all renderers. It appears twice:
+  once wrapping the secondary "$" shadow, and once wrapping the leader's
+  combined "$" + cursor shadow.
+-->
+<svg width="60" height="60" viewBox="0 0 60 60"
+     xmlns="http://www.w3.org/2000/svg">
+
+  <style><![CDATA[
+    /* =====================================================================
+       SINGLE SOURCE OF TRUTH - all theming values declared exactly once.
+       ===================================================================== */
+
+    /* Secondary (back) window: dark gray, dimmed, no cursor. */
+    .secondaryTitlebar      { fill: #3A3A3A; }
+    .secondaryBody          { fill: url(#bodyGradSecondary); }
+    .secondaryCloseBtn      { fill: #FFFFFF; opacity: 0.10; }
+    .secondaryCloseX        { stroke: #9A9A9A; }
+    .secondaryGlyphFg       { fill: #B0B0B0; stroke: #B0B0B0; }
+    .secondaryGlyphShadow   { fill: #1F1F1F; stroke: #1F1F1F; }
+    .secondaryGlyphStack    { opacity: 0.7; }
+    .secondaryGradStart     { stop-color: #333333; }
+    .secondaryGradEnd       { stop-color: #4D4D4D; }
+
+    /* Leader (front) window: red, bright, with underscore cursor. */
+    .leaderTitlebar         { fill: #7A0A14; }
+    .leaderBody             { fill: url(#bodyGradLeader); }
+    .leaderCloseBtn         { fill: #FFFFFF; opacity: 0.18; }
+    .leaderCloseX           { stroke: #FFFFFF; }
+    .leaderGlyphFg          { fill: #FFFFFF; stroke: #FFFFFF; }
+    .leaderGlyphShadow      { fill: #5A0710; stroke: #5A0710; }
+    .leaderCursorFg         { fill: #FFFFFF; }
+    .leaderCursorShadow     { fill: #5A0710; }
+    .leaderGradStart        { stop-color: #9A0C18; }
+    .leaderGradEnd          { stop-color: #C50F1F; }
+
+    /* Shared geometry. The "$" outline is emboldened by stroking it in
+       its own fill color (round joins keep the bowls clean). */
+    .dollar                 { stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+    .closeX                 { stroke-width: 0.8; stroke-linecap: round; fill: none; }
+  ]]></style>
+
+  <defs>
+    <!-- ========================= GLYPH PATHS =========================
+         Each path is defined once and referenced by both windows.
+         No colors here - fill/stroke come from the CSS classes above. -->
+
+    <!-- Title bar shell: circular top corners (r=3.5), flat bottom edge
+         at y=13 where the body overlaps it. -->
+    <path id="titleBar"
+          d="M0 13V9.5C0 7.57 1.57 6 3.5 6H40.5C42.43 6 44 7.57 44 9.5V13Z"/>
+
+    <!-- Window body shell: circular bottom corners (r=3.5), flat top
+         edge at y=12. -->
+    <path id="bodyShape"
+          d="M0 12V38.5C0 40.43 1.57 42 3.5 42H40.5C42.43 42 44 40.43 44 38.5V12Z"/>
+
+    <!-- "$" prompt: DejaVu Sans Mono dollar glyph, scaled into the
+         chevron's old box (x ~6.5-16.5) and emboldened via the .dollar
+         stroke for a bold but still open-countered weight. The centre
+         bar's terminals are pulled in (top 16.5 -> 17.9, bottom 36.5 ->
+         34.9) so it overshoots the bowls by only ~1u at each end; the
+         .dollar round line-join keeps those bar heads rounded rather than
+         cut flat. Left of the underscore so the leader reads "$_". -->
+    <path id="dollar"
+          d="M11.931 27.012V31.686Q13.116 31.653 13.783 31.029Q14.451 30.404 14.451 29.327Q14.451 28.326 13.848 27.771Q13.245 27.216 11.931 27.012ZM10.854 24.965V20.517Q9.734 20.56 9.104 21.163Q8.474 21.767 8.474 22.779Q8.474 23.705 9.061 24.244Q9.648 24.782 10.854 24.965ZM11.931 34.9H10.854L10.843 33.258Q9.744 33.204 8.662 32.957Q7.58 32.709 6.524 32.267V30.329Q7.601 30.996 8.694 31.352Q9.788 31.707 10.854 31.729V26.796Q8.7 26.462 7.612 25.482Q6.524 24.502 6.524 22.887Q6.524 21.196 7.66 20.189Q8.797 19.182 10.854 19.031V17.9H11.931L11.942 19.031Q12.792 19.085 13.665 19.246Q14.537 19.408 15.442 19.688V21.551Q14.526 21.088 13.659 20.835Q12.792 20.582 11.931 20.539V25.181Q14.149 25.515 15.313 26.559Q16.476 27.604 16.476 29.263Q16.476 30.921 15.221 32.03Q13.966 33.14 11.942 33.237Z"/>
+
+    <!-- Underscore cursor: identical to the Windows and macOS variants. -->
+    <path id="underscore"
+          d="M40 32H24C23.4 32 23 32.4 23 33V36C23 36.6 23.4 37 24 37H40C40.6 37 41 36.6 41 36V33C41 32.4 40.6 32 40 32Z"/>
+
+    <!-- ========================= BODY GRADIENTS =========================
+         Shared verbatim with the Windows variant. Stop colors come from
+         CSS classes so every hex value lives only in the <style> block. -->
+    <linearGradient id="bodyGradSecondary"
+                    x1="36" y1="47" x2="11" y2="5"
+                    gradientUnits="userSpaceOnUse">
+      <stop class="secondaryGradStart" offset="0"/>
+      <stop class="secondaryGradEnd"   offset="1"/>
+    </linearGradient>
+    <linearGradient id="bodyGradLeader"
+                    x1="36" y1="47" x2="11" y2="5"
+                    gradientUnits="userSpaceOnUse">
+      <stop class="leaderGradStart" offset="0"/>
+      <stop class="leaderGradEnd"   offset="1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ========================= SECONDARY WINDOW =========================
+       Back window: dark gray, dimmed to 0.7 opacity on the "$",
+       no cursor, close button greyed (unfocused). Sits at the canvas
+       origin. -->
+  <g>
+    <!-- 1. Title bar, then body over its bottom edge. -->
+    <use href="#titleBar" class="secondaryTitlebar"/>
+    <use href="#bodyShape" class="secondaryBody"/>
+
+    <!-- 2. Single round close button on the right, greyed. -->
+    <circle class="secondaryCloseBtn" cx="38.5" cy="9" r="2.2"/>
+    <g class="closeX secondaryCloseX">
+      <line x1="37.5" y1="8" x2="39.5" y2="10"/>
+      <line x1="39.5" y1="8" x2="37.5" y2="10"/>
+    </g>
+
+    <!-- 3. "$" prompt: shadow (south-east offset) then foreground, dimmed. -->
+    <g class="secondaryGlyphStack">
+      <g transform="translate(1.6, 1.6)">
+        <use href="#dollar" class="dollar secondaryGlyphShadow"/>
+      </g>
+      <use href="#dollar" class="dollar secondaryGlyphFg"/>
+    </g>
+  </g>
+
+  <!-- ========================= LEADER WINDOW =========================
+       Front window: red, full opacity, with underscore cursor, close
+       button in colour (focused). Offset (+16, +12) to form the
+       "leader + secondaries" stack. -->
+  <g transform="translate(16, 12)">
+    <!-- 1. Title bar, then body over its bottom edge. -->
+    <use href="#titleBar" class="leaderTitlebar"/>
+    <use href="#bodyShape" class="leaderBody"/>
+
+    <!-- 2. Single round close button on the right, in colour. -->
+    <circle class="leaderCloseBtn" cx="38.5" cy="9" r="2.2"/>
+    <g class="closeX leaderCloseX">
+      <line x1="37.5" y1="8" x2="39.5" y2="10"/>
+      <line x1="39.5" y1="8" x2="37.5" y2="10"/>
+    </g>
+
+    <!-- 3. "$" + cursor shadows share one translate group, then
+            foregrounds are drawn on top. -->
+    <g transform="translate(1.6, 1.6)">
+      <use href="#dollar" class="dollar leaderGlyphShadow"/>
+      <use href="#underscore" class="leaderCursorShadow"/>
+    </g>
+    <use href="#dollar" class="dollar leaderGlyphFg"/>
+    <use href="#underscore" class="leaderCursorFg"/>
+  </g>
+
+</svg>
