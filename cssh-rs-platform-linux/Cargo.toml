@@ -1,6 +1,6 @@
 [package]
 name = "cssh-rs-platform-linux"
-version = "0.19.1"
+version.workspace = true
 edition = "2021"
 license-file = "../LICENSE.txt"
 

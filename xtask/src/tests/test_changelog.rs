@@ -20,7 +20,7 @@ mock! {
 }
 
 static CARGO_TOML: LazyLock<String> = LazyLock::new(|| {
-    format!("[package]\nname = \"{PACKAGE_NAME}\"\nversion = \"1.2.3\"\nedition = \"2021\"\n")
+    "[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nversion = \"1.2.3\"\n".to_owned()
 });
 
 static CHANGELOGGING_TOML: LazyLock<String> = LazyLock::new(|| {
@@ -40,14 +40,27 @@ fn test_extract_version_from_cargo_toml_valid() {
 
 #[test]
 fn test_extract_version_from_cargo_toml_missing_key() {
-    // Arrange
-    let content = format!("[package]\nname = \"{PACKAGE_NAME}\"\n");
+    // Arrange: a workspace root whose [workspace.package] table omits version.
+    let content = "[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nedition = \"2021\"\n";
 
     // Act
-    let result = extract_version_from_cargo_toml(&content);
+    let result = extract_version_from_cargo_toml(content);
 
     // Assert
     assert!(result.is_err());
+}
+
+#[test]
+fn test_extract_version_from_cargo_toml_workspace_only_root() {
+    // Arrange: the real root shape - workspace-only, no top-level [package],
+    // version centralized under [workspace.package].
+    let content = "[workspace]\nmembers = [\"cssh-rs\", \"xtask\"]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.19.1\"\n";
+
+    // Act
+    let result = extract_version_from_cargo_toml(content).unwrap();
+
+    // Assert
+    assert_eq!(result, "0.19.1");
 }
 
 #[test]

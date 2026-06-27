@@ -39,7 +39,7 @@ mock! {
 
 fn cargo_toml_with_version(version: &str) -> String {
     format!(
-        "[workspace]\nmembers = [\"xtask\"]\n\n[package]\nname = \"{PACKAGE_NAME}\"\nversion = \"{version}\"\nedition = \"2021\"\n"
+        "[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nversion = \"{version}\"\n\n[package]\nname = \"{PACKAGE_NAME}\"\nedition = \"2021\"\n"
     )
 }
 
@@ -125,7 +125,10 @@ fn test_set_cargo_toml_version_updates_version() {
 
     // Assert
     let doc: toml_edit::DocumentMut = result.parse().unwrap();
-    assert_eq!(doc["package"]["version"].as_str().unwrap(), "1.0.0");
+    assert_eq!(
+        doc["workspace"]["package"]["version"].as_str().unwrap(),
+        "1.0.0"
+    );
 }
 
 #[test]

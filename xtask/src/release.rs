@@ -566,7 +566,7 @@ pub fn determine_release_type(current: &Version, next: &Version) -> ReleaseType 
     }
 }
 
-/// Rewrite the `[package].version` field in a `Cargo.toml` string.
+/// Rewrite the `[workspace.package].version` field in a `Cargo.toml` string.
 ///
 /// Uses `toml_edit` to preserve all existing formatting.
 ///
@@ -586,7 +586,7 @@ pub fn set_cargo_toml_version(cargo_toml_content: &str, new_version: &str) -> Re
     let mut doc: toml_edit::DocumentMut = cargo_toml_content
         .parse()
         .context("failed to parse Cargo.toml")?;
-    doc["package"]["version"] = toml_edit::value(new_version);
+    doc["workspace"]["package"]["version"] = toml_edit::value(new_version);
     Ok(doc.to_string())
 }
 

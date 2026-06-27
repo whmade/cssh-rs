@@ -1,6 +1,6 @@
 [package]
 name = "cssh-rs-protocol"
-version = "0.19.1"
+version.workspace = true
 edition = "2021"
 license-file = "../LICENSE.txt"
 
