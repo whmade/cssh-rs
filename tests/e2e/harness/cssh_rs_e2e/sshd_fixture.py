@@ -302,11 +302,13 @@ def _harden_private_key_permissions(private_path: Path) -> None:
 
     On POSIX this is a ``chmod 0600``. On Windows OpenSSH ignores the
     POSIX mode and instead rejects any key file whose ACL grants access
-    beyond the owner - under the per-run temp tree it specifically flags
-    the inherited ``OWNER RIGHTS`` ACE and then exits with ``no hostkeys
-    available``. Strip inheritance and grant the current user sole access
-    via ``icacls`` so both sshd (host key) and the ssh client (per-alias
-    identity keys) load the key instead of ignoring it.
+    beyond the owner, SYSTEM or Administrators - under the per-run temp
+    tree the file carries an ``OWNER RIGHTS`` (``S-1-3-4``) ACE that sshd
+    flags before exiting with ``no hostkeys available``. Stripping
+    inheritance alone does not drop that ACE, so it is removed explicitly
+    and the current user is granted sole access via ``icacls``. The result
+    is verified so a lingering ``OWNER RIGHTS`` ACE surfaces as a clear
+    error with the offending ACL rather than an opaque sshd failure.
 
     Args:
         private_path: Path of the private key file to lock down.
@@ -315,15 +317,24 @@ def _harden_private_key_permissions(private_path: Path) -> None:
         with contextlib.suppress(OSError):
             private_path.chmod(0o600)
         return
+    target = str(private_path)
     user = getpass.getuser()
     for args in (
-        ["icacls", str(private_path), "/inheritance:r"],
-        ["icacls", str(private_path), "/grant:r", f"{user}:F"],
+        ["icacls", target, "/inheritance:r"],
+        ["icacls", target, "/remove:g", "*S-1-3-4"],
+        ["icacls", target, "/grant:r", f"{user}:F"],
     ):
         result = subprocess.run(args, capture_output=True, check=False)
         if result.returncode != 0:
             detail = result.stderr.decode("utf-8", errors="replace").strip()
-            raise SshdFixtureError(f"failed to harden key permissions on {private_path}: {detail}")
+            raise SshdFixtureError(f"failed to harden key permissions on {target}: {detail}")
+
+    listing = subprocess.run(["icacls", target], capture_output=True, check=False)
+    acl = listing.stdout.decode("utf-8", errors="replace")
+    if "S-1-3-4" in acl or "OWNER RIGHTS" in acl:
+        raise SshdFixtureError(
+            f"OWNER RIGHTS ACE still present on {target} after hardening:\n{acl}"
+        )
 
 
 def _build_forced_command(executable: str, marker: str) -> str:
