@@ -92,6 +92,15 @@ def test_resolve_sshd_path_rejects_missing_override(monkeypatch: pytest.MonkeyPa
         sshd_fixture._resolve_sshd_path()
 
 
+def test_resolve_sshd_path_rejects_directory_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CSSH_E2E_SSHD", str(tmp_path))
+
+    with pytest.raises(SshdFixtureError, match="non-existent path"):
+        sshd_fixture._resolve_sshd_path()
+
+
 def test_resolve_sshd_path_falls_back_to_which(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CSSH_E2E_SSHD", raising=False)
     monkeypatch.setattr(sshd_fixture.shutil, "which", lambda _: "/usr/sbin/sshd")
@@ -116,6 +125,21 @@ def test_start_sshd_rejects_empty_aliases() -> None:
 def test_start_sshd_rejects_duplicate_aliases() -> None:
     with pytest.raises(SshdFixtureError, match="unique"):
         SshdFixture().start_sshd(["h1", "h1"])
+
+
+@pytest.mark.parametrize(
+    "alias",
+    ["../escape", "a/b", "a\\b", "has space", "with\nnewline", "tab\there", ""],
+)
+def test_start_sshd_rejects_unsafe_aliases(alias: str) -> None:
+    with pytest.raises(SshdFixtureError):
+        SshdFixture().start_sshd([alias])
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, 100000])
+def test_start_sshd_rejects_out_of_range_port(port: int) -> None:
+    with pytest.raises(SshdFixtureError, match="port must be between"):
+        SshdFixture().start_sshd(["h1"], port=port)
 
 
 def test_start_sshd_rejects_when_already_running() -> None:

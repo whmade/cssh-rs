@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import getpass
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -51,6 +52,14 @@ READINESS_POLL_INTERVAL_SECONDS = 0.1
 
 STOP_GRACE_SECONDS = 3.0
 """Seconds granted to sshd to exit after ``terminate()`` before ``kill()``."""
+
+ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+"""Allowed shape for a host alias - a single safe token with no path
+separators, whitespace, or control characters, since each alias is
+interpolated into filenames and the generated ``ssh_config``."""
+
+MIN_TCP_PORT = 1
+MAX_TCP_PORT = 65535
 
 
 class SshdFixtureError(RuntimeError):
@@ -98,6 +107,16 @@ class SshdFixture:
             raise SshdFixtureError("host_aliases must be non-empty")
         if len(set(aliases)) != len(aliases):
             raise SshdFixtureError("host_aliases must be unique")
+        for alias in aliases:
+            if not ALIAS_PATTERN.fullmatch(alias):
+                raise SshdFixtureError(
+                    f"host alias must match {ALIAS_PATTERN.pattern} "
+                    f"(no whitespace, path separators or control characters): {alias!r}"
+                )
+        if port is not None and not MIN_TCP_PORT <= port <= MAX_TCP_PORT:
+            raise SshdFixtureError(
+                f"port must be between {MIN_TCP_PORT} and {MAX_TCP_PORT}: {port}"
+            )
 
         tempdir = Path(tempfile.mkdtemp(prefix="cssh-e2e-sshd-"))
         process: subprocess.Popen[bytes] | None = None
@@ -376,14 +395,14 @@ def _pick_free_port() -> int:
 def _resolve_sshd_path() -> str:
     override = os.environ.get("CSSH_E2E_SSHD")
     if override:
-        if not Path(override).exists():
+        if not Path(override).is_file():
             raise SshdFixtureError(f"CSSH_E2E_SSHD points at non-existent path: {override}")
         return override
     resolved = shutil.which("sshd")
     if resolved:
         return resolved
     for candidate in DEFAULT_SSHD_LOCATIONS:
-        if Path(candidate).exists():
+        if Path(candidate).is_file():
             return candidate
     raise SshdFixtureError("could not locate sshd; set CSSH_E2E_SSHD or install OpenSSH server")
 
