@@ -294,9 +294,36 @@ def _write_openssh_keypair(private_path: Path) -> None:
     )
     private_path.write_bytes(private_bytes)
     private_path.with_suffix(".pub").write_bytes(public_bytes + b"\n")
-    with contextlib.suppress(OSError):
-        # POSIX permission tightening; ignored on Windows where ACLs apply.
-        private_path.chmod(0o600)
+    _harden_private_key_permissions(private_path)
+
+
+def _harden_private_key_permissions(private_path: Path) -> None:
+    """Lock down ``private_path`` so OpenSSH accepts it as a private key.
+
+    On POSIX this is a ``chmod 0600``. On Windows OpenSSH ignores the
+    POSIX mode and instead rejects any key file whose ACL grants access
+    beyond the owner - under the per-run temp tree it specifically flags
+    the inherited ``OWNER RIGHTS`` ACE and then exits with ``no hostkeys
+    available``. Strip inheritance and grant the current user sole access
+    via ``icacls`` so both sshd (host key) and the ssh client (per-alias
+    identity keys) load the key instead of ignoring it.
+
+    Args:
+        private_path: Path of the private key file to lock down.
+    """
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            private_path.chmod(0o600)
+        return
+    user = getpass.getuser()
+    for args in (
+        ["icacls", str(private_path), "/inheritance:r"],
+        ["icacls", str(private_path), "/grant:r", f"{user}:F"],
+    ):
+        result = subprocess.run(args, capture_output=True, check=False)
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise SshdFixtureError(f"failed to harden key permissions on {private_path}: {detail}")
 
 
 def _build_forced_command(executable: str, marker: str) -> str:
