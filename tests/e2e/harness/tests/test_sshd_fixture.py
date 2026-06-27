@@ -149,12 +149,6 @@ def test_start_sshd_rejects_when_already_running() -> None:
         fixture.start_sshd(["h1"])
 
 
-def test_accessors_raise_before_start() -> None:
-    fixture = SshdFixture()
-
-    assert fixture.host_aliases() == []
-    for accessor in (fixture.markers_dir, fixture.ssh_config_path, fixture.port):
-        with pytest.raises(SshdFixtureError, match="not running"):
-            accessor()
+def test_read_marker_raises_before_start() -> None:
     with pytest.raises(SshdFixtureError, match="not running"):
-        fixture.read_marker("h1")
+        SshdFixture().read_marker("h1")

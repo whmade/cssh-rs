@@ -7,10 +7,7 @@ no shared system state. Each host alias gets its own Ed25519 keypair whose
 SSH channel's stdin into ``markers/<alias>.log``; suites assert cssh-rs
 fan-out by reading those marker files.
 
-All state - host key, per-alias keypairs, ``authorized_keys``, the
-generated ``sshd_config`` and ``ssh_config``, ``known_hosts``, the markers
-directory and the sshd log - lives in one per-run temp directory that
-``Stop Sshd`` removes.
+All per-run state lives in one temp directory that ``Stop Sshd`` removes.
 """
 
 from __future__ import annotations
@@ -30,28 +27,22 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+# Fallback sshd.exe locations on Windows, tried when it is not on PATH.
 DEFAULT_SSHD_LOCATIONS = (
     r"C:\Windows\System32\OpenSSH\sshd.exe",
     r"C:\Program Files\OpenSSH\sshd.exe",
 )
-"""Fallback locations searched for ``sshd.exe`` on Windows."""
 
 READINESS_TIMEOUT_SECONDS = 10.0
-"""Maximum time spent polling sshd's listening port for readiness."""
-
 READINESS_POLL_INTERVAL_SECONDS = 0.1
-"""Delay between consecutive TCP-connect probes during readiness polling."""
-
 STOP_GRACE_SECONDS = 3.0
-"""Seconds granted to sshd to exit after ``terminate()`` before ``kill()``."""
+MAX_LOG_TAIL_BYTES = 4096
 
+# Aliases are interpolated into filenames and the generated ssh_config, so
+# reject path separators, whitespace and control characters.
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-"""Allowed host alias shape; aliases are interpolated into filenames and the
-generated ``ssh_config``, so path separators, whitespace and control
-characters are rejected."""
 
-# A caller-supplied port must be unprivileged (>= 1024); the fixture binds
-# without admin, matching the high-port default picked by _pick_free_port.
+# A caller-supplied port must be unprivileged so the fixture binds without admin.
 MIN_UNPRIVILEGED_PORT = 1024
 MAX_TCP_PORT = 65535
 
@@ -69,10 +60,6 @@ class SshdFixture:
     def __init__(self) -> None:
         self._tempdir: Path | None = None
         self._process: subprocess.Popen[bytes] | None = None
-        self._port: int | None = None
-        self._aliases: list[str] = []
-        self._ssh_config_path: Path | None = None
-        self._markers_dir: Path | None = None
 
     def start_sshd(
         self,
@@ -188,10 +175,6 @@ class SshdFixture:
 
         self._tempdir = tempdir
         self._process = process
-        self._port = chosen_port
-        self._aliases = aliases
-        self._ssh_config_path = ssh_config_path
-        self._markers_dir = markers_dir
 
         return {
             "port": chosen_port,
@@ -207,10 +190,6 @@ class SshdFixture:
         _remove_tempdir(self._tempdir)
         self._process = None
         self._tempdir = None
-        self._port = None
-        self._aliases = []
-        self._ssh_config_path = None
-        self._markers_dir = None
 
     def read_marker(self, alias: str) -> str:
         """Return the contents of ``markers/<alias>.log`` as UTF-8 text.
@@ -219,39 +198,15 @@ class SshdFixture:
             alias: Host alias whose marker is read.
 
         Returns:
-            Marker file contents, decoded with ``errors='replace'``.
-            Empty string if the file does not exist yet.
+            Marker file contents decoded with ``errors='replace'``, or the
+            empty string if the file does not exist yet.
         """
-        markers_dir = self._require_markers_dir()
-        marker = markers_dir / f"{alias}.log"
+        if self._tempdir is None:
+            raise SshdFixtureError("sshd fixture is not running")
+        marker = self._tempdir / "markers" / f"{alias}.log"
         if not marker.exists():
             return ""
         return marker.read_bytes().decode("utf-8", errors="replace")
-
-    def markers_dir(self) -> str:
-        """Return the absolute path of the markers directory."""
-        return str(self._require_markers_dir())
-
-    def ssh_config_path(self) -> str:
-        """Return the absolute path of the generated ``ssh_config``."""
-        if self._ssh_config_path is None:
-            raise SshdFixtureError("sshd fixture is not running")
-        return str(self._ssh_config_path)
-
-    def port(self) -> int:
-        """Return the TCP port sshd is listening on."""
-        if self._port is None:
-            raise SshdFixtureError("sshd fixture is not running")
-        return self._port
-
-    def host_aliases(self) -> list[str]:
-        """Return the list of configured host aliases."""
-        return list(self._aliases)
-
-    def _require_markers_dir(self) -> Path:
-        if self._markers_dir is None:
-            raise SshdFixtureError("sshd fixture is not running")
-        return self._markers_dir
 
 
 def _terminate(process: subprocess.Popen[bytes] | None) -> None:
@@ -292,18 +247,13 @@ def _write_openssh_keypair(private_path: Path) -> None:
 def _harden_private_key_permissions(private_path: Path) -> None:
     """Lock down ``private_path`` so OpenSSH accepts it as a private key.
 
-    On POSIX this is a ``chmod 0600``. On Windows OpenSSH ignores the
-    POSIX mode and instead rejects any key file whose ACL grants access
-    beyond the owner, SYSTEM or Administrators - under the per-run temp
-    tree the file carries an ``OWNER RIGHTS`` (``S-1-3-4``) ACE that sshd
-    flags before exiting with ``no hostkeys available``. Stripping
-    inheritance alone does not drop that ACE, so it is removed explicitly
-    and the current user is granted sole access via ``icacls``. The result
-    is verified so a lingering ``OWNER RIGHTS`` ACE surfaces as a clear
-    error with the offending ACL rather than an opaque sshd failure.
-
-    Args:
-        private_path: Path of the private key file to lock down.
+    POSIX: ``chmod 0600``. Windows: OpenSSH ignores the POSIX mode and
+    rejects any key whose ACL grants access beyond the owner, SYSTEM or
+    Administrators. Files under the per-run temp tree carry an OWNER RIGHTS
+    (``S-1-3-4``) ACE that survives stripping inheritance, so it is removed
+    explicitly and the current user granted sole access via ``icacls``. The
+    ACL is then re-read and verified, turning a lingering ACE into a clear
+    error here instead of an opaque ``no hostkeys available`` from sshd.
     """
     if os.name != "nt":
         with contextlib.suppress(OSError):
@@ -330,22 +280,13 @@ def _harden_private_key_permissions(private_path: Path) -> None:
 
 
 def _build_forced_command(executable: str, marker: str) -> str:
-    """Return the ``command="..."`` payload for an authorized_keys line.
+    """Return the ``command="..."`` payload (without enclosing quotes) for an
+    authorized_keys line that runs the marker writer as
+    ``<python> -m cssh_rs_e2e._marker_writer <marker>``.
 
-    Runs the marker writer as ``<python> -m cssh_rs_e2e._marker_writer
-    <marker>`` so it resolves through the installed package, not a path.
-
-    OpenSSH parses the value as a double-quoted string where ``\\"`` is a
-    literal quote and ``\\\\`` a literal backslash, so every backslash is
-    doubled and every inner quote escaped - letting interpreter and marker
-    paths survive sshd's parser even with spaces or backslashes.
-
-    Args:
-        executable: Python interpreter that runs the marker writer.
-        marker: Absolute path of the alias's ``markers/<alias>.log``.
-
-    Returns:
-        The escaped payload, without the enclosing quotes.
+    sshd parses the value as a double-quoted string, so every backslash is
+    doubled and every inner quote escaped; interpreter and marker paths then
+    survive even when they contain spaces or backslashes.
     """
     return (
         f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_e2e._marker_writer "
@@ -454,9 +395,9 @@ def _wait_for_listening(
     )
 
 
-def _read_log_tail(log_path: Path, max_bytes: int = 4096) -> str:
+def _read_log_tail(log_path: Path) -> str:
     try:
         data = log_path.read_bytes()
     except OSError:
         return ""
-    return data[-max_bytes:].decode("utf-8", errors="replace")
+    return data[-MAX_LOG_TAIL_BYTES:].decode("utf-8", errors="replace")

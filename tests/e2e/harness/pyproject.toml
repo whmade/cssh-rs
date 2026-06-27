@@ -34,8 +34,8 @@ addopts = "--import-mode=importlib"
 line-length = 100
 target-version = "py314"
 
-# Full flake8 family (pycodestyle, pyflakes, mccabe) plus the flake8-*
-# plugin sets ruff ports.
+# The flake8 family (pycodestyle, pyflakes, mccabe) plus the flake8-*
+# plugins that ruff ports.
 [tool.ruff.lint]
 select = [
     "E",    # pycodestyle errors
