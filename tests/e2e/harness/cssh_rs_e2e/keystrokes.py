@@ -1,11 +1,10 @@
 """Deliver synthetic keystrokes for the cssh-rs Windows E2E suite.
 
-This Robot Framework library types into whichever window is currently
-foreground; it never selects a target itself. Suites call the window focus
-library first so input lands in the daemon window (fan-out tests) or one
-client window (control-mode tests), then call these keywords to type. The
-keywords hold no sleeps - readiness is polled at the Robot Framework layer
-with ``Wait Until Keyword Succeeds``.
+This Robot Framework library types into whichever window is foreground; it
+never selects a target itself. Suites focus a window first (via the window
+focus library), then call these keywords. The keywords hold no sleeps;
+readiness is polled at the Robot Framework layer with
+``Wait Until Keyword Succeeds``.
 """
 
 from __future__ import annotations
@@ -24,15 +23,14 @@ class Keystrokes:
     ROBOT_LIBRARY_VERSION = "0.1.0"
 
     def type_text(self, text: str, interval: float = 0.0) -> None:
-        """Type ``text`` as literal characters into the foreground window.
+        """Type ``text`` as literal printable characters into the foreground window.
 
-        Types printable characters only; use ``press_key`` for named keys such
-        as Enter or Tab.
+        Use ``press_key`` for named keys such as Enter or Tab.
 
         Args:
             text: Characters to type.
-            interval: Seconds to wait between characters. Default 0.0 types as
-                fast as pyautogui allows; raise it if a terminal drops input.
+            interval: Seconds between characters; raise it if a terminal drops
+                fast input.
         """
         self._pyautogui().write(text, interval=interval)
 
@@ -46,16 +44,15 @@ class Keystrokes:
         self.type_text(text, interval=interval)
         self.press_key("enter")
 
-    def press_key(self, key: str, presses: int = 1) -> None:
+    def press_key(self, key: str) -> None:
         """Press a named key such as ``enter``, ``tab`` or ``esc``.
 
         Args:
             key: pyautogui key name to press.
-            presses: Number of times to press the key.
         """
         if not key:
             raise KeystrokesError("key must be a non-empty string")
-        self._pyautogui().press(key, presses=presses)
+        self._pyautogui().press(key)
 
     def send_hotkey(self, *keys: str) -> None:
         """Press ``keys`` together as a chord, e.g. ``ctrl`` ``c``.
@@ -72,10 +69,10 @@ class Keystrokes:
         """Import pyautogui lazily, disable its failsafe, and return the module.
 
         Imported here, not at module top: cssh_rs_e2e/__init__ re-exports this
-        module and is itself imported by the SSH-invoked marker writer, which
-        runs with no display and must stay free of pyautogui's GUI imports.
-        The failsafe aborts on a mouse move into a screen corner; these
-        keyboard-only keywords must not be killed by a stray cursor in CI.
+        module, which the SSH-invoked marker writer imports headless and must
+        stay free of pyautogui's GUI dependencies. The failsafe aborts input
+        on a mouse move into a screen corner, which would kill these
+        keyboard-only keywords in CI.
         """
         import pyautogui
 

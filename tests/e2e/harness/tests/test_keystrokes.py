@@ -53,14 +53,14 @@ def test_type_line_types_text_then_presses_enter(fake_pyautogui: _FakePyAutoGui)
 
     assert fake_pyautogui.calls == [
         ("write", ("payload",), {"interval": 0.01}),
-        ("press", ("enter",), {"presses": 1}),
+        ("press", ("enter",), {}),
     ]
 
 
-def test_press_key_forwards_key_and_presses(fake_pyautogui: _FakePyAutoGui) -> None:
-    Keystrokes().press_key("tab", presses=3)
+def test_press_key_forwards_key(fake_pyautogui: _FakePyAutoGui) -> None:
+    Keystrokes().press_key("tab")
 
-    assert fake_pyautogui.calls == [("press", ("tab",), {"presses": 3})]
+    assert fake_pyautogui.calls == [("press", ("tab",), {})]
 
 
 def test_press_key_rejects_empty_key(fake_pyautogui: _FakePyAutoGui) -> None:
