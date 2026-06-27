@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from libraries import sshd_fixture
-from libraries.sshd_fixture import SshdFixture, SshdFixtureError
+from cssh_rs_e2e import sshd_fixture
+from cssh_rs_e2e.sshd_fixture import SshdFixture, SshdFixtureError
 
 
 def test_quote_escapes_backslashes_then_quotes() -> None:
@@ -19,7 +19,7 @@ def test_quote_escapes_backslashes_then_quotes() -> None:
 def test_build_forced_command_invokes_marker_module() -> None:
     forced = sshd_fixture._build_forced_command("/usr/bin/python3", "/tmp/markers/h1.log")
 
-    assert forced == r"\"/usr/bin/python3\" -m libraries._marker_writer \"/tmp/markers/h1.log\""
+    assert forced == r"\"/usr/bin/python3\" -m cssh_rs_e2e._marker_writer \"/tmp/markers/h1.log\""
 
 
 def test_as_forward_slash_normalizes_separators() -> None:

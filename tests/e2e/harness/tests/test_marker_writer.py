@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from libraries import _marker_writer
+from cssh_rs_e2e import _marker_writer
 
 
 def _fake_stdin(data: bytes) -> types.SimpleNamespace:

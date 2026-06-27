@@ -283,7 +283,7 @@ def _write_openssh_keypair(private_path: Path) -> None:
 def _build_forced_command(executable: str, marker: str) -> str:
     """Return the ``command="..."`` payload for an authorized_keys line.
 
-    Runs the marker writer as ``<python> -m libraries._marker_writer
+    Runs the marker writer as ``<python> -m cssh_rs_e2e._marker_writer
     <marker>`` so it resolves through the installed package rather than a
     filesystem path.
 
@@ -302,7 +302,7 @@ def _build_forced_command(executable: str, marker: str) -> str:
         The escaped ``command`` payload, without the enclosing quotes.
     """
     return (
-        f"{_quote_authorized_keys_arg(executable)} -m libraries._marker_writer "
+        f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_e2e._marker_writer "
         f"{_quote_authorized_keys_arg(marker)}"
     )
 
