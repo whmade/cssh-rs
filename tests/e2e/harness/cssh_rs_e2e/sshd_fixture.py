@@ -150,9 +150,6 @@ class SshdFixture:
             )
 
             sshd_path = _resolve_sshd_path()
-            # sshd logs to sshd_log_path via -E; discard its stdout/stderr so no
-            # file handle outlives the subprocess and blocks tempdir removal on
-            # Windows.
             process = subprocess.Popen(
                 [
                     sshd_path,
@@ -251,13 +248,10 @@ def _write_openssh_keypair(private_path: Path) -> None:
 def _harden_private_key_permissions(private_path: Path) -> None:
     """Lock down ``private_path`` so OpenSSH accepts it as a private key.
 
-    POSIX: ``chmod 0600``. Windows: OpenSSH ignores the POSIX mode and
-    rejects any key whose ACL grants access beyond the owner, SYSTEM or
-    Administrators. Files under the per-run temp tree carry an OWNER RIGHTS
-    (``S-1-3-4``) ACE that survives stripping inheritance, so it is removed
-    explicitly and the current user granted sole access via ``icacls``. The
-    ACL is then re-read and verified, turning a lingering ACE into a clear
-    error here instead of an opaque ``no hostkeys available`` from sshd.
+    POSIX uses ``chmod 0600``. Windows ignores the POSIX mode, so ``icacls``
+    strips inheritance and the temp tree's OWNER RIGHTS (``S-1-3-4``) ACE and
+    grants the current user sole access, then re-reads the ACL to fail loudly
+    if any wider grant survives.
     """
     if os.name != "nt":
         with contextlib.suppress(OSError):

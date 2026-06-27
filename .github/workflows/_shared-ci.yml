@@ -176,12 +176,8 @@ jobs:
       - name: Run check-typography
         run: cargo xtask check-typography
 
-  # Lint, format, type-check and test the Python E2E harness
-  # (tests/e2e/harness) as four parallel jobs. They run on windows-latest -
-  # the harness's target platform - so the real-sshd integration test
-  # exercises the Windows path when an OpenSSH server is present (and skips
-  # otherwise). Tool versions are pinned in pyproject.toml; shared setup
-  # steps are reused through YAML anchors.
+  # Lint, format, type-check and test the Python E2E harness as four parallel
+  # jobs on windows-latest, the harness's target platform. Deps via pyproject.toml.
   e2e-harness-lint:
     runs-on: *runner-version
     steps:
