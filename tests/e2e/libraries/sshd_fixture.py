@@ -100,73 +100,80 @@ class SshdFixture:
             raise SshdFixtureError("host_aliases must be unique")
 
         tempdir = Path(tempfile.mkdtemp(prefix="cssh-e2e-sshd-"))
-        markers_dir = tempdir / "markers"
-        keys_dir = tempdir / "keys"
-        markers_dir.mkdir()
-        keys_dir.mkdir()
+        process: subprocess.Popen[bytes] | None = None
+        try:
+            markers_dir = tempdir / "markers"
+            keys_dir = tempdir / "keys"
+            markers_dir.mkdir()
+            keys_dir.mkdir()
 
-        host_key_path = tempdir / "host_ed25519"
-        _write_openssh_keypair(host_key_path)
+            host_key_path = tempdir / "host_ed25519"
+            _write_openssh_keypair(host_key_path)
 
-        authorized_keys_path = tempdir / "authorized_keys"
-        marker_writer = (Path(__file__).resolve().parent / "_marker_writer.py").resolve()
-        with authorized_keys_path.open("w", encoding="ascii", newline="\n") as handle:
-            for alias in aliases:
-                alias_key_path = keys_dir / f"{alias}_ed25519"
-                _write_openssh_keypair(alias_key_path)
-                pubkey = (alias_key_path.with_suffix(".pub")).read_text(encoding="ascii").strip()
-                marker_path = markers_dir / f"{alias}.log"
-                forced = _build_forced_command(
-                    sys.executable, str(marker_writer), str(marker_path)
-                )
-                handle.write(
-                    f'command="{forced}",no-port-forwarding,no-x11-forwarding,'
-                    f"no-pty,no-agent-forwarding,no-user-rc {pubkey}\n"
-                )
+            authorized_keys_path = tempdir / "authorized_keys"
+            with authorized_keys_path.open("w", encoding="utf-8", newline="\n") as handle:
+                for alias in aliases:
+                    alias_key_path = keys_dir / f"{alias}_ed25519"
+                    _write_openssh_keypair(alias_key_path)
+                    pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
+                    marker_path = markers_dir / f"{alias}.log"
+                    forced = _build_forced_command(sys.executable, str(marker_path))
+                    handle.write(
+                        f'command="{forced}",no-port-forwarding,no-x11-forwarding,'
+                        f"no-pty,no-agent-forwarding,no-user-rc {pubkey}\n"
+                    )
 
-        chosen_port = port if port is not None else _pick_free_port()
-        sshd_config_path = tempdir / "sshd_config"
-        sshd_log_path = tempdir / "sshd.log"
-        pid_path = tempdir / "sshd.pid"
-        sshd_config_path.write_text(
-            _render_sshd_config(
-                port=chosen_port,
-                host_key=host_key_path,
-                authorized_keys=authorized_keys_path,
-                pid_file=pid_path,
-            ),
-            encoding="ascii",
-        )
+            chosen_port = port if port is not None else _pick_free_port()
+            sshd_config_path = tempdir / "sshd_config"
+            sshd_log_path = tempdir / "sshd.log"
+            pid_path = tempdir / "sshd.pid"
+            sshd_config_path.write_text(
+                _render_sshd_config(
+                    port=chosen_port,
+                    host_key=host_key_path,
+                    authorized_keys=authorized_keys_path,
+                    pid_file=pid_path,
+                ),
+                encoding="utf-8",
+            )
 
-        known_hosts_path = tempdir / "known_hosts"
-        known_hosts_path.touch()
-        ssh_config_path = tempdir / "ssh_config"
-        ssh_config_path.write_text(
-            _render_ssh_config(
-                aliases=aliases,
-                port=chosen_port,
-                keys_dir=keys_dir,
-                known_hosts=known_hosts_path,
-                user=getpass.getuser(),
-            ),
-            encoding="ascii",
-        )
+            known_hosts_path = tempdir / "known_hosts"
+            known_hosts_path.touch()
+            ssh_config_path = tempdir / "ssh_config"
+            ssh_config_path.write_text(
+                _render_ssh_config(
+                    aliases=aliases,
+                    port=chosen_port,
+                    keys_dir=keys_dir,
+                    known_hosts=known_hosts_path,
+                    user=getpass.getuser(),
+                ),
+                encoding="utf-8",
+            )
 
-        sshd_path = _resolve_sshd_path()
-        log_file = sshd_log_path.open("wb")
-        process = subprocess.Popen(
-            [
-                sshd_path,
-                "-f",
-                str(sshd_config_path),
-                "-D",
-                "-E",
-                str(sshd_log_path),
-            ],
-            stdout=log_file,
-            stderr=log_file,
-            stdin=subprocess.DEVNULL,
-        )
+            sshd_path = _resolve_sshd_path()
+            # sshd's own log goes to sshd_log_path via -E; the process's own
+            # stdout/stderr are discarded so no file handle outlives the
+            # subprocess and blocks tempdir removal on Windows.
+            process = subprocess.Popen(
+                [
+                    sshd_path,
+                    "-f",
+                    str(sshd_config_path),
+                    "-D",
+                    "-E",
+                    str(sshd_log_path),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+            )
+
+            _wait_for_listening(chosen_port, process, sshd_log_path)
+        except BaseException:
+            _terminate(process)
+            _remove_tempdir(tempdir)
+            raise
 
         self._tempdir = tempdir
         self._process = process
@@ -174,12 +181,6 @@ class SshdFixture:
         self._aliases = aliases
         self._ssh_config_path = ssh_config_path
         self._markers_dir = markers_dir
-
-        try:
-            _wait_for_listening(chosen_port, process, sshd_log_path)
-        except Exception:
-            self.stop_sshd()
-            raise
 
         return {
             "port": chosen_port,
@@ -191,17 +192,8 @@ class SshdFixture:
 
     def stop_sshd(self) -> None:
         """Terminate sshd and remove the per-run temp directory."""
-        process = self._process
-        if process is not None:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=STOP_GRACE_SECONDS)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=STOP_GRACE_SECONDS)
-        if self._tempdir is not None and os.environ.get("CSSH_E2E_KEEP_TEMP") != "1":
-            shutil.rmtree(self._tempdir, ignore_errors=True)
+        _terminate(self._process)
+        _remove_tempdir(self._tempdir)
         self._process = None
         self._tempdir = None
         self._port = None
@@ -251,6 +243,24 @@ class SshdFixture:
         return self._markers_dir
 
 
+def _terminate(process: subprocess.Popen[bytes] | None) -> None:
+    """Stop ``process`` gracefully, escalating to kill after the grace period."""
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=STOP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=STOP_GRACE_SECONDS)
+
+
+def _remove_tempdir(tempdir: Path | None) -> None:
+    """Remove ``tempdir`` unless ``CSSH_E2E_KEEP_TEMP=1`` keeps it for debugging."""
+    if tempdir is not None and os.environ.get("CSSH_E2E_KEEP_TEMP") != "1":
+        shutil.rmtree(tempdir, ignore_errors=True)
+
+
 def _write_openssh_keypair(private_path: Path) -> None:
     """Write a fresh Ed25519 keypair in OpenSSH format next to ``private_path``."""
     private_key = Ed25519PrivateKey.generate()
@@ -267,19 +277,34 @@ def _write_openssh_keypair(private_path: Path) -> None:
     private_path.with_suffix(".pub").write_bytes(public_bytes + b"\n")
     with contextlib.suppress(OSError):
         # POSIX permission tightening; ignored on Windows where ACLs apply.
-        os.chmod(private_path, 0o600)
+        private_path.chmod(0o600)
 
 
-def _build_forced_command(executable: str, script: str, marker: str) -> str:
+def _build_forced_command(executable: str, marker: str) -> str:
     """Return the ``command="..."`` payload for an authorized_keys line.
+
+    Runs the marker writer as ``<python> -m libraries._marker_writer
+    <marker>`` so it resolves through the installed package rather than a
+    filesystem path.
 
     OpenSSH parses the value as a double-quoted string in which ``\\"``
     becomes a literal double quote and ``\\\\`` becomes a literal
     backslash. We therefore double every backslash and escape every
-    inner quote so paths containing spaces or backslashes survive both
-    sshd's parser and the downstream shell exec.
+    inner quote so the interpreter and marker paths survive both sshd's
+    parser and the downstream shell exec even when they contain spaces
+    or backslashes.
+
+    Args:
+        executable: Python interpreter that runs the marker writer.
+        marker: Absolute path of the alias's ``markers/<alias>.log``.
+
+    Returns:
+        The escaped ``command`` payload, without the enclosing quotes.
     """
-    return " ".join(_quote_authorized_keys_arg(part) for part in (executable, script, marker))
+    return (
+        f"{_quote_authorized_keys_arg(executable)} -m libraries._marker_writer "
+        f"{_quote_authorized_keys_arg(marker)}"
+    )
 
 
 def _quote_authorized_keys_arg(value: str) -> str:
@@ -352,9 +377,7 @@ def _resolve_sshd_path() -> str:
     override = os.environ.get("CSSH_E2E_SSHD")
     if override:
         if not Path(override).exists():
-            raise SshdFixtureError(
-                f"CSSH_E2E_SSHD points at non-existent path: {override}"
-            )
+            raise SshdFixtureError(f"CSSH_E2E_SSHD points at non-existent path: {override}")
         return override
     resolved = shutil.which("sshd")
     if resolved:
@@ -362,9 +385,7 @@ def _resolve_sshd_path() -> str:
     for candidate in DEFAULT_SSHD_LOCATIONS:
         if Path(candidate).exists():
             return candidate
-    raise SshdFixtureError(
-        "could not locate sshd; set CSSH_E2E_SSHD or install OpenSSH server"
-    )
+    raise SshdFixtureError("could not locate sshd; set CSSH_E2E_SSHD or install OpenSSH server")
 
 
 def _wait_for_listening(
@@ -377,8 +398,7 @@ def _wait_for_listening(
         if process.poll() is not None:
             log_tail = _read_log_tail(log_path)
             raise SshdFixtureError(
-                f"sshd exited with code {process.returncode} before "
-                f"binding port {port}\n{log_tail}"
+                f"sshd exited with code {process.returncode} before binding port {port}\n{log_tail}"
             )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.5):
@@ -412,7 +432,7 @@ def _smoke() -> int:
             print(f"ssh client not found at {ssh}; skipping drive step")
         else:
             for alias in aliases:
-                payload = f"hello-{alias}\n".encode("utf-8")
+                payload = f"hello-{alias}\n".encode()
                 result = subprocess.run(
                     [ssh, "-F", str(info["ssh_config"]), alias],
                     input=payload,

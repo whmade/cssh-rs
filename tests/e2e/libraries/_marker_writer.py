@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from pathlib import Path
 
 
 def main() -> int:
@@ -28,7 +29,7 @@ def main() -> int:
         return 2
     marker_path = sys.argv[1]
     try:
-        with open(marker_path, "ab") as marker:
+        with Path(marker_path).open("ab") as marker:
             shutil.copyfileobj(sys.stdin.buffer, marker)
     except OSError as exc:
         sys.stderr.write(f"marker write failed: {exc}\n")

@@ -1,0 +1,8 @@
+# Python E2E project build and tool artifacts.
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.ruff_cache/
+.pyrefly/
