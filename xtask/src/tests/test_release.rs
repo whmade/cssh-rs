@@ -1,6 +1,5 @@
 //! Tests for the release module.
 
-use cssh_rs_meta::PACKAGE_NAME;
 use mockall::mock;
 use semver::Version;
 
@@ -38,9 +37,7 @@ mock! {
 }
 
 fn cargo_toml_with_version(version: &str) -> String {
-    format!(
-        "[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nversion = \"{version}\"\n\n[package]\nname = \"{PACKAGE_NAME}\"\nedition = \"2021\"\n"
-    )
+    format!("[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nversion = \"{version}\"\n")
 }
 
 fn clean_mock() -> MockReleaseSystemMock {
@@ -117,7 +114,7 @@ fn test_determine_release_type_patch() {
 
 #[test]
 fn test_set_cargo_toml_version_updates_version() {
-    // Arrange
+    // Arrange: the real root shape - workspace-only, no top-level [package].
     let content = cargo_toml_with_version("0.18.1");
 
     // Act
@@ -128,6 +125,10 @@ fn test_set_cargo_toml_version_updates_version() {
     assert_eq!(
         doc["workspace"]["package"]["version"].as_str().unwrap(),
         "1.0.0"
+    );
+    assert!(
+        doc.get("package").is_none(),
+        "set_cargo_toml_version must not introduce a [package] table"
     );
 }
 
@@ -141,29 +142,7 @@ fn test_set_cargo_toml_version_preserves_other_fields() {
 
     // Assert
     let doc: toml_edit::DocumentMut = result.parse().unwrap();
-    assert_eq!(doc["package"]["name"].as_str().unwrap(), PACKAGE_NAME);
-    assert_eq!(doc["package"]["edition"].as_str().unwrap(), "2021");
-}
-
-#[test]
-fn test_set_cargo_toml_version_workspace_only_root() {
-    // Arrange
-    let content =
-        "[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nversion = \"0.18.1\"\n";
-
-    // Act
-    let result = set_cargo_toml_version(content, "1.0.0").unwrap();
-
-    // Assert
-    let doc: toml_edit::DocumentMut = result.parse().unwrap();
-    assert_eq!(
-        doc["workspace"]["package"]["version"].as_str().unwrap(),
-        "1.0.0"
-    );
-    assert!(
-        doc.get("package").is_none(),
-        "set_cargo_toml_version must not introduce a [package] table"
-    );
+    assert_eq!(doc["workspace"]["members"][0].as_str().unwrap(), "xtask");
 }
 
 #[test]
