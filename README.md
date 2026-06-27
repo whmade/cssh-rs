@@ -1,9 +1,13 @@
-<p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/windows/cssh-rs.svg" width="100" alt="cssh-rs Logo" /></a></p>
+<p align="center">
+	<a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/linux/cssh-rs.svg" width="100" alt="cssh-rs linux Logo" /></a>
+	<a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/windows/cssh-rs.svg" width="150" alt="cssh-rs windows Logo" /></a>
+	<a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/macos/cssh-rs.svg" width="100" alt="cssh-rs macOs Logo" /></a>
+</p>
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
-  <a href="#cross-platform"><img src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows"></a>
   <a href="#cross-platform"><img src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black" alt="Linux"></a>
+	<a href="#cross-platform"><img src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white" alt="Windows"></a>
   <a href="#cross-platform"><img src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white" alt="macOS"></a>
 </p>
 <p align="center">
@@ -28,8 +32,8 @@ cssh-rs is designed to run on Windows, Linux, and macOS.
 <table align="center">
   <thead>
     <tr>
-      <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows"></a></th>
       <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" alt="Linux"></a></th>
+      <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" alt="Windows"></a></th>
       <th colspan="2" align="center"><a href="#cross-platform"><img height="60" src="https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white&style=for-the-badge" alt="macOS"></a></th>
     </tr>
     <tr>
@@ -40,28 +44,28 @@ cssh-rs is designed to run on Windows, Linux, and macOS.
   </thead>
   <tbody>
     <tr valign="top">
-      <td>conhost</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-implemented-brightgreen" alt="implemented"></a></td>
       <td>GNOME Terminal</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11)</td>
+      <td>conhost</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-implemented-brightgreen" alt="implemented"></a></td>
       <td>Alacritty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
     </tr>
     <tr valign="top">
-      <td>Windows Terminal</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
       <td>Alacritty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
+      <td>Windows Terminal</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
       <td>Kitty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
     </tr>
     <tr valign="top">
-      <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
       <td>Kitty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
       <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+      <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
     </tr>
     <tr valign="top">
-      <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
       <td>WezTerm</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
       <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
+      <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
     </tr>
     <tr valign="top">
-      <td colspan="2"></td>
       <td>Ghostty</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a> (X11, Wayland)</td>
+      <td colspan="2"></td>
       <td>Terminal.app</td><td><a href="#cross-platform"><img src="https://img.shields.io/badge/-planned-yellow" alt="planned"></a></td>
     </tr>
     <tr valign="top">
