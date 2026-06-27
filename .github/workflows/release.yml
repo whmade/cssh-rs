@@ -78,7 +78,7 @@ jobs:
           SIZE=$(stat -c%s "${ASSET}.zip")
           echo "Package size: ${SIZE} bytes"
 
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@v4.1.0
         with:
           subject-path: "cssh-rs-v${{ github.ref_name }}-x86_64-pc-windows-msvc.zip"
 
