@@ -4,6 +4,27 @@
 # Reusable workflow containing common CI jobs that can be called by both
 # the main CI workflow and the coverage CI workflow.
 # Uses YAML anchors where possible to reduce redundancy.
+#
+# Caching strategy: the workspace is compiled once per toolchain in a
+# dedicated builder job, then every follow-up job restores that warm
+# build instead of recompiling. There are two builders because the two
+# toolchains produce incompatible artifacts (cargo fingerprints by rustc
+# version + RUSTFLAGS):
+#   - build-stable  : the pinned stable toolchain, consumed by lint,
+#                     doc-tests and the xtask checks.
+#   - build-nightly : nightly + `-C instrument-coverage` via cargo-llvm-cov,
+#                     consumed only by the coverage `tests` job.
+# Two cache layers cooperate per builder:
+#   - Swatinem/rust-cache owns the cargo home (~/.cargo) and the pruned
+#     dependency target; it also exports CARGO_INCREMENTAL=0.
+#   - actions/cache owns the FULL, un-pruned `target` (including
+#     cargo-llvm-cov's `target/llvm-cov-target`, which Swatinem strips as a
+#     non-dependency artifact). This is what ships the instrumented test
+#     binaries from build-nightly to the tests job.
+# The `${{ github.sha }}` key suffix lets a builder save a per-commit cache
+# that same-run consumers restore as an exact hit (zero recompile), while
+# the restore-keys prefix gives the builder itself a warm incremental base
+# from the previous run.
 
 name: Shared CI Logic
 
@@ -20,9 +41,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Keep the actions/cache `target` lean and machine-portable. Swatinem sets
+  # this too, but setting it here guards the cache independently of step order.
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  build:
+  build-stable:
     runs-on: &runner-version windows-latest
     steps:
       - uses: &checkout-action actions/checkout@v7.0.0
@@ -30,16 +54,16 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - uses: &rust-cache-action Swatinem/rust-cache@v2
-        with: &rust-cache-shared-key
-          shared-key: ${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+        with: &rust-cache-stable
+          shared-key: stable
 
-      - uses: &build-cache actions/cache@v5.0.5
-        with: &build-cache-paths
-          path: |
-            ~\.cargo\git
-            ~\.cargo\registry
-            target
-          key: ${{runner.os}}-build-cache-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+      - uses: &target-cache actions/cache@v5.0.5
+        with: &target-cache-stable
+          path: target
+          key: ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-
+            ${{ runner.os }}-target-stable-
 
       - name: Build
         run: |
@@ -48,6 +72,51 @@ jobs:
 
       - name: Build docs
         run: cargo docs
+
+  build-nightly:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+
+      - uses: *rust-cache-action
+        with: &rust-cache-nightly
+          shared-key: nightly
+
+      - uses: *target-cache
+        with: &target-cache-nightly
+          path: target
+          key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.config/coverage/nightly-toolchain.version') }}-
+            ${{ runner.os }}-target-nightly-
+
+      - &read-nightly
+        name: Read nightly toolchain version
+        id: nightly
+        shell: bash
+        run: |
+          echo "version=$(cat .config/coverage/nightly-toolchain.version)" >> $GITHUB_OUTPUT
+
+      - &install-nightly
+        name: Install nightly toolchain
+        run: |
+          rustup toolchain install ${{ steps.nightly.outputs.version }} --component llvm-tools
+
+      - &install-llvm-cov
+        name: Install cargo-llvm-cov
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-llvm-cov
+          version: "^0.8.0"
+
+      # Compile the instrumented test binaries (into target/llvm-cov-target)
+      # without running them. `test --no-run` is the compile-only form; bare
+      # `--no-run` is the deprecated report alias and does NOT build. The
+      # feature/workspace flags MUST match the tests job's run so the restored
+      # binaries are fingerprint-compatible and are not recompiled there.
+      - name: Build instrumented test binaries
+        run: cargo +${{ steps.nightly.outputs.version }} llvm-cov test --no-run --all-features --workspace
 
   check-format:
     runs-on: *runner-version
@@ -59,50 +128,40 @@ jobs:
 
   check-lint:
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run linter
         run: cargo lint
 
   tests:
     timeout-minutes: 30
     runs-on: *runner-version
-    needs: build
+    needs: build-nightly
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-nightly
+      - uses: *target-cache
+        with: *target-cache-nightly
 
-      - name: Read nightly toolchain version
-        id: nightly
-        shell: bash
-        run: |
-          echo "version=$(cat .config/coverage/nightly-toolchain.version)" >> $GITHUB_OUTPUT
-
-      - name: Install nightly toolchain
-        run: |
-          rustup toolchain install ${{ steps.nightly.outputs.version }} --component llvm-tools
-
-      - name: Install cargo-llvm-cov
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-llvm-cov
-          version: "^0.8.0"
+      - *read-nightly
+      - *install-nightly
+      - *install-llvm-cov
 
       - name: Run tests with coverage
         run: |
           $nightly = "${{ steps.nightly.outputs.version }}"
           $ignoreRegex = (Get-Content -Raw ".config/coverage/ignore-filename.regex").Trim()
-          cargo +$nightly llvm-cov clean --workspace
+          # Reset only the profiling counters; keep the instrumented binaries
+          # restored from build-nightly so this job runs them without recompiling.
+          cargo +$nightly llvm-cov clean --workspace --profraw-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # PowerShell does not propagate native-command exit codes by default,
           # so capture the cargo test exit and surface it after writing reports.
@@ -139,40 +198,40 @@ jobs:
   tests-docs:
     timeout-minutes: 15
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run tests docs
         run: cargo doc-tests
 
   check-readme-help:
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run check-readme-help
         run: cargo xtask check-readme-help
 
   check-typography:
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run check-typography
         run: cargo xtask check-typography
 
