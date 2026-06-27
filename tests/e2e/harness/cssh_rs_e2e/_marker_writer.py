@@ -1,13 +1,9 @@
-"""Append the stdin byte stream to the file path passed in argv[1].
+"""Append the stdin byte stream to the marker file named in ``argv[1]``.
 
 Invoked by sshd through the per-key ``command="..."`` restriction in
-``authorized_keys``. Each successful connection from an alias-specific
-key runs this helper with that alias's marker path, so whatever the
-client writes on the channel lands in ``markers/<alias>.log``.
-
-The helper opens the marker file in binary append mode and copies
-``sys.stdin.buffer`` into it byte-for-byte. It must exit promptly so
-sshd can close the channel cleanly.
+``authorized_keys``: each connection from an alias's key runs this helper
+with that alias's marker path, so whatever the client sends on the channel
+lands in ``markers/<alias>.log``.
 """
 
 from __future__ import annotations

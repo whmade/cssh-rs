@@ -14,9 +14,8 @@ dependencies = [
     "cryptography==49.0.0",
 ]
 
-# Lint and type-check tooling. Installed with the package via
-# `pip install -e ".[dev]"` so versions stay pinned alongside the runtime
-# dependencies instead of in separate marker files.
+# Lint and type-check tooling, pinned alongside the runtime deps and
+# installed via `pip install -e ".[dev]"`.
 [project.optional-dependencies]
 dev = [
     "ruff==0.15.20",
@@ -35,9 +34,8 @@ addopts = "--import-mode=importlib"
 line-length = 100
 target-version = "py314"
 
-# Enable the full flake8 family (pycodestyle, pyflakes, mccabe) plus the
-# flake8-* plugin rule sets ruff ports, so the libraries are held to a
-# consistent quality bar.
+# Full flake8 family (pycodestyle, pyflakes, mccabe) plus the flake8-*
+# plugin sets ruff ports.
 [tool.ruff.lint]
 select = [
     "E",    # pycodestyle errors

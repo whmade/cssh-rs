@@ -1,24 +1,16 @@
 """Per-run user-mode sshd fixture for the cssh-rs Windows E2E suite.
 
-This Robot Framework library starts a fresh OpenSSH ``sshd`` instance on
-``127.0.0.1`` at a high TCP port for the duration of a test suite. Each
-logical host alias gets its own Ed25519 keypair, and the matching
-``authorized_keys`` entry pins a ``command="..."`` restriction that pipes
-the SSH channel's stdin into ``markers/<alias>.log``. Test suites assert
-fan-out by reading those marker files after exercising ``cssh-rs``.
+This Robot Framework library starts a fresh OpenSSH ``sshd`` on
+``127.0.0.1`` at a high TCP port for one test suite, with no elevation and
+no shared system state. Each host alias gets its own Ed25519 keypair whose
+``authorized_keys`` entry pins a ``command="..."`` restriction piping the
+SSH channel's stdin into ``markers/<alias>.log``; suites assert cssh-rs
+fan-out by reading those marker files.
 
-Everything lives inside a per-run temp directory: host key, per-alias
-keypairs, ``authorized_keys``, the generated ``sshd_config`` and
-``ssh_config``, a ``known_hosts`` file, the markers directory, and the
-sshd log. The fixture does not touch any system path and needs no
-elevation.
-
-The library exposes the keywords ``Start Sshd``, ``Stop Sshd``,
-``Read Marker``, ``Markers Dir``, ``Ssh Config Path``, ``Port`` and
-``Host Aliases`` to Robot Framework suites. A ``__main__`` smoke entry
-brings the fixture up locally, drives a real ``ssh`` against each
-alias, prints the resulting marker contents and tears down again, so
-the library can be sanity-checked outside of Robot.
+All state - host key, per-alias keypairs, ``authorized_keys``, the
+generated ``sshd_config`` and ``ssh_config``, ``known_hosts``, the markers
+directory and the sshd log - lives in one per-run temp directory that
+``Stop Sshd`` removes.
 """
 
 from __future__ import annotations
@@ -54,11 +46,13 @@ STOP_GRACE_SECONDS = 3.0
 """Seconds granted to sshd to exit after ``terminate()`` before ``kill()``."""
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-"""Allowed shape for a host alias - a single safe token with no path
-separators, whitespace, or control characters, since each alias is
-interpolated into filenames and the generated ``ssh_config``."""
+"""Allowed host alias shape; aliases are interpolated into filenames and the
+generated ``ssh_config``, so path separators, whitespace and control
+characters are rejected."""
 
-MIN_TCP_PORT = 1
+# A caller-supplied port must be unprivileged (>= 1024); the fixture binds
+# without admin, matching the high-port default picked by _pick_free_port.
+MIN_UNPRIVILEGED_PORT = 1024
 MAX_TCP_PORT = 65535
 
 
@@ -113,9 +107,9 @@ class SshdFixture:
                     f"host alias must match {ALIAS_PATTERN.pattern} "
                     f"(no whitespace, path separators or control characters): {alias!r}"
                 )
-        if port is not None and not MIN_TCP_PORT <= port <= MAX_TCP_PORT:
+        if port is not None and not MIN_UNPRIVILEGED_PORT <= port <= MAX_TCP_PORT:
             raise SshdFixtureError(
-                f"port must be between {MIN_TCP_PORT} and {MAX_TCP_PORT}: {port}"
+                f"port must be between {MIN_UNPRIVILEGED_PORT} and {MAX_TCP_PORT}: {port}"
             )
 
         tempdir = Path(tempfile.mkdtemp(prefix="cssh-e2e-sshd-"))
@@ -145,13 +139,11 @@ class SshdFixture:
             chosen_port = port if port is not None else _pick_free_port()
             sshd_config_path = tempdir / "sshd_config"
             sshd_log_path = tempdir / "sshd.log"
-            pid_path = tempdir / "sshd.pid"
             sshd_config_path.write_text(
                 _render_sshd_config(
                     port=chosen_port,
                     host_key=host_key_path,
                     authorized_keys=authorized_keys_path,
-                    pid_file=pid_path,
                 ),
                 encoding="utf-8",
             )
@@ -341,22 +333,19 @@ def _build_forced_command(executable: str, marker: str) -> str:
     """Return the ``command="..."`` payload for an authorized_keys line.
 
     Runs the marker writer as ``<python> -m cssh_rs_e2e._marker_writer
-    <marker>`` so it resolves through the installed package rather than a
-    filesystem path.
+    <marker>`` so it resolves through the installed package, not a path.
 
-    OpenSSH parses the value as a double-quoted string in which ``\\"``
-    becomes a literal double quote and ``\\\\`` becomes a literal
-    backslash. We therefore double every backslash and escape every
-    inner quote so the interpreter and marker paths survive both sshd's
-    parser and the downstream shell exec even when they contain spaces
-    or backslashes.
+    OpenSSH parses the value as a double-quoted string where ``\\"`` is a
+    literal quote and ``\\\\`` a literal backslash, so every backslash is
+    doubled and every inner quote escaped - letting interpreter and marker
+    paths survive sshd's parser even with spaces or backslashes.
 
     Args:
         executable: Python interpreter that runs the marker writer.
         marker: Absolute path of the alias's ``markers/<alias>.log``.
 
     Returns:
-        The escaped ``command`` payload, without the enclosing quotes.
+        The escaped payload, without the enclosing quotes.
     """
     return (
         f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_e2e._marker_writer "
@@ -374,22 +363,18 @@ def _render_sshd_config(
     port: int,
     host_key: Path,
     authorized_keys: Path,
-    pid_file: Path,
 ) -> str:
     return (
         f"Port {port}\n"
         "ListenAddress 127.0.0.1\n"
         f"HostKey {_as_forward_slash(host_key)}\n"
         f"AuthorizedKeysFile {_as_forward_slash(authorized_keys)}\n"
-        "PasswordAuthentication no\n"
         "PubkeyAuthentication yes\n"
+        "PasswordAuthentication no\n"
         "PermitRootLogin no\n"
-        "ChallengeResponseAuthentication no\n"
-        "KbdInteractiveAuthentication no\n"
         # StrictModes is disabled so the fixture works from any user-owned
         # temp directory; the per-run tree is unique and isolated anyway.
         "StrictModes no\n"
-        f"PidFile {_as_forward_slash(pid_file)}\n"
         "LogLevel VERBOSE\n"
     )
 
@@ -475,38 +460,3 @@ def _read_log_tail(log_path: Path, max_bytes: int = 4096) -> str:
     except OSError:
         return ""
     return data[-max_bytes:].decode("utf-8", errors="replace")
-
-
-def _smoke() -> int:
-    """Bring the fixture up, drive ssh against each alias, tear down."""
-    aliases = sys.argv[1:] or ["h1", "h2"]
-    fixture = SshdFixture()
-    info = fixture.start_sshd(aliases)
-    print(f"fixture: {info}")
-    try:
-        ssh = shutil.which("ssh") or r"C:\Windows\System32\OpenSSH\ssh.exe"
-        if not Path(ssh).exists():
-            print(f"ssh client not found at {ssh}; skipping drive step")
-        else:
-            for alias in aliases:
-                payload = f"hello-{alias}\n".encode()
-                result = subprocess.run(
-                    [ssh, "-F", str(info["ssh_config"]), alias],
-                    input=payload,
-                    capture_output=True,
-                    timeout=10,
-                    check=False,
-                )
-                print(
-                    f"ssh {alias}: rc={result.returncode}, "
-                    f"stderr={result.stderr.decode('utf-8', 'replace').strip()}"
-                )
-        for alias in aliases:
-            print(f"markers/{alias}.log -> {fixture.read_marker(alias)!r}")
-    finally:
-        fixture.stop_sshd()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(_smoke())

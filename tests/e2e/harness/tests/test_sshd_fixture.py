@@ -32,7 +32,6 @@ def test_render_sshd_config_emits_expected_directives(tmp_path: Path) -> None:
         port=2222,
         host_key=tmp_path / "host_ed25519",
         authorized_keys=tmp_path / "authorized_keys",
-        pid_file=tmp_path / "sshd.pid",
     )
 
     assert "Port 2222\n" in config
@@ -136,7 +135,7 @@ def test_start_sshd_rejects_unsafe_aliases(alias: str) -> None:
         SshdFixture().start_sshd([alias])
 
 
-@pytest.mark.parametrize("port", [0, -1, 65536, 100000])
+@pytest.mark.parametrize("port", [0, -1, 1023, 65536, 100000])
 def test_start_sshd_rejects_out_of_range_port(port: int) -> None:
     with pytest.raises(SshdFixtureError, match="port must be between"):
         SshdFixture().start_sshd(["h1"], port=port)
