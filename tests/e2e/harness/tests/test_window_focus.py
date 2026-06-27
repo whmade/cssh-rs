@@ -19,12 +19,6 @@ class _FakeWindow:
         self.activate_calls.append({"wait": wait, "user": user})
         return self._activates
 
-    def getHandle(self) -> int:  # noqa: N802 - mirrors pywinctl's API name
-        return 4242
-
-    def getPID(self) -> int:  # noqa: N802 - mirrors pywinctl's API name
-        return 1234
-
 
 def _patch_matches(
     monkeypatch: pytest.MonkeyPatch, matches: list[_FakeWindow]
@@ -63,13 +57,13 @@ def test_focus_window_rejects_unknown_match_mode() -> None:
         WindowFocus().focus_window("cssh-rs daemon", match_mode="fuzzy")
 
 
-def test_focus_window_returns_window_details(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_focus_window_returns_matched_title(monkeypatch: pytest.MonkeyPatch) -> None:
     window = _FakeWindow("cssh-rs daemon")
     _patch_matches(monkeypatch, [window])
 
     result = WindowFocus().focus_window("cssh-rs daemon")
 
-    assert result == {"title": "cssh-rs daemon", "handle": 4242, "pid": 1234}
+    assert result == "cssh-rs daemon"
     assert window.activate_calls == [{"wait": True, "user": True}]
 
 
@@ -106,7 +100,7 @@ def test_focus_window_retries_until_a_match_appears(
 
     result = WindowFocus().focus_window("cssh-rs daemon", poll_interval=0.0)
 
-    assert result["title"] == "cssh-rs daemon"
+    assert result == "cssh-rs daemon"
     assert results == []
 
 
@@ -128,7 +122,7 @@ def test_focus_window_matches_non_ascii_title(monkeypatch: pytest.MonkeyPatch) -
 
     result = WindowFocus().focus_window(unicode_title)
 
-    assert result["title"] == unicode_title
+    assert result == unicode_title
 
 
 def test_get_active_window_title_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:

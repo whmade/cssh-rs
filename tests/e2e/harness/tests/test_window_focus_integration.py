@@ -1,13 +1,11 @@
-"""Integration test that focuses a real window through the library.
+"""Integration smoke test that focuses a real window through the library.
 
-Skipped off Windows, so the hermetic unit suite still runs everywhere. On
-``windows-latest`` it spawns a short-lived Tk window with a unique title and
-verifies the library activates it and reports it as foreground.
+Skipped off Windows. On ``windows-latest`` it spawns a uniquely-titled Tk
+window and asserts the library activates it and reports it as foreground.
 """
 
 from __future__ import annotations
 
-import contextlib
 import subprocess
 import sys
 import uuid
@@ -36,7 +34,7 @@ def test_focus_window_activates_a_real_window() -> None:
     try:
         result = WindowFocus().focus_window(title, timeout=10.0)
 
-        assert result["title"] == title
+        assert result == title
         assert WindowFocus().get_active_window_title() == title
     finally:
         _terminate(helper)
@@ -50,5 +48,3 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
         process.kill()
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.wait(timeout=_GRACE_SECONDS)
