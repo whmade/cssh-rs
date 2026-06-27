@@ -1,88 +1,128 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!--
-  cssh-rs - Cross-platform cluster SSH
+  cssh-rs - Cross-platform cluster SSH (macOS variant)
 
-  App icon, designed to match the visual language of the official
-  Windows Terminal icon (microsoft/terminal, res/terminal/Terminal.svg).
+  App icon for macOS. Same "leader + secondaries" stack as the Windows
+  icon (res/windows/cssh-rs.svg) - two stylized terminal windows offset by
+  (+16, +12) - but each window is reshaped to read as a native macOS
+  object in its own right. There is deliberately NO outer app-icon tile:
+  the macOS design language is applied per window, not to the whole
+  composition, so the two windows still read as two stacked icons.
 
   Canvas: 60x60. Two terminal windows:
-    - secondary  → the back window (dark, dimmed)
-    - leader     → the front window (red, bright, with underscore
-                    cursor), offset by (+16, +12) to form the
-                    "leader + secondaries" stack.
-
+    - secondary  -> the back window (dark, dimmed, UNFOCUSED).
+    - leader     -> the front window (red, bright, with underscore
+                    cursor), offset by (+16, +12).
   The leader is tinted red (Campbell "red" #C50F1F from the Windows
   Terminal default scheme) to mark the broadcasting session.
 
+  Per-window macOS identity
+  =========================
+  Distilled from the macOS Terminal.app icon and Apple's Big Sur+ icons,
+  applied to EACH window:
+
+  1. SQUIRCLE corners. Each window frame is a continuous-corner
+     superellipse (|.|^4), not the squarer circular-corner rectangle of
+     the Windows variant. #windowSilhouette / #titleBar are a sampled
+     superellipse with corner extent r=10 over a 44x42 frame.
+
+  2. DEPTH. Each window carries a top-lit body gradient and an edge bevel
+     so it reads as a sculpted object rather than a flat cutout. Edge
+     definition comes from a rim-light bevel (#rimBase + #rimTL + #rimBR)
+     measured off the macOS Terminal icon - a continuous rim all round,
+     brighter as a broad top-left highlight plus a small bottom-right glow
+     - the way Apple's icons catch light on the bevel, NOT from a flat
+     outline stroke. (No drop shadow: macOS app icons do not bake one in.)
+
+  3. macOS chrome + prompt glyph. Traffic-light controls (filled
+     circles) sit LEFT of each title bar - coloured on the focused
+     leader, greyed on the unfocused secondary - sized to ~0.4 of the
+     title-bar height with macOS-like spacing. Each window keeps the
+     ">_" chevron + underscore prompt motif Terminal.app uses.
+
   Single source of truth
   ======================
-  All theming values — colors, gradient stops, opacity — are declared
+  All theming values - colors, gradient stops, opacity - are declared
   exactly once as CSS class rules in the <style> block. Glyph paths
-  (title bar shell, body shell, chevron arms, underscore cursor) are
-  defined once in <defs> and referenced via <use> from both windows.
+  (title bar shell, body / silhouette shell, chevron arms, underscore
+  cursor) are defined once in <defs> and referenced via <use>.
 
-  The shadow offset (1.6 SVG units, south-east) is expressed as an
-  SVG transform attribute rather than CSS — CSS transforms on SVG
-  elements are not reliably applied by all renderers. It appears
-  twice: once wrapping the secondary chevron shadows, and once
-  wrapping the leader's combined chevron + cursor shadows.
+  The glyph shadow offset (1.6 SVG units, south-east) is expressed as an
+  SVG transform attribute rather than CSS - CSS transforms on SVG
+  elements are not reliably applied by all renderers.
 
-  Chevron arm thickness is ~20% greater than a naïve mitred join
-  would give, to better match the 5u height of the underscore.
+  Chevron arm thickness is ~20% greater than a naive mitred join would
+  give, to better match the 5u height of the underscore.
 -->
 <svg width="60" height="60" viewBox="0 0 60 60"
      xmlns="http://www.w3.org/2000/svg">
 
   <style><![CDATA[
     /* =====================================================================
-       SINGLE SOURCE OF TRUTH — all theming values declared exactly once.
+       SINGLE SOURCE OF TRUTH - all theming values declared exactly once.
        ===================================================================== */
 
     /* Secondary (back) window: dark gray, dimmed, no cursor. */
     .secondaryTitlebar      { fill: #3A3A3A; }
     .secondaryBody          { fill: url(#bodyGradSecondary); }
-    .secondaryCtl           { stroke: #8A8A8A; }
     .secondaryChevronFg     { fill: #B0B0B0; }
     .secondaryChevronShadow { fill: #1F1F1F; }
     .secondaryChevronStack  { opacity: 0.7; }
-    .secondaryGradStart     { stop-color: #333333; }
-    .secondaryGradEnd       { stop-color: #4D4D4D; }
+    .secondaryGradStart     { stop-color: #4D4D4D; }
+    .secondaryGradEnd       { stop-color: #333333; }
 
     /* Leader (front) window: red, bright, with underscore cursor. */
     .leaderTitlebar         { fill: #7A0A14; }
     .leaderBody             { fill: url(#bodyGradLeader); }
-    .leaderCtlMin           { stroke: #FEBC2E; }
-    .leaderCtlMax           { stroke: #28C840; }
-    .leaderCtlClose         { stroke: #FF5F57; }
     .leaderChevronFg        { fill: #FFFFFF; }
     .leaderChevronShadow    { fill: #5A0710; }
-    .leaderGradStart        { stop-color: #9A0C18; }
-    .leaderGradEnd          { stop-color: #C50F1F; }
+    .leaderGradStart        { stop-color: #C50F1F; }
+    .leaderGradEnd          { stop-color: #9A0C18; }
 
-    /* Shared. */
-    .ctlGroup               { stroke-width: 0.7; stroke-linecap: round; fill: none; }
+    /* Edge bevel (the macOS rim), stroked so it traces the whole rounded
+       edge. Three white layers, drawn in order:
+         rimBase - a CONTINUOUS rim around the entire perimeter so the edge
+                   is defined everywhere (slightly brighter at the top, as
+                   the extruded edge catches light all the way round);
+         rimTL   - broad primary highlight over the top-left, measured off
+                   the macOS Terminal icon (brightest at the corner,
+                   spreading along the top and left edges to their mids);
+         rimBR   - smaller secondary glow at the bottom-right corner.
+       Shared by both windows. */
+    .rimBase                { fill: none; stroke: url(#rimBase); stroke-width: 0.8; }
+    .rimTL                  { fill: none; stroke: url(#rimTL); stroke-width: 0.8; }
+    .rimBR                  { fill: none; stroke: url(#rimBR); stroke-width: 0.8; }
+
+    /* macOS traffic-light controls (filled circles, left-aligned). */
+    .macClose               { fill: #FF5F57; }
+    .macMin                 { fill: #FEBC2E; }
+    .macZoom                { fill: #28C840; }
+    .macCtlOff              { fill: #8A8A8A; }  /* unfocused window */
   ]]></style>
 
   <defs>
     <!-- ========================= GLYPH PATHS =========================
          Each path is defined once and referenced by both windows.
-         No colors here — fill/stroke come from the CSS classes above. -->
+         No colors here - fill/stroke come from the CSS classes above. -->
 
-    <!-- Title bar shell. -->
+    <!-- Title bar shell: superellipse top corners (r=10), flat bottom
+         edge at y=13 where it meets the body. -->
     <path id="titleBar"
-          d="M0 13H44V8C44 6.9 43.1 6 42 6H2C0.9 6 0 6.9 0 8V13Z"/>
+          d="M10 0 34 0 34.0 0.0 37.35 0.03 38.72 0.13 39.75 0.28 40.59 0.51 41.29 0.8 41.9 1.16 42.41 1.59 42.84 2.1 43.2 2.71 43.49 3.41 43.72 4.25 43.87 5.28 43.97 6.65 44.0 10.0 44 13 0 13 0 10 0.0 10.0 0.03 6.65 0.13 5.28 0.28 4.25 0.51 3.41 0.8 2.71 1.16 2.1 1.59 1.59 2.1 1.16 2.71 0.8 3.41 0.51 4.25 0.28 5.28 0.13 6.65 0.03 10.0 0.0Z"/>
 
-    <!-- Window body shell. -->
-    <path id="bodyShape"
-          d="M42 42H2C0.9 42 0 41.1 0 40V12H44V40C44 41.1 43.1 42 42 42Z"/>
+    <!-- Window body / full silhouette: superellipse on all four corners
+         (r=10) over the 44x42 frame. Used filled as the body and stroked
+         as the hairline rim. -->
+    <path id="windowSilhouette"
+          d="M10 0 34 0 34.0 0.0 37.35 0.03 38.72 0.13 39.75 0.28 40.59 0.51 41.29 0.8 41.9 1.16 42.41 1.59 42.84 2.1 43.2 2.71 43.49 3.41 43.72 4.25 43.87 5.28 43.97 6.65 44.0 10.0 44 32 44.0 32.0 43.97 35.35 43.87 36.72 43.72 37.75 43.49 38.59 43.2 39.29 42.84 39.9 42.41 40.41 41.9 40.84 41.29 41.2 40.59 41.49 39.75 41.72 38.72 41.87 37.35 41.97 34.0 42.0 10 42 10.0 42.0 6.65 41.97 5.28 41.87 4.25 41.72 3.41 41.49 2.71 41.2 2.1 40.84 1.59 40.41 1.16 39.9 0.8 39.29 0.51 38.59 0.28 37.75 0.13 36.72 0.03 35.35 0.0 32.0 0 10 0.0 10.0 0.03 6.65 0.13 5.28 0.28 4.25 0.51 3.41 0.8 2.71 1.16 2.1 1.59 1.59 2.1 1.16 2.71 0.8 3.41 0.51 4.25 0.28 5.28 0.13 6.65 0.03 10.0 0.0Z"/>
 
-    <!-- Chevron, lower arm (apex → bottom-left).
-         Perpendicular thickness ~4.9u (≈20% thicker than a default
+    <!-- Chevron, lower arm (apex -> bottom-left).
+         Perpendicular thickness ~4.9u (~20% thicker than a default
          mitred join) to better match the 5u-tall underscore. -->
     <path id="chLower"
           d="M13.92 22.52L6.12 30.32C5.62 30.82 5.62 31.52 6.12 31.92L7.98 33.78C8.48 34.28 9.18 34.28 9.58 33.78L17.38 25.98C17.88 25.48 17.88 24.78 17.38 24.38L15.52 22.52C15.12 22.12 14.32 22.12 13.92 22.52Z"/>
 
-    <!-- Chevron, upper arm (top-left → apex). Mirrors chLower across
+    <!-- Chevron, upper arm (top-left -> apex). Mirrors chLower across
          the horizontal. -->
     <path id="chUpper"
           d="M9.58 16.02L17.38 23.82C17.88 24.32 17.88 25.02 17.38 25.42L15.52 27.28C15.02 27.78 14.32 27.78 13.92 27.28L6.12 19.48C5.62 18.98 5.62 18.28 6.12 17.88L7.98 16.02C8.38 15.62 9.18 15.62 9.58 16.02Z"/>
@@ -92,41 +132,71 @@
           d="M40 32H24C23.4 32 23 32.4 23 33V36C23 36.6 23.4 37 24 37H40C40.6 37 41 36.6 41 36V33C41 32.4 40.6 32 40 32Z"/>
 
     <!-- ========================= BODY GRADIENTS =========================
-         Stop colors are applied via CSS classes so every hex value
-         lives only in the <style> block above. -->
+         Top-lit: lighter stop at the top, darker at the bottom. Stop
+         colors come from CSS classes so every hex lives in <style>. -->
     <linearGradient id="bodyGradSecondary"
-                    x1="36" y1="47" x2="11" y2="5"
+                    x1="22" y1="0" x2="22" y2="42"
                     gradientUnits="userSpaceOnUse">
       <stop class="secondaryGradStart" offset="0"/>
       <stop class="secondaryGradEnd"   offset="1"/>
     </linearGradient>
     <linearGradient id="bodyGradLeader"
-                    x1="36" y1="47" x2="11" y2="5"
+                    x1="22" y1="0" x2="22" y2="42"
                     gradientUnits="userSpaceOnUse">
       <stop class="leaderGradStart" offset="0"/>
       <stop class="leaderGradEnd"   offset="1"/>
     </linearGradient>
+
+    <!-- Edge bevel gradients (stroked onto the rounded edge).
+         userSpaceOnUse means each window maps them to its own 44x42 box.
+
+         rimBase: continuous rim around the WHOLE edge, a little brighter at
+         the top than the bottom, so the border reads everywhere - not only
+         where the highlights are. -->
+    <linearGradient id="rimBase" x1="22" y1="0" x2="22" y2="42"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.09"/>
+    </linearGradient>
+    <!-- rimTL: broad primary highlight, centred just outside the top-left
+         corner (8,6), large radius so it grazes the top and left edges
+         out to their midpoints before fading. -->
+    <radialGradient id="rimTL" cx="8" cy="6" r="30"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <!-- rimBR: smaller secondary glow at the bottom-right corner. -->
+    <radialGradient id="rimBR" cx="44" cy="42" r="16"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
   </defs>
+
+  <!-- =================== COMPOSITION (inset) ===================
+       Both windows are scaled to 0.83 and nudged in so the stack sits with
+       a margin inside the 60x60 canvas instead of bleeding off the right /
+       bottom edge (the leader's right edge would otherwise sit on x=60). -->
+  <g transform="translate(5, 6) scale(0.83)">
 
   <!-- ========================= SECONDARY WINDOW =========================
        Back window: dark gray, dimmed to 0.7 opacity on the chevron,
-       no cursor. Sits at the canvas origin. -->
+       no cursor, traffic lights greyed (unfocused). Sits at the
+       composition origin. -->
   <g>
-    <!-- 1. Title bar. -->
+    <!-- 1. Body, then title bar over its top. -->
+    <use href="#windowSilhouette" class="secondaryBody"/>
     <use href="#titleBar" class="secondaryTitlebar"/>
 
-    <!-- 2. Controls: minimize dash, maximize square, close cross. -->
-    <g class="ctlGroup">
-      <line class="secondaryCtl" x1="29.3" y1="10.4" x2="31.7" y2="10.4"/>
-      <rect class="secondaryCtl" x="34.3"  y="8.3"   width="2.4" height="2.4" rx="0.2"/>
-      <line class="secondaryCtl" x1="39.3" y1="8.3"  x2="41.7" y2="10.7"/>
-      <line class="secondaryCtl" x1="41.7" y1="8.3"  x2="39.3" y2="10.7"/>
+    <!-- 2. Controls: greyed traffic lights, left-aligned (close, min, zoom). -->
+    <g class="macCtlOff">
+      <circle cx="5.5"  cy="6.5" r="2"/>
+      <circle cx="12"   cy="6.5" r="2"/>
+      <circle cx="18.5" cy="6.5" r="2"/>
     </g>
 
-    <!-- 3. Body. -->
-    <use href="#bodyShape" class="secondaryBody"/>
-
-    <!-- 4. Chevron: shadow (south-east offset) then foreground, dimmed. -->
+    <!-- 3. Chevron: shadow (south-east offset) then foreground, dimmed. -->
     <g class="secondaryChevronStack">
       <g transform="translate(1.6, 1.6)">
         <g class="secondaryChevronShadow">
@@ -139,27 +209,29 @@
         <use href="#chLower"/>
       </g>
     </g>
+
+    <!-- 4. Edge bevel: continuous base rim, then top-left and
+            bottom-right highlights on top. -->
+    <use href="#windowSilhouette" class="rimBase"/>
+    <use href="#windowSilhouette" class="rimTL"/>
+    <use href="#windowSilhouette" class="rimBR"/>
   </g>
 
   <!-- ========================= LEADER WINDOW =========================
-       Front window: red, full opacity, with underscore cursor.
-       Offset (+16, +12) to form the "leader + secondaries" stack. -->
+       Front window: red, full opacity, with underscore cursor, traffic
+       lights in colour (focused). Offset (+16, +12) to form the
+       "leader + secondaries" stack. -->
   <g transform="translate(16, 12)">
-    <!-- 1. Title bar. -->
+    <!-- 1. Body, then title bar over its top. -->
+    <use href="#windowSilhouette" class="leaderBody"/>
     <use href="#titleBar" class="leaderTitlebar"/>
 
-    <!-- 2. Controls: yellow minimize, green maximize, red close. -->
-    <g class="ctlGroup">
-      <line class="leaderCtlMin"   x1="29.3" y1="10.4" x2="31.7" y2="10.4"/>
-      <rect class="leaderCtlMax"   x="34.3"  y="8.3"   width="2.4" height="2.4" rx="0.2"/>
-      <line class="leaderCtlClose" x1="39.3" y1="8.3"  x2="41.7" y2="10.7"/>
-      <line class="leaderCtlClose" x1="41.7" y1="8.3"  x2="39.3" y2="10.7"/>
-    </g>
+    <!-- 2. Controls: red close, yellow minimize, green zoom, left-aligned. -->
+    <circle class="macClose" cx="5.5"  cy="6.5" r="2"/>
+    <circle class="macMin"   cx="12"   cy="6.5" r="2"/>
+    <circle class="macZoom"  cx="18.5" cy="6.5" r="2"/>
 
-    <!-- 3. Body. -->
-    <use href="#bodyShape" class="leaderBody"/>
-
-    <!-- 4. Chevron shadows and cursor shadow share one translate group,
+    <!-- 3. Chevron shadows and cursor shadow share one translate group,
             then foregrounds are drawn on top. -->
     <g transform="translate(1.6, 1.6)">
       <g class="leaderChevronShadow">
@@ -173,6 +245,14 @@
       <use href="#chLower"/>
     </g>
     <use href="#underscore" class="leaderChevronFg"/>
+
+    <!-- 4. Edge bevel: continuous base rim, then top-left and
+            bottom-right highlights on top. -->
+    <use href="#windowSilhouette" class="rimBase"/>
+    <use href="#windowSilhouette" class="rimTL"/>
+    <use href="#windowSilhouette" class="rimBR"/>
+  </g>
+
   </g>
 
 </svg>
