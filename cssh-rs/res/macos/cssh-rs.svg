@@ -32,11 +32,11 @@
      measured off the macOS Terminal icon - a continuous rim all round,
      brighter as a broad top-left highlight plus a small bottom-right glow
      - the way Apple's icons catch light on the bevel, NOT from a flat
-     outline stroke. (No drop shadow: macOS app icons do not bake one in.)
+     outline stroke.
 
   3. macOS chrome + prompt glyph. Traffic-light controls (filled
      circles) sit LEFT of each title bar - coloured on the focused
-     leader, greyed on the unfocused secondary - sized to ~0.4 of the
+     leader, greyed on the unfocused secondary - sized to ~0.3 of the
      title-bar height with macOS-like spacing. Each window keeps the
      ">_" chevron + underscore prompt motif Terminal.app uses.
 
@@ -178,7 +178,7 @@
        Both windows are scaled to 0.83 and nudged in so the stack sits with
        a margin inside the 60x60 canvas instead of bleeding off the right /
        bottom edge (the leader's right edge would otherwise sit on x=60). -->
-  <g transform="translate(5, 6) scale(0.83)">
+  <g transform="translate(5, 7.6) scale(0.83)">
 
   <!-- ========================= SECONDARY WINDOW =========================
        Back window: dark gray, dimmed to 0.7 opacity on the chevron,
