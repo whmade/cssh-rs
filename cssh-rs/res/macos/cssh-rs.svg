@@ -93,6 +93,14 @@
     .rimTL                  { fill: none; stroke: url(#rimTL); stroke-width: 0.8; }
     .rimBR                  { fill: none; stroke: url(#rimBR); stroke-width: 0.8; }
 
+    /* Rim gradient stops: all white, varying opacity. rimBase fades from a
+       brighter top to a dimmer bottom; the highlights glow from core to
+       transparent. */
+    .rimStopBaseTop         { stop-color: #FFFFFF; stop-opacity: 0.16; }
+    .rimStopBaseBottom      { stop-color: #FFFFFF; stop-opacity: 0.09; }
+    .rimStopGlow            { stop-color: #FFFFFF; stop-opacity: 0.5; }
+    .rimStopFade            { stop-color: #FFFFFF; stop-opacity: 0; }
+
     /* macOS traffic-light controls (filled circles, left-aligned). */
     .macClose               { fill: #FF5F57; }
     .macMin                 { fill: #FEBC2E; }
@@ -155,22 +163,22 @@
          where the highlights are. -->
     <linearGradient id="rimBase" x1="22" y1="0" x2="22" y2="42"
                     gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.09"/>
+      <stop class="rimStopBaseTop"    offset="0"/>
+      <stop class="rimStopBaseBottom" offset="1"/>
     </linearGradient>
     <!-- rimTL: broad primary highlight, centred just outside the top-left
          corner (8,6), large radius so it grazes the top and left edges
          out to their midpoints before fading. -->
     <radialGradient id="rimTL" cx="8" cy="6" r="30"
                     gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.5"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop class="rimStopGlow" offset="0"/>
+      <stop class="rimStopFade" offset="1"/>
     </radialGradient>
     <!-- rimBR: smaller secondary glow at the bottom-right corner. -->
     <radialGradient id="rimBR" cx="44" cy="42" r="16"
                     gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.5"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop class="rimStopGlow" offset="0"/>
+      <stop class="rimStopFade" offset="1"/>
     </radialGradient>
   </defs>
 
