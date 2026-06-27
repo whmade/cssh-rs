@@ -30,14 +30,12 @@ multiple hosts simultaneously with synchronized keystroke distribution.
 - **Modules**: `cssh-rs-core/src/client/`, `cssh-rs-core/src/daemon/`, `cssh-rs-core/src/utils/`
 - **Tests**: `cssh-rs-core/src/tests/` with component-based organization (`test_*.rs` naming)
 - **xtask**: `xtask/` - Developer automation tasks (README checks, release, changelog, social preview)
-- **Config**: `.config/` - grouped, shared single-line marker files consumed
-  by both `xtask` and CI. Currently holds `.config/coverage/` (pinned
-  nightly toolchain, pinned Python tools `diff-cover` / `pycobertura`, and
-  the coverage ignore-filename regex), `.config/cross-build/` (pinned
-  `cargo-xwin` version used by `cargo xtask cross-build`), and
-  `.config/e2e/` (pinned Python E2E toolchain: the `python` interpreter
-  plus `robotframework` / `pyautogui` / `pywinctl`). Filenames
-  follow `<identifier>.<kind>` where `<kind>` is `version` or `regex`.
+- **Config**: `.config/` - grouped, shared marker files consumed by both
+  `xtask` and CI. Each area gets a `.config/<group>/` subdirectory holding
+  `<identifier>.<kind>` files, where `<kind>` is `version` or `regex` and
+  each file contains a single trimmed line (a pinned tool version or a
+  regex). When pinning tools for a new area, add a new group subdirectory
+  rather than overloading an existing one.
 
 ## Build & Test Commands
 
