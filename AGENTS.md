@@ -35,7 +35,10 @@ multiple hosts simultaneously with synchronized keystroke distribution.
   `<identifier>.<kind>` files, where `<kind>` is `version` or `regex` and
   each file contains a single trimmed line (a pinned tool version or a
   regex). When pinning tools for a new area, add a new group subdirectory
-  rather than overloading an existing one.
+  rather than overloading an existing one. Cross-cutting toolchain pins
+  consumed by multiple groups live at `.config/<identifier>.<kind>`
+  directly (e.g. `.config/python.version`) so consumers share a single
+  source of truth.
 
 ## Build & Test Commands
 
