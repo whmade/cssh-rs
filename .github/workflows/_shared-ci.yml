@@ -176,6 +176,48 @@ jobs:
       - name: Run check-typography
         run: cargo xtask check-typography
 
+  # Lint, format, type-check and test the Python E2E harness package
+  # (tests/e2e). Runs on windows-latest - the harness's target platform -
+  # so the real-sshd integration test exercises the Windows path when an
+  # OpenSSH server is available, and skips otherwise. Tool versions are
+  # pinned in tests/e2e/pyproject.toml and installed via the dev extra.
+  e2e-python:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+
+      - name: Read python version
+        id: python
+        shell: bash
+        run: echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+          cache: pip
+          cache-dependency-path: tests/e2e/pyproject.toml
+
+      - name: Install E2E package with dev tooling
+        working-directory: tests/e2e
+        run: pip install -e ".[dev]"
+
+      - name: Ruff lint
+        working-directory: tests/e2e
+        run: ruff check
+
+      - name: Ruff format check
+        working-directory: tests/e2e
+        run: ruff format --check
+
+      - name: Pyrefly type check
+        working-directory: tests/e2e
+        run: pyrefly check
+
+      - name: Pytest
+        working-directory: tests/e2e
+        run: pytest
+
   # Compile-only cross-checks for the portable crate subset on native
   # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still
   # Windows-tied (ported off the windows crate in M4/M5) and are excluded;
