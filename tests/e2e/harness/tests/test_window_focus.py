@@ -57,6 +57,16 @@ def test_focus_window_rejects_unknown_match_mode() -> None:
         WindowFocus().focus_window("cssh-rs daemon", match_mode="fuzzy")
 
 
+def test_focus_window_rejects_negative_timeout() -> None:
+    with pytest.raises(WindowFocusError, match="timeout must be non-negative"):
+        WindowFocus().focus_window("cssh-rs daemon", timeout=-1.0)
+
+
+def test_focus_window_rejects_negative_poll_interval() -> None:
+    with pytest.raises(WindowFocusError, match="poll_interval must be non-negative"):
+        WindowFocus().focus_window("cssh-rs daemon", poll_interval=-1.0)
+
+
 def test_focus_window_returns_matched_title(monkeypatch: pytest.MonkeyPatch) -> None:
     window = _FakeWindow("cssh-rs daemon")
     _patch_matches(monkeypatch, [window])

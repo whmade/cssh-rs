@@ -17,6 +17,8 @@ import time
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.1
 
+_VALID_MATCH_MODES = ("exact", "substring")
+
 
 class WindowFocusError(RuntimeError):
     """Raised when a window cannot be located uniquely or cannot be focused."""
@@ -50,17 +52,23 @@ class WindowFocus:
         Returns:
             The matched window's title.
         """
-        # Import lazily: pywinctl pulls in display/GUI machinery, and both the
-        # package __init__ (which re-exports this module) and the SSH-invoked
-        # marker writer must stay display-free.
+        # Validate before importing pywinctl so a bad argument fails fast
+        # without spinning up the display/GUI machinery the import pulls in.
+        if match_mode not in _VALID_MATCH_MODES:
+            raise WindowFocusError(
+                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+            )
+        if timeout < 0:
+            raise WindowFocusError(f"timeout must be non-negative, got {timeout}")
+        if poll_interval < 0:
+            raise WindowFocusError(f"poll_interval must be non-negative, got {poll_interval}")
+
+        # Imported lazily for the same reason: both the package __init__ (which
+        # re-exports this module) and the SSH-invoked marker writer must stay
+        # display-free.
         import pywinctl
 
-        conditions = {"exact": pywinctl.Re.IS, "substring": pywinctl.Re.CONTAINS}
-        if match_mode not in conditions:
-            raise WindowFocusError(
-                f"match_mode must be one of {sorted(conditions)}, got {match_mode!r}"
-            )
-        condition = conditions[match_mode]
+        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
 
         deadline = time.monotonic() + timeout
         while True:
