@@ -69,7 +69,7 @@ impl ChangelogSystem for RealSystem {
     }
 }
 
-/// Extract the `[package].version` value from a `Cargo.toml` string.
+/// Extract the `[workspace.package].version` value from a `Cargo.toml` string.
 ///
 /// # Arguments
 ///
@@ -82,17 +82,19 @@ impl ChangelogSystem for RealSystem {
 /// # Errors
 ///
 /// Returns an error if the content cannot be parsed as TOML or the
-/// `[package].version` key is absent.
+/// `[workspace.package].version` key is absent.
 pub fn extract_version_from_cargo_toml(cargo_toml_content: &str) -> Result<String> {
     let doc: toml_edit::DocumentMut = cargo_toml_content
         .parse()
         .context("failed to parse Cargo.toml")?;
     let version = doc
-        .get("package")
+        .get("workspace")
+        .and_then(|w| w.as_table())
+        .and_then(|t| t.get("package"))
         .and_then(|p| p.as_table())
         .and_then(|t| t.get("version"))
         .and_then(|v| v.as_str())
-        .context("missing [package].version in Cargo.toml")?;
+        .context("missing [workspace.package].version in Cargo.toml")?;
     Ok(version.to_owned())
 }
 
