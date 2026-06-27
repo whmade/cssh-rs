@@ -110,13 +110,20 @@ jobs:
           crate: cargo-llvm-cov
           version: "^0.8.0"
 
-      # Compile the instrumented test binaries (into target/llvm-cov-target)
-      # without running them. `test --no-run` is the compile-only form; bare
-      # `--no-run` is the deprecated report alias and does NOT build. The
-      # feature/workspace flags MUST match the tests job's run so the restored
-      # binaries are fingerprint-compatible and are not recompiled there.
+      # Compile the instrumented test binaries without running them, so the
+      # tests job restores them from cache and only executes + reports.
+      # cargo-llvm-cov has no build-only mode (its `--no-run` is the deprecated
+      # `report` alias), so source the coverage env via `show-env` and drive a
+      # plain `cargo test --no-run`. The tests job sources the same env, making
+      # the binaries fingerprint-identical so they are not recompiled there.
+      # `--with-pwsh-env-prefix` emits `$env:K=V` lines for PowerShell (renamed
+      # to `--pwsh` in llvm-cov 0.7+; we pin ^0.6).
       - name: Build instrumented test binaries
-        run: cargo +${{ steps.nightly.outputs.version }} llvm-cov test --no-run --all-features --workspace
+        run: |
+          $nightly = "${{ steps.nightly.outputs.version }}"
+          cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix | Invoke-Expression
+          cargo +$nightly test --no-run --all-features --workspace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   check-format:
     runs-on: *runner-version
@@ -159,15 +166,19 @@ jobs:
         run: |
           $nightly = "${{ steps.nightly.outputs.version }}"
           $ignoreRegex = (Get-Content -Raw ".config/coverage/ignore-filename.regex").Trim()
-          # Reset only the profiling counters; keep the instrumented binaries
-          # restored from build-nightly so this job runs them without recompiling.
+          # Source the coverage env, then run with a plain `cargo test` so the
+          # instrumented binaries restored from build-nightly are reused as-is
+          # (cargo-llvm-cov warns its own subcommands other than report/clean
+          # may misbehave under show-env). clean --profraw-only must run after
+          # show-env; it resets the counters without deleting those binaries.
+          cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix | Invoke-Expression
           cargo +$nightly llvm-cov clean --workspace --profraw-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # PowerShell does not propagate native-command exit codes by default,
           # so capture the cargo test exit and surface it after writing reports.
           # --no-fail-fast keeps later test binaries running when an earlier one
           # blows up, so we get full coverage instrumentation for all of them.
-          cargo +$nightly llvm-cov --all-features --workspace --no-fail-fast --no-report -- --no-capture
+          cargo +$nightly test --all-features --workspace --no-fail-fast -- --nocapture
           $testExit = $LASTEXITCODE
           cargo +$nightly llvm-cov report --cobertura --output-path coverage.xml --ignore-filename-regex $ignoreRegex
           $cobExit = $LASTEXITCODE
