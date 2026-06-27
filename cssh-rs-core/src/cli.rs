@@ -78,6 +78,30 @@ enum Commands {
     /// the daemon window receives are forwarded via the pipes to all the clients.
     /// Also handles control mode.
     Daemon {},
+    /// Write a default config file at the given output path.
+    ///
+    /// The emitted file is the single source of truth for cssh-rs
+    /// configuration - it is built from the same serde structs the
+    /// binary reads back, so callers that drive cssh-rs (in particular
+    /// the Windows E2E test harness) can point the launcher at a
+    /// pre-baked `program`/`arguments`/`ssh_config_path` without
+    /// duplicating the TOML schema.
+    GenerateConfig {
+        /// Path to an SSH config file. When set, the launched program
+        /// receives `-F <PATH>` as the first two argv entries.
+        #[clap(long = "ssh-config")]
+        ssh_config: Option<String>,
+        /// Program launched to establish each SSH connection.
+        #[clap(long, default_value = "ssh")]
+        program: String,
+        /// Name of the single cluster written to the config.
+        #[clap(long, default_value = "default")]
+        cluster: String,
+        /// Path of the config file to write. Defaults to
+        /// `cssh-rs-config.toml` next to the running executable.
+        #[clap(long)]
+        output: Option<String>,
+    },
 }
 
 /// Main Entrypoint struct
@@ -477,6 +501,104 @@ async fn run_interactive_mode<
     }
 }
 
+/// Build the [`Config`] emitted by the `generate-config` subcommand.
+///
+/// # Arguments
+///
+/// * `hosts` - Hostnames placed into the single emitted cluster.
+/// * `cluster` - Name of the emitted cluster.
+/// * `program` - Value written to `client.program`.
+/// * `ssh_config` - When `Some`, sets `client.ssh_config_path` and
+///   prepends `-F <path>` to `client.arguments`.
+///
+/// # Returns
+///
+/// A [`Config`] whose `client.arguments` ends in
+/// `{{USERNAME_AT_HOST}}`. All daemon settings and client console
+/// colors take their default values.
+fn build_generate_config(
+    hosts: Vec<String>,
+    cluster: &str,
+    program: &str,
+    ssh_config: Option<&str>,
+) -> Config {
+    let default_client = ClientConfig::default();
+    let placeholder = default_client.username_host_placeholder.clone();
+
+    let mut arguments = Vec::new();
+    if let Some(path) = ssh_config {
+        arguments.push("-F".to_string());
+        arguments.push(path.to_string());
+    }
+    arguments.push(placeholder.clone());
+
+    let ssh_config_path = ssh_config
+        .map(str::to_string)
+        .unwrap_or(default_client.ssh_config_path);
+
+    return Config {
+        clusters: vec![Cluster {
+            name: cluster.to_string(),
+            hosts,
+        }],
+        client: ClientConfig {
+            ssh_config_path,
+            program: program.to_string(),
+            arguments,
+            username_host_placeholder: placeholder,
+            disabled_console_color: default_client.disabled_console_color,
+            highlighted_console_color: default_client.highlighted_console_color,
+        },
+        daemon: DaemonConfig::default(),
+    };
+}
+
+/// Dispatch the `generate-config` subcommand: write a config file and
+/// print the absolute path of the written file to `output`.
+///
+/// # Arguments
+///
+/// * `output` - Sink for the success message (stdout path).
+/// * `config_manager` - Storage used to write the resulting config.
+/// * `default_config_path` - Path used when `output_path` is `None`.
+/// * `hosts` - Hosts assigned to the emitted cluster.
+/// * `cluster` - Cluster name.
+/// * `program` - SSH program name.
+/// * `ssh_config` - Optional `-F` argument.
+/// * `output_path` - Optional explicit output file path.
+///
+/// # Returns
+///
+/// `Ok(())` on success; `Err(message)` otherwise.
+fn run_generate_config<O: Output, C: ConfigManager>(
+    output: &mut O,
+    config_manager: &C,
+    default_config_path: &str,
+    hosts: Vec<String>,
+    cluster: &str,
+    program: &str,
+    ssh_config: Option<&str>,
+    output_path: Option<&str>,
+) -> Result<(), String> {
+    if hosts.is_empty() {
+        return Err("generate-config requires at least one host".to_string());
+    }
+
+    let config = build_generate_config(hosts, cluster, program, ssh_config);
+    let target_path = std::path::PathBuf::from(output_path.unwrap_or(default_config_path));
+    let target_str = target_path.to_string_lossy().into_owned();
+
+    config_manager
+        .store_config(&target_str, &config)
+        .map_err(|err| return format!("Failed to write config to {target_str}: {err}"))?;
+
+    let resolved = std::fs::canonicalize(&target_path)
+        .map(|p| return p.to_string_lossy().into_owned())
+        .unwrap_or(target_str);
+    output.println(&resolved);
+    return Ok(());
+}
+
 /// The main entrypoint
 ///
 /// Parses the CLI arguments,
@@ -535,6 +657,26 @@ pub async fn main<
     let config: Config = config_on_disk.into();
 
     match &args.command {
+        Some(Commands::GenerateConfig {
+            ssh_config,
+            program,
+            cluster,
+            output: output_path,
+        }) => {
+            if let Err(err) = run_generate_config(
+                output,
+                config_manager,
+                &config_path,
+                args.hosts.to_owned(),
+                cluster,
+                program,
+                ssh_config.as_deref(),
+                output_path.as_deref(),
+            ) {
+                output.eprintln(&err);
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Client { host }) => {
             if args.debug {
                 logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));

@@ -110,6 +110,49 @@ mod cli_args_test {
     }
 
     #[test]
+    fn test_parse_generate_config_args() {
+        let args = Args::parse_from(vec![
+            "executable_name",
+            "generate-config",
+            "--ssh-config",
+            "/tmp/c",
+            "--cluster",
+            "e2e",
+            "--program",
+            "ssh.exe",
+            "--output",
+            "/tmp/out.toml",
+            "host1",
+            "host2",
+        ]);
+        assert_eq!(
+            args.command,
+            Some(Commands::GenerateConfig {
+                ssh_config: Some("/tmp/c".to_string()),
+                program: "ssh.exe".to_string(),
+                cluster: "e2e".to_string(),
+                output: Some("/tmp/out.toml".to_string()),
+            })
+        );
+        assert_eq!(args.hosts, vec!["host1", "host2"]);
+    }
+
+    #[test]
+    fn test_parse_generate_config_args_defaults() {
+        let args = Args::parse_from(vec!["executable_name", "generate-config", "host1"]);
+        assert_eq!(
+            args.command,
+            Some(Commands::GenerateConfig {
+                ssh_config: None,
+                program: "ssh".to_string(),
+                cluster: "default".to_string(),
+                output: None,
+            })
+        );
+        assert_eq!(args.hosts, vec!["host1"]);
+    }
+
+    #[test]
     fn test_parse_client_args() {
         // Basic usage
         let args = Args::parse_from(vec!["executable_name", "client", "host1"]);
@@ -1991,5 +2034,174 @@ mod interactive_mode_test {
             &mut mock_input,
         )
         .await;
+    }
+}
+
+/// Tests for the `generate-config` subcommand helpers.
+mod generate_config_test {
+    use crate::cli::{build_generate_config, run_generate_config, MockConfigManager, MockOutput};
+    use crate::utils::config::{ClientConfig, Config, ConfigOpt};
+    use mockall::predicate::eq;
+
+    const PLACEHOLDER: &str = "{{USERNAME_AT_HOST}}";
+
+    #[test]
+    fn test_build_generate_config_without_ssh_config() {
+        let config = build_generate_config(
+            vec!["host1".to_string(), "host2".to_string()],
+            "default",
+            "ssh",
+            None,
+        );
+
+        assert_eq!(config.client.arguments, vec![PLACEHOLDER.to_string()]);
+        assert_eq!(config.client.username_host_placeholder, PLACEHOLDER);
+        assert_eq!(config.client.program, "ssh");
+        assert_eq!(config.clusters.len(), 1);
+        assert_eq!(config.clusters[0].name, "default");
+        assert_eq!(config.clusters[0].hosts, vec!["host1", "host2"]);
+    }
+
+    #[test]
+    fn test_build_generate_config_with_ssh_config() {
+        let config = build_generate_config(
+            vec!["host1".to_string()],
+            "e2e",
+            "ssh.exe",
+            Some("/tmp/test_ssh_config"),
+        );
+
+        assert_eq!(
+            config.client.arguments,
+            vec![
+                "-F".to_string(),
+                "/tmp/test_ssh_config".to_string(),
+                PLACEHOLDER.to_string(),
+            ]
+        );
+        assert_eq!(config.client.ssh_config_path, "/tmp/test_ssh_config");
+        assert_eq!(config.client.program, "ssh.exe");
+        assert_eq!(config.clusters[0].name, "e2e");
+        assert_eq!(config.clusters[0].hosts, vec!["host1"]);
+    }
+
+    #[test]
+    fn test_build_generate_config_preserves_default_colors() {
+        let default_client = ClientConfig::default();
+        let config = build_generate_config(vec!["h".to_string()], "default", "ssh", None);
+
+        assert_eq!(
+            config.client.disabled_console_color,
+            default_client.disabled_console_color
+        );
+        assert_eq!(
+            config.client.highlighted_console_color,
+            default_client.highlighted_console_color
+        );
+    }
+
+    #[test]
+    fn test_build_generate_config_round_trips_through_toml() {
+        let config = build_generate_config(
+            vec!["host1".to_string(), "host2".to_string()],
+            "e2e",
+            "ssh",
+            Some("/tmp/c"),
+        );
+
+        let serialized = toml::to_string(&config).expect("serialize");
+        let opt: ConfigOpt = toml::from_str(&serialized).expect("deserialize");
+        let parsed: Config = opt.into();
+
+        assert_eq!(parsed.client.arguments, config.client.arguments);
+        assert_eq!(parsed.client.program, config.client.program);
+        assert_eq!(parsed.client.ssh_config_path, config.client.ssh_config_path);
+        assert_eq!(
+            parsed.client.username_host_placeholder,
+            config.client.username_host_placeholder
+        );
+        assert_eq!(parsed.clusters, config.clusters);
+    }
+
+    #[test]
+    fn test_run_generate_config_rejects_empty_hosts() {
+        let mut output = MockOutput::new();
+        let mgr = MockConfigManager::new();
+
+        let result = run_generate_config(
+            &mut output,
+            &mgr,
+            "cssh-rs-config.toml",
+            Vec::new(),
+            "default",
+            "ssh",
+            None,
+            None,
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("at least one host"), "got: {err}");
+    }
+
+    #[test]
+    fn test_run_generate_config_writes_to_default_path() {
+        let mut output = MockOutput::new();
+        let mut mgr = MockConfigManager::new();
+
+        mgr.expect_store_config()
+            .with(
+                eq("cssh-rs-config.toml"),
+                mockall::predicate::function(|cfg: &Config| {
+                    return cfg.clusters.len() == 1
+                        && cfg.clusters[0].name == "default"
+                        && cfg.clusters[0].hosts == vec!["host1".to_string()]
+                        && cfg.client.program == "ssh"
+                        && cfg.client.arguments == vec![PLACEHOLDER.to_string()];
+                }),
+            )
+            .times(1)
+            .returning(|_, _| return Ok(()));
+
+        output.expect_println().times(1).returning(|_| {});
+
+        let result = run_generate_config(
+            &mut output,
+            &mgr,
+            "cssh-rs-config.toml",
+            vec!["host1".to_string()],
+            "default",
+            "ssh",
+            None,
+            None,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_generate_config_uses_output_path_override() {
+        let mut output = MockOutput::new();
+        let mut mgr = MockConfigManager::new();
+
+        mgr.expect_store_config()
+            .with(eq("/tmp/out.toml"), mockall::predicate::always())
+            .times(1)
+            .returning(|_, _| return Ok(()));
+
+        output.expect_println().times(1).returning(|_| {});
+
+        let result = run_generate_config(
+            &mut output,
+            &mgr,
+            "cssh-rs-config.toml",
+            vec!["host1".to_string()],
+            "e2e",
+            "ssh",
+            Some("/tmp/c"),
+            Some("/tmp/out.toml"),
+        );
+
+        assert!(result.is_ok());
     }
 }
