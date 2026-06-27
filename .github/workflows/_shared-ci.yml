@@ -175,3 +175,34 @@ jobs:
         with: *build-cache-paths
       - name: Run check-typography
         run: cargo xtask check-typography
+
+  # Compile-only cross-checks for the portable crate subset on native
+  # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still
+  # Windows-tied (ported off the windows crate in M4/M5) and are excluded;
+  # the --exclude form fails loudly if a portable crate later grows a
+  # Windows dependency.
+  check-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - uses: *rust-cache-action
+        with:
+          shared-key: linux-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+      - name: Add target
+        run: rustup target add x86_64-unknown-linux-gnu
+      - name: Check portable crates
+        run: cargo check --workspace --target x86_64-unknown-linux-gnu --exclude cssh-rs --exclude cssh-rs-core --exclude cssh-rs-protocol
+
+  check-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - uses: *rust-cache-action
+        with:
+          shared-key: macos-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+      - name: Add target
+        run: rustup target add x86_64-apple-darwin
+      - name: Check portable crates
+        run: cargo check --workspace --target x86_64-apple-darwin --exclude cssh-rs --exclude cssh-rs-core --exclude cssh-rs-protocol
