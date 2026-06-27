@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -152,3 +153,38 @@ def test_start_sshd_rejects_when_already_running() -> None:
 def test_read_marker_raises_before_start() -> None:
     with pytest.raises(SshdFixtureError, match="not running"):
         SshdFixture().read_marker("h1")
+
+
+def test_read_log_tail_returns_only_last_bytes(tmp_path: Path) -> None:
+    log = tmp_path / "sshd.log"
+    log.write_bytes(b"x" * (sshd_fixture.MAX_LOG_TAIL_BYTES + 100))
+
+    assert len(sshd_fixture._read_log_tail(log)) == sshd_fixture.MAX_LOG_TAIL_BYTES
+
+
+def test_read_log_tail_missing_file_returns_empty(tmp_path: Path) -> None:
+    assert sshd_fixture._read_log_tail(tmp_path / "absent.log") == ""
+
+
+def test_terminate_survives_process_that_never_reaps() -> None:
+    class _StuckProcess:
+        def __init__(self) -> None:
+            self.killed = False
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            pass
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            raise subprocess.TimeoutExpired(cmd="sshd", timeout=timeout or 0.0)
+
+    process = _StuckProcess()
+
+    sshd_fixture._terminate(process)  # type: ignore[arg-type]
+
+    assert process.killed

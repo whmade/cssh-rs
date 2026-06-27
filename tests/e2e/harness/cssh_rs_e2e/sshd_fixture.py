@@ -150,9 +150,9 @@ class SshdFixture:
             )
 
             sshd_path = _resolve_sshd_path()
-            # sshd's own log goes to sshd_log_path via -E; the process's own
-            # stdout/stderr are discarded so no file handle outlives the
-            # subprocess and blocks tempdir removal on Windows.
+            # sshd logs to sshd_log_path via -E; discard its stdout/stderr so no
+            # file handle outlives the subprocess and blocks tempdir removal on
+            # Windows.
             process = subprocess.Popen(
                 [
                     sshd_path,
@@ -180,7 +180,7 @@ class SshdFixture:
             "port": chosen_port,
             "ssh_config": str(ssh_config_path),
             "markers_dir": str(markers_dir),
-            "aliases": list(aliases),
+            "aliases": aliases,
             "tempdir": str(tempdir),
         }
 
@@ -218,7 +218,11 @@ def _terminate(process: subprocess.Popen[bytes] | None) -> None:
         process.wait(timeout=STOP_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait(timeout=STOP_GRACE_SECONDS)
+        # A process stuck in uninterruptible sleep may not reap even after
+        # kill; teardown still removes the temp tree, so a lingering timeout
+        # here must not abort it.
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=STOP_GRACE_SECONDS)
 
 
 def _remove_tempdir(tempdir: Path | None) -> None:
@@ -280,13 +284,8 @@ def _harden_private_key_permissions(private_path: Path) -> None:
 
 
 def _build_forced_command(executable: str, marker: str) -> str:
-    """Return the ``command="..."`` payload (without enclosing quotes) for an
-    authorized_keys line that runs the marker writer as
-    ``<python> -m cssh_rs_e2e._marker_writer <marker>``.
-
-    sshd parses the value as a double-quoted string, so every backslash is
-    doubled and every inner quote escaped; interpreter and marker paths then
-    survive even when they contain spaces or backslashes.
+    """Return the authorized_keys ``command="..."`` payload (without the outer
+    quotes) that runs ``<executable> -m cssh_rs_e2e._marker_writer <marker>``.
     """
     return (
         f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_e2e._marker_writer "
@@ -295,6 +294,11 @@ def _build_forced_command(executable: str, marker: str) -> str:
 
 
 def _quote_authorized_keys_arg(value: str) -> str:
+    """Quote ``value`` as one token inside sshd's double-quoted command= string.
+
+    The command= value is itself double-quoted, so backslashes are doubled and
+    inner quotes escaped; paths with spaces or backslashes then survive intact.
+    """
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'\\"{escaped}\\"'
 
@@ -396,8 +400,12 @@ def _wait_for_listening(
 
 
 def _read_log_tail(log_path: Path) -> str:
+    """Return up to the last ``MAX_LOG_TAIL_BYTES`` of ``log_path``, or ``""`` on error."""
     try:
-        data = log_path.read_bytes()
+        with log_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - MAX_LOG_TAIL_BYTES))
+            data = handle.read()
     except OSError:
         return ""
-    return data[-MAX_LOG_TAIL_BYTES:].decode("utf-8", errors="replace")
+    return data.decode("utf-8", errors="replace")

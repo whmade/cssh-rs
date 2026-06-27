@@ -14,11 +14,11 @@ from pathlib import Path
 
 
 def main() -> int:
-    """Copy stdin to the file named in ``sys.argv[1]`` and return 0.
+    """Append stdin to the file named in ``sys.argv[1]``.
 
     Returns:
-        Process exit code. 2 if the marker path argument is missing,
-        1 if writing fails, 0 otherwise.
+        Exit code: 2 if the marker path argument is missing, 1 if writing
+        fails, 0 on success.
     """
     if len(sys.argv) != 2:
         sys.stderr.write("usage: _marker_writer.py <marker-path>\n")
