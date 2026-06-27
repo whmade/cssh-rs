@@ -1,4 +1,4 @@
-<p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/cssh-rs.svg" width="100" alt="cssh-rs Logo" /></a></p>
+<p align="center"><a href="https://github.com/whmade/cssh-rs"><img src="https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/cssh-rs/res/windows/cssh-rs.svg" width="100" alt="cssh-rs Logo" /></a></p>
 <h1 align="center">cssh-rs</h1>
 <p align="center"><i>Cross-platform cluster SSH tool</i></p>
 <p align="center">
@@ -79,6 +79,9 @@ Mutter (GNOME on Wayland) is currently not planned.
 ## Download/Installation
 cssh-rs is a portable application and is not installed.<br>
 To download the cssh-rs application refer to the [Releases 📦](https://github.com/whmade/cssh-rs/releases) page.
+Each release ships a `cssh-rs-v<version>-<target>.zip` archive
+with a `.sha256` checksum sibling you can verify with
+`sha256sum -c <archive>.sha256`.
 
 > [!NOTE]
 > The released `cssh-rs.exe` is not code-signed. On first launch Windows

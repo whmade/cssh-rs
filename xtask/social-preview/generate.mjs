@@ -41,7 +41,7 @@ if (!OUT_PATH) {
 }
 
 const TEMPLATE_PATH = "templates/social-preview.html";
-const LOGO_PATH = "cssh-rs/res/cssh-rs.svg";
+const LOGO_PATH = "cssh-rs/res/windows/cssh-rs.svg";
 const FONT_PATH = "cssh-rs/res/dejavu-sans-mono.book.ttf";
 // ozh/github-colors is a long-running community mirror of the colors
 // embedded in github-linguist/linguist's `languages.yml`, published as

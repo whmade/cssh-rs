@@ -19,7 +19,7 @@ jobs:
   build-release:
     runs-on: windows-latest
     steps:
-      - uses: &checkout-action actions/checkout@v6.0.3
+      - uses: &checkout-action actions/checkout@v7.0.0
 
       - name: Build release binary
         run: cargo release
@@ -51,6 +51,9 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
 
+          # Conventional Rust CLI asset name: <name>-v<version>-<target-triple>.
+          ASSET="cssh-rs-v${VERSION}-x86_64-pc-windows-msvc"
+
           # Create package directory
           mkdir -p package
 
@@ -64,21 +67,26 @@ jobs:
           cp LICENSE.txt package/
 
           # Create zip archive with maximum compression
-          (cd package && zip -9 "../cssh-rs.${VERSION}.zip" ./*)
+          (cd package && zip -9 "../${ASSET}.zip" ./*)
+
+          # Generate the SHA-256 checksum sibling. Run from the directory the
+          # zip lives in so the recorded filename is the bare basename, keeping
+          # `sha256sum -c ${ASSET}.zip.sha256` portable for downloaders.
+          sha256sum "${ASSET}.zip" > "${ASSET}.zip.sha256"
 
           # Get file size for logging
-          SIZE=$(stat -c%s "cssh-rs.${VERSION}.zip")
+          SIZE=$(stat -c%s "${ASSET}.zip")
           echo "Package size: ${SIZE} bytes"
 
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: "cssh-rs.${{ github.ref_name }}.zip"
+          subject-path: "cssh-rs-v${{ github.ref_name }}-x86_64-pc-windows-msvc.zip"
 
       - name: Upload release package
         uses: *upload-artifact-action
         with:
           name: release-package
-          path: cssh-rs.${{ github.ref_name }}.zip
+          path: cssh-rs-v${{ github.ref_name }}-x86_64-pc-windows-msvc.zip*
           retention-days: 1
 
   create-draft-release:
@@ -164,21 +172,27 @@ jobs:
 
             console.log('Draft release created:', release.data.html_url);
 
-            // Upload release asset
-            const assetPath = path.join(process.cwd(), 'artifacts', `cssh-rs.${version}.zip`);
-            const assetData = fs.readFileSync(assetPath);
+            // Upload the zip and its SHA-256 checksum sibling.
+            const asset = `cssh-rs-v${version}-x86_64-pc-windows-msvc`;
+            const assets = [
+              { name: `${asset}.zip`, contentType: 'application/zip' },
+              { name: `${asset}.zip.sha256`, contentType: 'text/plain' },
+            ];
 
-            await github.rest.repos.uploadReleaseAsset({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.data.id,
-              name: `cssh-rs.${version}.zip`,
-              data: assetData,
-              headers: {
-                'content-type': 'application/zip',
-                'content-length': assetData.length
-              }
-            });
+            for (const { name, contentType } of assets) {
+              const data = fs.readFileSync(path.join(process.cwd(), 'artifacts', name));
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                name,
+                data,
+                headers: {
+                  'content-type': contentType,
+                  'content-length': data.length
+                }
+              });
+              console.log('Release asset uploaded successfully:', name);
+            }
 
-            console.log('Release asset uploaded successfully');
             console.log('Draft release is ready for review at:', release.data.html_url);

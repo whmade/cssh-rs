@@ -20,7 +20,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Build docs
         run: cargo docs
@@ -46,7 +46,7 @@ jobs:
 
           cp templates/github-pages-index.html unified_site/index.html
           cp cssh-rs/res/cssh-rs.ico unified_site/favicon.ico
-          cp cssh-rs/res/cssh-rs.svg unified_site/cssh-rs.svg
+          cp cssh-rs/res/windows/cssh-rs.svg unified_site/cssh-rs.svg
 
           echo "<meta http-equiv=\"refresh\" content=\"0; url=cssh_rs_core/index.html\">" > unified_site/docs/index.html
 
