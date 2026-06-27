@@ -145,6 +145,39 @@ fn test_set_cargo_toml_version_preserves_other_fields() {
     assert_eq!(doc["package"]["edition"].as_str().unwrap(), "2021");
 }
 
+#[test]
+fn test_set_cargo_toml_version_workspace_only_root() {
+    // Arrange
+    let content =
+        "[workspace]\nmembers = [\"xtask\"]\n\n[workspace.package]\nversion = \"0.18.1\"\n";
+
+    // Act
+    let result = set_cargo_toml_version(content, "1.0.0").unwrap();
+
+    // Assert
+    let doc: toml_edit::DocumentMut = result.parse().unwrap();
+    assert_eq!(
+        doc["workspace"]["package"]["version"].as_str().unwrap(),
+        "1.0.0"
+    );
+    assert!(
+        doc.get("package").is_none(),
+        "set_cargo_toml_version must not introduce a [package] table"
+    );
+}
+
+#[test]
+fn test_set_cargo_toml_version_errors_when_version_absent() {
+    // Arrange
+    let content = "[workspace]\nmembers = [\"xtask\"]\n";
+
+    // Act
+    let result = set_cargo_toml_version(content, "1.0.0");
+
+    // Assert
+    assert!(result.is_err());
+}
+
 // ── prepare_release ───────────────────────────────────────────────────────────
 
 #[test]
