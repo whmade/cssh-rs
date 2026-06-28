@@ -14,8 +14,7 @@ single case that matches and ignore the rest:
   `gh pr view N --json number,title,body,state,headRefName,baseRefName,url,author,files,commits`
   for the metadata. Do NOT use a bare `gh pr view N`: its default view fetches
   classic project cards and fails with a "Projects (classic) is being
-  deprecated" GraphQL error. Always pass `--json` with the explicit fields
-  above.
+  deprecated" GraphQL error.
 - A commit hash -> `git show <hash>`.
 - A range or ref (e.g. `main..HEAD`, `HEAD~3`) -> `git diff <range-or-ref>`.
 - Empty -> the current uncommitted changes (`git diff` for unstaged, `git diff
