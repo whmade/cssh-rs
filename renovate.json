@@ -1,0 +1,73 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Europe/Berlin",
+  "schedule": [
+    "* 18-21 * * 5"
+  ],
+  "labels": [
+    "dependencies",
+    "no-news-fragment-needed"
+  ],
+  "commitMessagePrefix": "deps:",
+  "dependencyDashboard": true,
+  "rebaseWhen": "behind-base-branch",
+  "automerge": true,
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
+  "enabledManagers": [
+    "custom.regex"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "cargo-xwin pinned for Windows cross-builds",
+      "managerFilePatterns": [
+        "/^\\.config/cross-build/cargo-xwin\\.version$/"
+      ],
+      "matchStrings": [
+        "(?<currentValue>\\d[\\w.+-]*)"
+      ],
+      "depNameTemplate": "cargo-xwin",
+      "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "description": "diff-cover pinned for coverage diffing",
+      "managerFilePatterns": [
+        "/^\\.config/coverage/diff-cover\\.version$/"
+      ],
+      "matchStrings": [
+        "(?<currentValue>\\d[\\w.+-]*)"
+      ],
+      "depNameTemplate": "diff-cover",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "pycobertura pinned for coverage reports",
+      "managerFilePatterns": [
+        "/^\\.config/coverage/pycobertura\\.version$/"
+      ],
+      "matchStrings": [
+        "(?<currentValue>\\d[\\w.+-]*)"
+      ],
+      "depNameTemplate": "pycobertura",
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "cargo-llvm-cov version constraint in the shared CI workflow",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/_shared-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "crate: cargo-llvm-cov\\s+version: \"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "cargo-llvm-cov",
+      "datasourceTemplate": "crate"
+    }
+  ]
+}
