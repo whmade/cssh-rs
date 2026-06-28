@@ -80,20 +80,16 @@ enum Commands {
     Daemon {},
     /// Write a default config file at the given output path.
     ///
-    /// The emitted file is the single source of truth for cssh-rs
-    /// configuration - it is built from the same serde structs the
-    /// binary reads back, so callers that drive cssh-rs (in particular
-    /// the Windows E2E test harness) can point the launcher at a
-    /// pre-baked `program`/`arguments`/`ssh_config_path` without
-    /// duplicating the TOML schema.
+    /// Values that differ from the defaults can be set via the options.
     GenerateConfig {
         /// Path to an SSH config file. When set, the launched program
         /// receives `-F <PATH>` as the first two argv entries.
         #[clap(long = "ssh-config")]
         ssh_config: Option<String>,
         /// Program launched to establish each SSH connection.
-        #[clap(long, default_value = "ssh")]
-        program: String,
+        /// Defaults to the `client.program` config default when unset.
+        #[clap(long)]
+        program: Option<String>,
         /// Name of the single cluster written to the config.
         #[clap(long, default_value = "default")]
         cluster: String,
@@ -507,50 +503,44 @@ async fn run_interactive_mode<
 ///
 /// * `hosts` - Hostnames placed into the single emitted cluster.
 /// * `cluster` - Name of the emitted cluster.
-/// * `program` - Value written to `client.program`.
+/// * `program` - When `Some`, overrides `client.program`; otherwise the
+///   `ClientConfig` default is kept.
 /// * `ssh_config` - When `Some`, sets `client.ssh_config_path` and
 ///   prepends `-F <path>` to `client.arguments`.
 ///
 /// # Returns
 ///
-/// A [`Config`] whose `client.arguments` ends in
-/// `{{USERNAME_AT_HOST}}`. All daemon settings and client console
-/// colors take their default values.
+/// A [`Config`] built from [`Config::default`] with only the cluster,
+/// program and SSH-config-derived fields overridden, so all other client
+/// and daemon defaults stay sourced from their single definition.
 fn build_generate_config(
     hosts: Vec<String>,
     cluster: &str,
-    program: &str,
+    program: Option<&str>,
     ssh_config: Option<&str>,
 ) -> Config {
-    let default_client = ClientConfig::default();
-    let placeholder = default_client.username_host_placeholder.clone();
+    let mut config = Config {
+        clusters: vec![Cluster {
+            name: cluster.to_string(),
+            hosts,
+        }],
+        ..Config::default()
+    };
+
+    if let Some(program) = program {
+        config.client.program = program.to_string();
+    }
 
     let mut arguments = Vec::new();
     if let Some(path) = ssh_config {
         arguments.push("-F".to_string());
         arguments.push(path.to_string());
+        config.client.ssh_config_path = path.to_string();
     }
-    arguments.push(placeholder.clone());
+    arguments.push(config.client.username_host_placeholder.clone());
+    config.client.arguments = arguments;
 
-    let ssh_config_path = ssh_config
-        .map(str::to_string)
-        .unwrap_or(default_client.ssh_config_path);
-
-    return Config {
-        clusters: vec![Cluster {
-            name: cluster.to_string(),
-            hosts,
-        }],
-        client: ClientConfig {
-            ssh_config_path,
-            program: program.to_string(),
-            arguments,
-            username_host_placeholder: placeholder,
-            disabled_console_color: default_client.disabled_console_color,
-            highlighted_console_color: default_client.highlighted_console_color,
-        },
-        daemon: DaemonConfig::default(),
-    };
+    return config;
 }
 
 /// Dispatch the `generate-config` subcommand: write a config file and
@@ -576,7 +566,7 @@ fn run_generate_config<O: Output, C: ConfigManager>(
     default_config_path: &str,
     hosts: Vec<String>,
     cluster: &str,
-    program: &str,
+    program: Option<&str>,
     ssh_config: Option<&str>,
     output_path: Option<&str>,
 ) -> Result<(), String> {
@@ -592,7 +582,11 @@ fn run_generate_config<O: Output, C: ConfigManager>(
         .store_config(&target_str, &config)
         .map_err(|err| return format!("Failed to write config to {target_str}: {err}"))?;
 
+    // The contract is to print an absolute path. canonicalize resolves
+    // symlinks but can fail on some filesystems; std::path::absolute then
+    // makes the path absolute lexically without touching the filesystem.
     let resolved = std::fs::canonicalize(&target_path)
+        .or_else(|_| return std::path::absolute(&target_path))
         .map(|p| return p.to_string_lossy().into_owned())
         .unwrap_or(target_str);
     output.println(&resolved);
@@ -653,30 +647,38 @@ pub async fn main<
     }
 
     let config_path = format!("{PACKAGE_NAME}-config.toml");
+
+    // generate-config is the config source of truth, so it must not depend
+    // on successfully loading a (possibly broken) existing config. Dispatch
+    // it before the config is read from disk.
+    if let Some(Commands::GenerateConfig {
+        ssh_config,
+        program,
+        cluster,
+        output: output_path,
+    }) = &args.command
+    {
+        if let Err(err) = run_generate_config(
+            output,
+            config_manager,
+            &config_path,
+            args.hosts.to_owned(),
+            cluster,
+            program.as_deref(),
+            ssh_config.as_deref(),
+            output_path.as_deref(),
+        ) {
+            output.eprintln(&err);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let config_on_disk: ConfigOpt = config_manager.load_config(&config_path).unwrap();
     let config: Config = config_on_disk.into();
 
     match &args.command {
-        Some(Commands::GenerateConfig {
-            ssh_config,
-            program,
-            cluster,
-            output: output_path,
-        }) => {
-            if let Err(err) = run_generate_config(
-                output,
-                config_manager,
-                &config_path,
-                args.hosts.to_owned(),
-                cluster,
-                program,
-                ssh_config.as_deref(),
-                output_path.as_deref(),
-            ) {
-                output.eprintln(&err);
-                std::process::exit(1);
-            }
-        }
+        Some(Commands::GenerateConfig { .. }) => unreachable!("handled before config load"),
         Some(Commands::Client { host }) => {
             if args.debug {
                 logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));

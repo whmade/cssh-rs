@@ -129,7 +129,7 @@ mod cli_args_test {
             args.command,
             Some(Commands::GenerateConfig {
                 ssh_config: Some("/tmp/c".to_string()),
-                program: "ssh.exe".to_string(),
+                program: Some("ssh.exe".to_string()),
                 cluster: "e2e".to_string(),
                 output: Some("/tmp/out.toml".to_string()),
             })
@@ -144,7 +144,7 @@ mod cli_args_test {
             args.command,
             Some(Commands::GenerateConfig {
                 ssh_config: None,
-                program: "ssh".to_string(),
+                program: None,
                 cluster: "default".to_string(),
                 output: None,
             })
@@ -2050,7 +2050,7 @@ mod generate_config_test {
         let config = build_generate_config(
             vec!["host1".to_string(), "host2".to_string()],
             "default",
-            "ssh",
+            Some("ssh"),
             None,
         );
 
@@ -2067,7 +2067,7 @@ mod generate_config_test {
         let config = build_generate_config(
             vec!["host1".to_string()],
             "e2e",
-            "ssh.exe",
+            Some("ssh.exe"),
             Some("/tmp/test_ssh_config"),
         );
 
@@ -2088,8 +2088,10 @@ mod generate_config_test {
     #[test]
     fn test_build_generate_config_preserves_default_colors() {
         let default_client = ClientConfig::default();
-        let config = build_generate_config(vec!["h".to_string()], "default", "ssh", None);
+        let config = build_generate_config(vec!["h".to_string()], "default", None, None);
 
+        // An unset --program keeps the ClientConfig default.
+        assert_eq!(config.client.program, default_client.program);
         assert_eq!(
             config.client.disabled_console_color,
             default_client.disabled_console_color
@@ -2105,7 +2107,7 @@ mod generate_config_test {
         let config = build_generate_config(
             vec!["host1".to_string(), "host2".to_string()],
             "e2e",
-            "ssh",
+            Some("ssh"),
             Some("/tmp/c"),
         );
 
@@ -2134,7 +2136,7 @@ mod generate_config_test {
             "cssh-rs-config.toml",
             Vec::new(),
             "default",
-            "ssh",
+            Some("ssh"),
             None,
             None,
         );
@@ -2171,7 +2173,7 @@ mod generate_config_test {
             "cssh-rs-config.toml",
             vec!["host1".to_string()],
             "default",
-            "ssh",
+            Some("ssh"),
             None,
             None,
         );
@@ -2197,7 +2199,7 @@ mod generate_config_test {
             "cssh-rs-config.toml",
             vec!["host1".to_string()],
             "e2e",
-            "ssh",
+            Some("ssh"),
             Some("/tmp/c"),
             Some("/tmp/out.toml"),
         );
