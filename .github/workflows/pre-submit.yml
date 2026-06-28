@@ -127,7 +127,7 @@ jobs:
         run: |
           echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-python@v6.2.0
+      - uses: actions/setup-python@v6.3.0
         with:
           python-version: ${{ steps.python.outputs.version }}
 
