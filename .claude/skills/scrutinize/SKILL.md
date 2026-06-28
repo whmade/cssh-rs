@@ -1,23 +1,29 @@
 ---
 name: scrutinize
-description: Self-review pass to run after finishing a development task. Critically challenge every character added by a PR, commit, or diff - remove what is not needed, simplify what is, and tighten comments and docs. With no argument it scrutinizes the current working changes.
-argument-hint: [pr-number | commit-id | git-ref-or-range | empty for working changes]
+description: Self-review pass to run after finishing a development task. With no argument it scrutinizes the current working changes.
+argument-hint: [GH PR <number> | commit-id | git-ref-or-range | empty for working changes]
 ---
 
 You are a senior software development expert with years of experience.
 
 First, resolve `$ARGUMENTS` to the exact set of changes to scrutinize:
 
-- A bare number (e.g. `185`) -> a GitHub PR: `gh pr diff $ARGUMENTS` and `gh pr view $ARGUMENTS`.
+- A GitHub PR reference like `GH PR 185` -> take the number and resolve it with `gh pr diff <number>` and `gh pr view <number>`.
 - A commit hash -> `git show $ARGUMENTS`.
 - A range or ref (e.g. `main..HEAD`, `HEAD~3`) -> `git diff $ARGUMENTS`.
 - Empty -> the current uncommitted changes (`git diff` for unstaged, `git diff --cached` for staged).
 
-Read the resolved diff in full before changing anything. Read the relevant
-surrounding code so a "simpler" rewrite stays correct, and honor the project's
-own conventions in `AGENTS.md` / `CLAUDE.md`.
+Read the resolved diff in full before changing anything, together with all
+supporting material: any linked GitHub issue, existing PR or commit comments,
+and related discussion. Then read the surrounding code so a "simpler" rewrite
+stays correct and so you understand the project's conventions and structure,
+and honor `AGENTS.md` / `CLAUDE.md`.
 
-Then critically challenge each and every single character added by the change:
+Then research online for current best practices and state-of-the-art
+approaches for exactly what the change is trying to do, so every decision that
+follows is well founded.
+
+Now critically challenge each and every single character added by the change:
 
 - If it is not absolutely needed, remove it.
 - If it can be done more simply, make it simpler.
@@ -27,16 +33,20 @@ While doing so, keep the result readable:
 
 - No abbreviations.
 - Variables have speaking, descriptive names.
-- The additions stay readable and well documented.
+- The additions stay readable.
 
-But hold comments and documentation to the same standard - critically
-challenge each comment and each doc string. If it can be shorter, more
-precise, and less prose, make it so.
+Hold comments and docstrings to a strict standard:
+
+- Good code needs no inline comments. Add one only to explain something
+  non-obvious that the code cannot convey on its own.
+- A good inline comment is at most one line - a line, not a sentence.
+- The same limits apply to docstrings: explain only what is not obvious, as
+  briefly as possible.
+
+Challenge every existing comment and docstring against these limits and cut or
+shorten anything that fails them.
 
 Apply the changes directly. For every edit, state what you challenged and why
 the change is justified (removed as unneeded / simpler / more elegant /
 tightened prose). If a change is genuinely needed as-is, say so rather than
 inventing a change.
-
-After editing, run the project's checks for any modified code and report the
-results.

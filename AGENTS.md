@@ -207,8 +207,8 @@ mark each thread resolved once addressed, and push to update the PR.
 ## Completion Checklist
 
 Before considering any task complete, first self-review your changes by
-running [`/scrutinize`](.claude/skills/scrutinize/SKILL.md) on them: challenge
-every addition, remove what is not needed, simplify and tighten. Then confirm:
+running [`/scrutinize`](.claude/skills/scrutinize/SKILL.md) on them. Then
+confirm:
 
 1. Documentation is complete and accurate
 2. All tests pass (`cargo doc-tests && cargo test`)
