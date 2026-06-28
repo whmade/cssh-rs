@@ -497,22 +497,10 @@ async fn run_interactive_mode<
     }
 }
 
-/// Build the [`Config`] emitted by the `generate-config` subcommand.
-///
-/// # Arguments
-///
-/// * `hosts` - Hostnames placed into the single emitted cluster.
-/// * `cluster` - Name of the emitted cluster.
-/// * `program` - When `Some`, overrides `client.program`; otherwise the
-///   `ClientConfig` default is kept.
-/// * `ssh_config` - When `Some`, sets `client.ssh_config_path` and
-///   prepends `-F <path>` to `client.arguments`.
-///
-/// # Returns
-///
-/// A [`Config`] built from [`Config::default`] with only the cluster,
-/// program and SSH-config-derived fields overridden, so all other client
-/// and daemon defaults stay sourced from their single definition.
+/// Build the `generate-config` [`Config`] from [`Config::default`], placing
+/// `hosts` in a single `cluster`, overriding `client.program` when `program`
+/// is set and, when `ssh_config` is set, prepending `-F <path>` to
+/// `client.arguments` and recording it as `client.ssh_config_path`.
 fn build_generate_config(
     hosts: Vec<String>,
     cluster: &str,
@@ -543,23 +531,9 @@ fn build_generate_config(
     return config;
 }
 
-/// Dispatch the `generate-config` subcommand: write a config file and
-/// print the absolute path of the written file to `output`.
-///
-/// # Arguments
-///
-/// * `output` - Sink for the success message (stdout path).
-/// * `config_manager` - Storage used to write the resulting config.
-/// * `default_config_path` - Path used when `output_path` is `None`.
-/// * `hosts` - Hosts assigned to the emitted cluster.
-/// * `cluster` - Cluster name.
-/// * `program` - SSH program name.
-/// * `ssh_config` - Optional `-F` argument.
-/// * `output_path` - Optional explicit output file path.
-///
-/// # Returns
-///
-/// `Ok(())` on success; `Err(message)` otherwise.
+/// Write the generated config to `output_path` (or `default_config_path`) and
+/// print its absolute path to `output`; error if `hosts` is empty or the write
+/// fails.
 fn run_generate_config<O: Output, C: ConfigManager>(
     output: &mut O,
     config_manager: &C,
@@ -582,9 +556,7 @@ fn run_generate_config<O: Output, C: ConfigManager>(
         .store_config(&target_str, &config)
         .map_err(|err| return format!("Failed to write config to {target_str}: {err}"))?;
 
-    // The contract is to print an absolute path. canonicalize resolves
-    // symlinks but can fail on some filesystems; std::path::absolute then
-    // makes the path absolute lexically without touching the filesystem.
+    // canonicalize can fail on some filesystems; fall back to a lexical absolute path.
     let resolved = std::fs::canonicalize(&target_path)
         .or_else(|_| return std::path::absolute(&target_path))
         .map(|p| return p.to_string_lossy().into_owned())
@@ -648,9 +620,7 @@ pub async fn main<
 
     let config_path = format!("{PACKAGE_NAME}-config.toml");
 
-    // generate-config is the config source of truth, so it must not depend
-    // on successfully loading a (possibly broken) existing config. Dispatch
-    // it before the config is read from disk.
+    // Dispatch before load_config so a broken on-disk config cannot break generation.
     if let Some(Commands::GenerateConfig {
         ssh_config,
         program,
