@@ -81,9 +81,10 @@ def test_focus_window_raises_when_activation_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_matches(monkeypatch, [_FakeWindow("cssh-rs daemon", activates=False)])
+    monkeypatch.setattr(window_focus.time, "sleep", lambda _: None)
 
     with pytest.raises(WindowFocusError, match="failed to focus"):
-        WindowFocus().focus_window("cssh-rs daemon")
+        WindowFocus().focus_window("cssh-rs daemon", timeout=0.0)
 
 
 def test_focus_window_rejects_multiple_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,6 +113,31 @@ def test_focus_window_retries_until_a_match_appears(
 
     assert result == "cssh-rs daemon"
     assert results == []
+
+
+def test_focus_window_retries_until_activation_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    activation_results = [False, True]
+
+    class _FlakyWindow:
+        def __init__(self) -> None:
+            self.title = "cssh-rs daemon"
+            self.activate_calls: list[dict[str, object]] = []
+
+        def activate(self, wait: bool = False, user: bool = True) -> bool:
+            self.activate_calls.append({"wait": wait, "user": user})
+            return activation_results.pop(0)
+
+    window = _FlakyWindow()
+    _patch_matches(monkeypatch, [window])
+    monkeypatch.setattr(window_focus.time, "sleep", lambda _: None)
+
+    result = WindowFocus().focus_window("cssh-rs daemon", poll_interval=0.0)
+
+    assert result == "cssh-rs daemon"
+    assert len(window.activate_calls) == 2
+    assert activation_results == []
 
 
 def test_focus_window_times_out_without_a_match(monkeypatch: pytest.MonkeyPatch) -> None:
