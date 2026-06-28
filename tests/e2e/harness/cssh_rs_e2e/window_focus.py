@@ -66,6 +66,7 @@ class WindowFocus:
         condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
 
         deadline = time.monotonic() + timeout
+        activation_failed = False
         while True:
             matches = pywinctl.getWindowsWithTitle(title, condition=condition)
             if len(matches) > 1:
@@ -73,10 +74,15 @@ class WindowFocus:
                 raise WindowFocusError(f"multiple windows match {title!r}: {matched_titles}")
             if len(matches) == 1:
                 window = matches[0]
-                if not window.activate(wait=True, user=True):
-                    raise WindowFocusError(f"failed to focus window {title!r}")
-                return window.title
+                if window.activate(wait=True, user=True):
+                    return window.title
+                # activate (SetForegroundWindow) transiently fails under Windows'
+                # focus-stealing prevention right after a window spawns; retry until
+                # the deadline instead of failing on the first attempt.
+                activation_failed = True
             if time.monotonic() >= deadline:
+                if activation_failed:
+                    raise WindowFocusError(f"failed to focus window {title!r}")
                 raise WindowFocusError(f"no window matching {title!r} within {timeout}s")
             time.sleep(poll_interval)
 
