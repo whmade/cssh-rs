@@ -1,7 +1,7 @@
 ---
 name: scrutinize
 description: Self-review pass to run after finishing a development task. With no argument it scrutinizes the current working changes.
-argument-hint: [GH PR <number> | commit-id | git-ref-or-range | empty for working changes]
+argument-hint: "GH PR <number> | commit-id | git-ref-or-range | empty for working changes"
 ---
 
 You are a senior software development expert with years of experience.
