@@ -11,4 +11,3 @@
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 #![warn(missing_docs)]
 #![doc(html_no_source)]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
