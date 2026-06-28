@@ -42,6 +42,10 @@ Hold comments and docstrings to a strict standard:
 - A good inline comment is at most one line - a line, not a sentence.
 - The same limits apply to docstrings: explain only what is not obvious, as
   briefly as possible.
+- Honor the project's documentation standards while trimming. Where
+  `AGENTS.md` mandates structure (e.g. cssh keeps the `# Arguments` and
+  `# Returns` sections on public docstrings), keep that structure but make each
+  entry as short and precise as possible.
 
 Challenge every existing comment and docstring against these limits and cut or
 shorten anything that fails them.
