@@ -497,10 +497,8 @@ async fn run_interactive_mode<
     }
 }
 
-/// Build the `generate-config` [`Config`] from [`Config::default`], placing
-/// `hosts` in a single `cluster`, overriding `client.program` when `program`
-/// is set and, when `ssh_config` is set, prepending `-F <path>` to
-/// `client.arguments` and recording it as `client.ssh_config_path`.
+/// Build the config emitted by `generate-config`. A set `ssh_config` both
+/// prepends `-F <path>` to `client.arguments` and sets `client.ssh_config_path`.
 fn build_generate_config(
     hosts: Vec<String>,
     cluster: &str,
