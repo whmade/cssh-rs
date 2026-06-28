@@ -108,12 +108,12 @@ jobs:
       - name: Build instrumented test binaries
         run: |
           $nightly = "${{ steps.nightly.outputs.version }}"
-          # Capture show-env and confirm it only emits `$env:NAME=...` lines
-          # before evaluating, rather than piping arbitrary text into the shell.
+          # Confirm every line is a fully-escaped `$env:NAME="..."` assignment
+          # so Invoke-Expression cannot run anything show-env did not emit.
           $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($line in $covEnv) {
-            if ($line -and $line -notmatch '^\s*\$env:\w+\s*=') {
+            if ($line -and $line -notmatch '^\$env:\w+="(`u\{[0-9a-fA-F]+\})*"$') {
               Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
             }
           }
@@ -169,7 +169,7 @@ jobs:
           $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($line in $covEnv) {
-            if ($line -and $line -notmatch '^\s*\$env:\w+\s*=') {
+            if ($line -and $line -notmatch '^\$env:\w+="(`u\{[0-9a-fA-F]+\})*"$') {
               Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
             }
           }
