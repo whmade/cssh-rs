@@ -4,6 +4,16 @@
 # Reusable workflow containing common CI jobs that can be called by both
 # the main CI workflow and the coverage CI workflow.
 # Uses YAML anchors where possible to reduce redundancy.
+#
+# Caching: each toolchain compiles once in a builder job (build-stable,
+# build-nightly); follow-up jobs restore that warm target instead of
+# recompiling. Two builders because cargo fingerprints by rustc version +
+# RUSTFLAGS, so stable and nightly (+instrument-coverage) artifacts differ.
+# Per builder, Swatinem/rust-cache owns ~/.cargo + the pruned dependency
+# target; actions/cache owns the full target (incl. llvm-cov-target) that
+# carries the instrumented binaries to the tests job. The github.sha key
+# suffix gives same-run consumers an exact hit; restore-keys gives the
+# builder a warm base from the previous run.
 
 name: Shared CI Logic
 
@@ -20,9 +30,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Keep the actions/cache `target` lean and machine-portable. Swatinem sets
+  # this too, but setting it here guards the cache independently of step order.
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  build:
+  build-stable:
     runs-on: &runner-version windows-latest
     steps:
       - uses: &checkout-action actions/checkout@v7.0.0
@@ -30,16 +43,16 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - uses: &rust-cache-action Swatinem/rust-cache@v2
-        with: &rust-cache-shared-key
-          shared-key: ${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+        with: &rust-cache-stable
+          shared-key: stable
 
-      - uses: &build-cache actions/cache@v5.0.5
-        with: &build-cache-paths
-          path: |
-            ~\.cargo\git
-            ~\.cargo\registry
-            target
-          key: ${{runner.os}}-build-cache-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+      - uses: &target-cache actions/cache@v5.0.5
+        with: &target-cache-stable
+          path: target
+          key: ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-
+            ${{ runner.os }}-target-stable-
 
       - name: Build
         run: |
@@ -48,6 +61,65 @@ jobs:
 
       - name: Build docs
         run: cargo docs
+
+  build-nightly:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+
+      - uses: *rust-cache-action
+        with: &rust-cache-nightly
+          shared-key: nightly
+
+      - uses: *target-cache
+        with: &target-cache-nightly
+          path: target
+          key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-
+            ${{ runner.os }}-target-nightly-
+
+      - &read-nightly
+        name: Read nightly toolchain version
+        id: nightly
+        shell: bash
+        run: |
+          echo "version=$(cat .config/coverage/nightly-toolchain.version)" >> $GITHUB_OUTPUT
+
+      - &install-nightly
+        name: Install nightly toolchain
+        run: |
+          rustup toolchain install ${{ steps.nightly.outputs.version }} --component llvm-tools
+
+      - &install-llvm-cov
+        name: Install cargo-llvm-cov
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-llvm-cov
+          version: "^0.8.0"
+
+      # cargo-llvm-cov has no build-only mode (its `--no-run` is the deprecated
+      # `report` alias), so source the coverage env via `show-env` and run a
+      # plain `cargo test --no-run`. The tests job sources the same env, so the
+      # binaries are fingerprint-identical and restored without a recompile.
+      # `--with-pwsh-env-prefix` emits `$env:K=V` lines (renamed `--pwsh` in
+      # llvm-cov 0.7+; we pin ^0.6).
+      - name: Build instrumented test binaries
+        run: |
+          $nightly = "${{ steps.nightly.outputs.version }}"
+          # Confirm every line is a fully-escaped `$env:NAME="..."` assignment
+          # so Invoke-Expression cannot run anything show-env did not emit.
+          $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($line in $covEnv) {
+            if ($line -and $line -notmatch '^\$env:\w+="(`u\{[0-9a-fA-F]+\})*"$') {
+              Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
+            }
+          }
+          $covEnv | Invoke-Expression
+          cargo +$nightly test --no-run --all-features --workspace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   check-format:
     runs-on: *runner-version
@@ -59,56 +131,56 @@ jobs:
 
   check-lint:
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run linter
         run: cargo lint
 
   tests:
     timeout-minutes: 30
     runs-on: *runner-version
-    needs: build
+    needs: build-nightly
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-nightly
+      - uses: *target-cache
+        with: *target-cache-nightly
 
-      - name: Read nightly toolchain version
-        id: nightly
-        shell: bash
-        run: |
-          echo "version=$(cat .config/coverage/nightly-toolchain.version)" >> $GITHUB_OUTPUT
-
-      - name: Install nightly toolchain
-        run: |
-          rustup toolchain install ${{ steps.nightly.outputs.version }} --component llvm-tools
-
-      - name: Install cargo-llvm-cov
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-llvm-cov
-          version: "^0.8.0"
+      - *read-nightly
+      - *install-nightly
+      - *install-llvm-cov
 
       - name: Run tests with coverage
         run: |
           $nightly = "${{ steps.nightly.outputs.version }}"
           $ignoreRegex = (Get-Content -Raw ".config/coverage/ignore-filename.regex").Trim()
-          cargo +$nightly llvm-cov clean --workspace
+          # Source the coverage env (validated as in build-nightly), then run a
+          # plain `cargo test` so the binaries from build-nightly are reused.
+          # clean --profraw-only runs after show-env to reset the counters
+          # without deleting those binaries.
+          $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($line in $covEnv) {
+            if ($line -and $line -notmatch '^\$env:\w+="(`u\{[0-9a-fA-F]+\})*"$') {
+              Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
+            }
+          }
+          $covEnv | Invoke-Expression
+          cargo +$nightly llvm-cov clean --workspace --profraw-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # PowerShell does not propagate native-command exit codes by default,
           # so capture the cargo test exit and surface it after writing reports.
           # --no-fail-fast keeps later test binaries running when an earlier one
           # blows up, so we get full coverage instrumentation for all of them.
-          cargo +$nightly llvm-cov --all-features --workspace --no-fail-fast --no-report -- --no-capture
+          cargo +$nightly test --all-features --workspace --no-fail-fast -- --nocapture
           $testExit = $LASTEXITCODE
           cargo +$nightly llvm-cov report --cobertura --output-path coverage.xml --ignore-filename-regex $ignoreRegex
           $cobExit = $LASTEXITCODE
@@ -139,40 +211,40 @@ jobs:
   tests-docs:
     timeout-minutes: 15
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run tests docs
         run: cargo doc-tests
 
   check-readme-help:
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run check-readme-help
         run: cargo xtask check-readme-help
 
   check-typography:
     runs-on: *runner-version
-    needs: build
+    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-shared-key
-      - uses: *build-cache
-        with: *build-cache-paths
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
       - name: Run check-typography
         run: cargo xtask check-typography
 
