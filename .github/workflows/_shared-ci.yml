@@ -5,26 +5,15 @@
 # the main CI workflow and the coverage CI workflow.
 # Uses YAML anchors where possible to reduce redundancy.
 #
-# Caching strategy: the workspace is compiled once per toolchain in a
-# dedicated builder job, then every follow-up job restores that warm
-# build instead of recompiling. There are two builders because the two
-# toolchains produce incompatible artifacts (cargo fingerprints by rustc
-# version + RUSTFLAGS):
-#   - build-stable  : the pinned stable toolchain, consumed by lint,
-#                     doc-tests and the xtask checks.
-#   - build-nightly : nightly + `-C instrument-coverage` via cargo-llvm-cov,
-#                     consumed only by the coverage `tests` job.
-# Two cache layers cooperate per builder:
-#   - Swatinem/rust-cache owns the cargo home (~/.cargo) and the pruned
-#     dependency target; it also exports CARGO_INCREMENTAL=0.
-#   - actions/cache owns the FULL, un-pruned `target` (including
-#     cargo-llvm-cov's `target/llvm-cov-target`, which Swatinem strips as a
-#     non-dependency artifact). This is what ships the instrumented test
-#     binaries from build-nightly to the tests job.
-# The `${{ github.sha }}` key suffix lets a builder save a per-commit cache
-# that same-run consumers restore as an exact hit (zero recompile), while
-# the restore-keys prefix gives the builder itself a warm incremental base
-# from the previous run.
+# Caching: each toolchain compiles once in a builder job (build-stable,
+# build-nightly); follow-up jobs restore that warm target instead of
+# recompiling. Two builders because cargo fingerprints by rustc version +
+# RUSTFLAGS, so stable and nightly (+instrument-coverage) artifacts differ.
+# Per builder, Swatinem/rust-cache owns ~/.cargo + the pruned dependency
+# target; actions/cache owns the full target (incl. llvm-cov-target) that
+# carries the instrumented binaries to the tests job. The github.sha key
+# suffix gives same-run consumers an exact hit; restore-keys gives the
+# builder a warm base from the previous run.
 
 name: Shared CI Logic
 
@@ -110,18 +99,25 @@ jobs:
           crate: cargo-llvm-cov
           version: "^0.8.0"
 
-      # Compile the instrumented test binaries without running them, so the
-      # tests job restores them from cache and only executes + reports.
       # cargo-llvm-cov has no build-only mode (its `--no-run` is the deprecated
-      # `report` alias), so source the coverage env via `show-env` and drive a
-      # plain `cargo test --no-run`. The tests job sources the same env, making
-      # the binaries fingerprint-identical so they are not recompiled there.
-      # `--with-pwsh-env-prefix` emits `$env:K=V` lines for PowerShell (renamed
-      # to `--pwsh` in llvm-cov 0.7+; we pin ^0.6).
+      # `report` alias), so source the coverage env via `show-env` and run a
+      # plain `cargo test --no-run`. The tests job sources the same env, so the
+      # binaries are fingerprint-identical and restored without a recompile.
+      # `--with-pwsh-env-prefix` emits `$env:K=V` lines (renamed `--pwsh` in
+      # llvm-cov 0.7+; we pin ^0.6).
       - name: Build instrumented test binaries
         run: |
           $nightly = "${{ steps.nightly.outputs.version }}"
-          cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix | Invoke-Expression
+          # Capture show-env and confirm it only emits `$env:NAME=...` lines
+          # before evaluating, rather than piping arbitrary text into the shell.
+          $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($line in $covEnv) {
+            if ($line -and $line -notmatch '^\s*\$env:\w+\s*=') {
+              Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
+            }
+          }
+          $covEnv | Invoke-Expression
           cargo +$nightly test --no-run --all-features --workspace
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -166,12 +162,18 @@ jobs:
         run: |
           $nightly = "${{ steps.nightly.outputs.version }}"
           $ignoreRegex = (Get-Content -Raw ".config/coverage/ignore-filename.regex").Trim()
-          # Source the coverage env, then run with a plain `cargo test` so the
-          # instrumented binaries restored from build-nightly are reused as-is
-          # (cargo-llvm-cov warns its own subcommands other than report/clean
-          # may misbehave under show-env). clean --profraw-only must run after
-          # show-env; it resets the counters without deleting those binaries.
-          cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix | Invoke-Expression
+          # Source the coverage env (validated as in build-nightly), then run a
+          # plain `cargo test` so the binaries from build-nightly are reused.
+          # clean --profraw-only runs after show-env to reset the counters
+          # without deleting those binaries.
+          $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($line in $covEnv) {
+            if ($line -and $line -notmatch '^\s*\$env:\w+\s*=') {
+              Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
+            }
+          }
+          $covEnv | Invoke-Expression
           cargo +$nightly llvm-cov clean --workspace --profraw-only
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # PowerShell does not propagate native-command exit codes by default,
