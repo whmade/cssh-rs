@@ -373,53 +373,30 @@ fn handle_special_commands<A: ArgsCommand>(input: &str, args_command: &A) -> boo
     return false;
 }
 
-/// Execute a parsed command using the provided entrypoint
+/// Execute the interactively entered command, rejecting any subcommand.
+///
+/// Interactive mode accepts only cssh options and positional arguments.
 async fn execute_parsed_command<
     W: WindowsApi + Clone + 'static,
     T: Entrypoint,
     A: ArgsCommand,
-    L: LoggerInitializer,
+    O: Output,
     C: ConfigManager + 'static,
 >(
     windows_api: &W,
     parsed_args: Args,
     entrypoint: &mut T,
     args_command: &A,
-    logger_initializer: &L,
+    output: &mut O,
     config_manager: &C,
     config: &Config,
     config_path: &str,
 ) {
     match &parsed_args.command {
-        Some(Commands::Client { host }) => {
-            if parsed_args.debug {
-                logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));
-            }
-            entrypoint
-                .client_main(
-                    windows_api,
-                    host.to_owned(),
-                    parsed_args.username.to_owned(),
-                    parsed_args.port,
-                    &config.client,
-                )
-                .await;
-        }
-        Some(Commands::Daemon {}) => {
-            if parsed_args.debug {
-                logger_initializer.init_logger("cssh-rs_daemon");
-            }
-            entrypoint
-                .daemon_main(
-                    windows_api,
-                    parsed_args.hosts,
-                    parsed_args.username,
-                    parsed_args.port,
-                    &config.daemon,
-                    &config.clusters,
-                    parsed_args.debug,
-                )
-                .await;
+        Some(_) => {
+            output.eprintln(
+                "Subcommands are not supported in interactive mode. Use cssh options and positional arguments only.",
+            );
         }
         None => {
             if !parsed_args.hosts.is_empty() {
@@ -442,7 +419,6 @@ async fn execute_parsed_command<
 async fn run_interactive_mode<
     W: WindowsApi + Clone + 'static,
     A: ArgsCommand,
-    L: LoggerInitializer,
     T: Entrypoint,
     O: Output,
     I: Input,
@@ -450,7 +426,6 @@ async fn run_interactive_mode<
 >(
     windows_api: &W,
     args_command: &A,
-    logger_initializer: &L,
     mut entrypoint: T,
     config_manager: &C,
     config: &Config,
@@ -480,7 +455,7 @@ async fn run_interactive_mode<
                             parsed_args,
                             &mut entrypoint,
                             args_command,
-                            logger_initializer,
+                            output,
                             config_manager,
                             config,
                             config_path,
@@ -600,7 +575,6 @@ pub async fn main<
                     run_interactive_mode(
                         windows_api,
                         args_command,
-                        logger_initializer,
                         entrypoint,
                         config_manager,
                         &config,

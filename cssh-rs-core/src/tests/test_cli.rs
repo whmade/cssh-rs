@@ -1049,35 +1049,32 @@ mod cli_main_test {
 mod execute_parsed_command_test {
     use crate::cli::{
         execute_parsed_command, Args, Commands, MockArgsCommand, MockConfigManager, MockEntrypoint,
-        MockLoggerInitializer,
+        MockOutput,
     };
     use crate::utils::config::Config;
     use crate::utils::windows::MockWindowsApi;
     use mockall::predicate::*;
 
-    /// Test execute_parsed_command with Client command
+    const SUBCOMMAND_REJECTED: &str =
+        "Subcommands are not supported in interactive mode. Use cssh options and positional arguments only.";
+
+    /// Interactive mode rejects the client subcommand without dispatching it.
     #[tokio::test]
-    async fn test_execute_parsed_command_client_main() {
+    async fn test_execute_parsed_command_rejects_client() {
+        // MockEntrypoint without expectations panics on any dispatch.
         let mut mock_entrypoint = MockEntrypoint::new();
         let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
+        let mut mock_output = MockOutput::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
         let config_path = "test-config.toml";
 
-        // Set up expectations for client_main call
-        mock_entrypoint
-            .expect_client_main::<MockWindowsApi>()
-            .with(
-                always(),
-                eq("testhost".to_string()),
-                eq(Some("testuser".to_string())),
-                eq(Some(2222)),
-                always(),
-            )
+        mock_output
+            .expect_eprintln()
+            .with(eq(SUBCOMMAND_REJECTED))
             .times(1)
-            .returning(|_, _, _, _, _| return Box::pin(async {}));
+            .returning(|_| {});
 
         let args = Args {
             command: Some(Commands::Client {
@@ -1086,60 +1083,6 @@ mod execute_parsed_command_test {
             username: Some("testuser".to_string()),
             port: Some(2222),
             hosts: vec![],
-            debug: false,
-        };
-
-        execute_parsed_command(
-            &mock_windows_api,
-            args,
-            &mut mock_entrypoint,
-            &mock_args_command,
-            &mock_logger_initializer,
-            &mock_config_manager,
-            &config,
-            config_path,
-        )
-        .await;
-    }
-
-    /// Test execute_parsed_command with Client command and debug enabled
-    #[tokio::test]
-    async fn test_execute_parsed_command_client_main_with_debug() {
-        let mut mock_entrypoint = MockEntrypoint::new();
-        let mock_args_command = MockArgsCommand::new();
-        let mut mock_logger_initializer = MockLoggerInitializer::new();
-        let mock_windows_api = MockWindowsApi::new();
-        let mock_config_manager = MockConfigManager::new();
-        let config = Config::default();
-        let config_path = "test-config.toml";
-
-        // Set up expectations for logger initialization
-        mock_logger_initializer
-            .expect_init_logger()
-            .with(eq("cssh-rs_client_debughost"))
-            .times(1)
-            .returning(|_| {});
-
-        // Set up expectations for client_main call
-        mock_entrypoint
-            .expect_client_main::<MockWindowsApi>()
-            .with(
-                always(),
-                eq("debughost".to_string()),
-                eq(None),
-                eq(None),
-                always(),
-            )
-            .times(1)
-            .returning(|_, _, _, _, _| return Box::pin(async {}));
-
-        let args = Args {
-            command: Some(Commands::Client {
-                host: "debughost".to_string(),
-            }),
-            username: None,
-            port: None,
-            hosts: vec![],
             debug: true,
         };
 
@@ -1148,7 +1091,7 @@ mod execute_parsed_command_test {
             args,
             &mut mock_entrypoint,
             &mock_args_command,
-            &mock_logger_initializer,
+            &mut mock_output,
             &mock_config_manager,
             &config,
             config_path,
@@ -1156,85 +1099,22 @@ mod execute_parsed_command_test {
         .await;
     }
 
-    /// Test execute_parsed_command with Daemon command
+    /// Interactive mode rejects the daemon subcommand without dispatching it.
     #[tokio::test]
-    async fn test_execute_parsed_command_daemon_main() {
+    async fn test_execute_parsed_command_rejects_daemon() {
         let mut mock_entrypoint = MockEntrypoint::new();
         let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
+        let mut mock_output = MockOutput::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
         let config_path = "test-config.toml";
 
-        // Set up expectations for daemon_main call
-        mock_entrypoint
-            .expect_daemon_main()
-            .with(
-                always(),
-                eq(vec!["host1".to_string(), "host2".to_string()]),
-                eq(Some("testuser".to_string())),
-                eq(Some(8080)),
-                always(),
-                always(),
-                eq(false),
-            )
-            .times(1)
-            .returning(|_: &MockWindowsApi, _, _, _, _, _, _| return Box::pin(async {}));
-
-        let args = Args {
-            command: Some(Commands::Daemon {}),
-            username: Some("testuser".to_string()),
-            port: Some(8080),
-            hosts: vec!["host1".to_string(), "host2".to_string()],
-            debug: false,
-        };
-
-        execute_parsed_command(
-            &mock_windows_api,
-            args,
-            &mut mock_entrypoint,
-            &mock_args_command,
-            &mock_logger_initializer,
-            &mock_config_manager,
-            &config,
-            config_path,
-        )
-        .await;
-    }
-
-    /// Test execute_parsed_command with Daemon command and debug enabled
-    #[tokio::test]
-    async fn test_execute_parsed_command_daemon_main_with_debug() {
-        let mut mock_entrypoint = MockEntrypoint::new();
-        let mock_args_command = MockArgsCommand::new();
-        let mut mock_logger_initializer = MockLoggerInitializer::new();
-        let mock_windows_api = MockWindowsApi::new();
-        let mock_config_manager = MockConfigManager::new();
-        let config = Config::default();
-        let config_path = "test-config.toml";
-
-        // Set up expectations for logger initialization
-        mock_logger_initializer
-            .expect_init_logger()
-            .with(eq("cssh-rs_daemon"))
+        mock_output
+            .expect_eprintln()
+            .with(eq(SUBCOMMAND_REJECTED))
             .times(1)
             .returning(|_| {});
-
-        // Set up expectations for daemon_main call
-        mock_entrypoint
-            .expect_daemon_main()
-            .with(
-                always(),
-                eq(vec!["host1".to_string(), "host2".to_string()]),
-                eq(Some("testuser".to_string())),
-                eq(Some(8080)),
-                always(),
-                always(),
-                eq(true),
-            )
-            .times(1)
-            .returning(|_: &MockWindowsApi, _, _, _, _, _, _| return Box::pin(async {}));
 
         let args = Args {
             command: Some(Commands::Daemon {}),
@@ -1249,7 +1129,7 @@ mod execute_parsed_command_test {
             args,
             &mut mock_entrypoint,
             &mock_args_command,
-            &mock_logger_initializer,
+            &mut mock_output,
             &mock_config_manager,
             &config,
             config_path,
@@ -1262,7 +1142,7 @@ mod execute_parsed_command_test {
     async fn test_execute_parsed_command_main_with_hosts() {
         let mut mock_entrypoint = MockEntrypoint::new();
         let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
+        let mut mock_output = MockOutput::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
@@ -1288,7 +1168,7 @@ mod execute_parsed_command_test {
             args,
             &mut mock_entrypoint,
             &mock_args_command,
-            &mock_logger_initializer,
+            &mut mock_output,
             &mock_config_manager,
             &config,
             config_path,
@@ -1301,7 +1181,7 @@ mod execute_parsed_command_test {
     async fn test_execute_parsed_command_print_help() {
         let mut mock_entrypoint = MockEntrypoint::new();
         let mut mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
+        let mut mock_output = MockOutput::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
@@ -1326,7 +1206,7 @@ mod execute_parsed_command_test {
             args,
             &mut mock_entrypoint,
             &mock_args_command,
-            &mock_logger_initializer,
+            &mut mock_output,
             &mock_config_manager,
             &config,
             config_path,
@@ -1768,9 +1648,8 @@ mod main_entrypoint_test {
 /// Test module for the interactive mode helper functions
 mod interactive_mode_test {
     use crate::cli::{
-        execute_parsed_command, handle_special_commands, run_interactive_mode, Args, Commands,
-        MockArgsCommand, MockConfigManager, MockEntrypoint, MockInput, MockLoggerInitializer,
-        MockOutput,
+        handle_special_commands, run_interactive_mode, MockArgsCommand, MockConfigManager,
+        MockEntrypoint, MockInput, MockOutput,
     };
     use crate::utils::config::Config;
     use crate::utils::windows::MockWindowsApi;
@@ -1814,177 +1693,76 @@ mod interactive_mode_test {
         assert!(!handle_special_commands("-v", &mock_args_command2));
     }
 
-    /// Test execute_parsed_command with Client command
+    /// A subcommand typed at the interactive prompt is rejected with a
+    /// message and the loop keeps running instead of dispatching it.
     #[tokio::test]
-    async fn test_execute_parsed_command_client() {
-        let mut mock_entrypoint = MockEntrypoint::new();
+    async fn test_run_interactive_mode_rejects_subcommand() {
+        // MockEntrypoint without expectations panics on any dispatch.
+        let mock_entrypoint = MockEntrypoint::new();
         let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
         let mock_windows_api = MockWindowsApi::new();
+        let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
         let config_path = "test-config.toml";
+        let mut mock_output = MockOutput::new();
+        let mut mock_input = MockInput::new();
 
-        // Set up expectations
-        mock_entrypoint
-            .expect_client_main::<MockWindowsApi>()
-            .with(
-                always(),
-                eq("testhost".to_string()),
-                eq(Some("testuser".to_string())),
-                eq(Some(2222)),
-                always(),
-            )
-            .times(1)
-            .returning(|_, _, _, _, _| return Box::pin(async {}));
+        // Two iterations: the rejected subcommand, then the empty exit line.
+        mock_output
+            .expect_println()
+            .with(eq("\n=== Interactive Mode ==="))
+            .times(2)
+            .returning(|_| {});
+        mock_output
+            .expect_println()
+            .with(eq(format!(
+                "Enter your {PACKAGE_NAME} arguments (or press Enter to exit):"
+            )))
+            .times(2)
+            .returning(|_| {});
+        mock_output
+            .expect_println()
+            .with(eq("Example: -u myuser host1 host2 host3"))
+            .times(2)
+            .returning(|_| {});
+        mock_output
+            .expect_println()
+            .with(eq("Example: --help"))
+            .times(2)
+            .returning(|_| {});
+        mock_output
+            .expect_print()
+            .with(eq("> "))
+            .times(2)
+            .returning(|_| {});
+        mock_output.expect_flush().times(2).returning(|| {});
 
-        let args = Args {
-            command: Some(Commands::Client {
-                host: "testhost".to_string(),
-            }),
-            username: Some("testuser".to_string()),
-            port: Some(2222),
-            hosts: vec![],
-            debug: false,
-        };
-
-        // Call the actual execute_parsed_command function with mocked dependencies
-        execute_parsed_command(
-            &mock_windows_api,
-            args,
-            &mut mock_entrypoint,
-            &mock_args_command,
-            &mock_logger_initializer,
-            &MockConfigManager::new(),
-            &config,
-            config_path,
-        )
-        .await;
-    }
-
-    /// Test execute_parsed_command with Daemon command
-    #[tokio::test]
-    async fn test_execute_parsed_command_daemon() {
-        let mut mock_entrypoint = MockEntrypoint::new();
-        let mock_args_command = MockArgsCommand::new();
-        let mut mock_logger_initializer = MockLoggerInitializer::new();
-        let config = Config::default();
-        let config_path = "test-config.toml";
-
-        // Set up expectations for logger initialization
-        mock_logger_initializer
-            .expect_init_logger()
-            .with(eq("cssh-rs_daemon"))
+        mock_output
+            .expect_eprintln()
+            .with(eq(
+                "Subcommands are not supported in interactive mode. Use cssh options and positional arguments only.",
+            ))
             .times(1)
             .returning(|_| {});
 
-        // Set up expectations
-        mock_entrypoint
-            .expect_daemon_main()
-            .with(
-                always(),
-                eq(vec!["host1".to_string(), "host2".to_string()]),
-                eq(Some("testuser".to_string())),
-                eq(Some(8080)),
-                always(),
-                always(),
-                eq(true),
-            )
+        mock_input
+            .expect_read_line()
             .times(1)
-            .returning(|_: &MockWindowsApi, _, _, _, _, _, _| return Box::pin(async {}));
+            .returning(|| return Ok("daemon host1\n".to_string()));
+        mock_input
+            .expect_read_line()
+            .times(1)
+            .returning(|| return Ok("\n".to_string()));
 
-        let args = Args {
-            command: Some(Commands::Daemon {}),
-            username: Some("testuser".to_string()),
-            port: Some(8080),
-            hosts: vec!["host1".to_string(), "host2".to_string()],
-            debug: true,
-        };
-
-        // Call the actual execute_parsed_command function with mocked dependencies
-        execute_parsed_command(
-            &MockWindowsApi::new(),
-            args,
-            &mut mock_entrypoint,
+        run_interactive_mode(
+            &mock_windows_api,
             &mock_args_command,
-            &mock_logger_initializer,
-            &MockConfigManager::new(),
+            mock_entrypoint,
+            &mock_config_manager,
             &config,
             config_path,
-        )
-        .await;
-    }
-
-    /// Test execute_parsed_command with None command and hosts
-    #[tokio::test]
-    async fn test_execute_parsed_command_none_with_hosts() {
-        let mut mock_entrypoint = MockEntrypoint::new();
-        let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
-        let config = Config::default();
-        let config_path = "test-config.toml";
-
-        // Set up expectations
-        mock_entrypoint
-            .expect_main()
-            .with(always(), always(), eq(config_path), always(), always())
-            .times(1)
-            .returning(|_: &MockWindowsApi, _: &MockConfigManager, _, _, _| {});
-
-        let args = Args {
-            command: None,
-            username: Some("testuser".to_string()),
-            port: Some(3333),
-            hosts: vec!["host1".to_string(), "host2".to_string()],
-            debug: false,
-        };
-
-        // Call the actual execute_parsed_command function with mocked dependencies
-        execute_parsed_command(
-            &MockWindowsApi::new(),
-            args,
-            &mut mock_entrypoint,
-            &mock_args_command,
-            &mock_logger_initializer,
-            &MockConfigManager::new(),
-            &config,
-            config_path,
-        )
-        .await;
-    }
-
-    /// Test execute_parsed_command with None command and no hosts (should show help)
-    #[tokio::test]
-    async fn test_execute_parsed_command_none_no_hosts() {
-        let mut mock_entrypoint = MockEntrypoint::new();
-        let mut mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
-        let config = Config::default();
-        let config_path = "test-config.toml";
-
-        // Set up expectation that print_help will be called
-        mock_args_command
-            .expect_print_help()
-            .times(1)
-            .returning(|| return Ok(()));
-
-        let args = Args {
-            command: None,
-            username: None,
-            port: None,
-            hosts: vec![],
-            debug: false,
-        };
-
-        // Call the actual execute_parsed_command function with mocked dependencies
-        execute_parsed_command(
-            &MockWindowsApi::new(),
-            args,
-            &mut mock_entrypoint,
-            &mock_args_command,
-            &mock_logger_initializer,
-            &MockConfigManager::new(),
-            &config,
-            config_path,
+            &mut mock_output,
+            &mut mock_input,
         )
         .await;
     }
@@ -1994,7 +1772,6 @@ mod interactive_mode_test {
     async fn test_run_interactive_mode_success() {
         let mock_entrypoint = MockEntrypoint::new();
         let mut mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
@@ -2051,7 +1828,6 @@ mod interactive_mode_test {
         run_interactive_mode(
             &mock_windows_api,
             &mock_args_command,
-            &mock_logger_initializer,
             mock_entrypoint,
             &mock_config_manager,
             &config,
@@ -2067,7 +1843,6 @@ mod interactive_mode_test {
     async fn test_run_interactive_mode_calls_execute_parsed_command_main() {
         let mut mock_entrypoint = MockEntrypoint::new();
         let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
@@ -2125,7 +1900,6 @@ mod interactive_mode_test {
         run_interactive_mode(
             &mock_windows_api,
             &mock_args_command,
-            &mock_logger_initializer,
             mock_entrypoint,
             &mock_config_manager,
             &config,
@@ -2141,7 +1915,6 @@ mod interactive_mode_test {
     async fn test_run_interactive_mode_parse_error() {
         let mock_entrypoint = MockEntrypoint::new();
         let mock_args_command = MockArgsCommand::new();
-        let mock_logger_initializer = MockLoggerInitializer::new();
         let mock_windows_api = MockWindowsApi::new();
         let mock_config_manager = MockConfigManager::new();
         let config = Config::default();
@@ -2210,7 +1983,6 @@ mod interactive_mode_test {
         run_interactive_mode(
             &mock_windows_api,
             &mock_args_command,
-            &mock_logger_initializer,
             mock_entrypoint,
             &mock_config_manager,
             &config,
