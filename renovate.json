@@ -5,7 +5,7 @@
   ],
   "timezone": "Europe/Berlin",
   "schedule": [
-    "after 6pm and before 7pm on friday"
+    "* 18-21 * * 5"
   ],
   "labels": [
     "dependencies",
@@ -13,6 +13,10 @@
   ],
   "commitMessagePrefix": "deps:",
   "dependencyDashboard": true,
+  "rebaseWhen": "behind-base-branch",
+  "automerge": true,
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
   "enabledManagers": [
     "custom.regex"
   ],
