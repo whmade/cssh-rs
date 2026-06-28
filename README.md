@@ -115,9 +115,10 @@ Cross-platform cluster SSH tool
 Usage: cssh-rs.exe [OPTIONS] [HOSTS]... [COMMAND]
 
 Commands:
-  client  Subcommand that will launch a single client window
-  daemon  Subcommand that will launch the daemon window
-  help    Print this message or the help of the given subcommand(s)
+  client           Subcommand that will launch a single client window
+  daemon           Subcommand that will launch the daemon window
+  generate-config  Write a default config file at the given output path
+  help             Print this message or the help of the given subcommand(s)
 
 Arguments:
   [HOSTS]...
