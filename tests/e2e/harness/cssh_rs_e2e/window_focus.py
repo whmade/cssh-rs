@@ -76,10 +76,9 @@ class WindowFocus:
                 window = matches[0]
                 if window.activate(wait=True, user=True):
                     return window.title
-                # SetForegroundWindow refuses the foreground transiently under
-                # Windows' focus-stealing prevention, especially right after a
-                # window is spawned; retry until the deadline instead of failing
-                # the first attempt.
+                # activate (SetForegroundWindow) transiently fails under Windows'
+                # focus-stealing prevention right after a window spawns; retry until
+                # the deadline instead of failing on the first attempt.
                 activation_failed = True
             if time.monotonic() >= deadline:
                 if activation_failed:
