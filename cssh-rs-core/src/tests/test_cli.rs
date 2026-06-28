@@ -1737,7 +1737,6 @@ mod interactive_mode_test {
             .returning(|_| {});
         mock_output.expect_flush().times(2).returning(|| {});
 
-        // The subcommand is reported as unsupported.
         mock_output
             .expect_eprintln()
             .with(eq(

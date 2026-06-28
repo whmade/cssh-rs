@@ -373,11 +373,9 @@ fn handle_special_commands<A: ArgsCommand>(input: &str, args_command: &A) -> boo
     return false;
 }
 
-/// Execute an interactively entered command using the provided entrypoint.
+/// Execute the interactively entered command, rejecting any subcommand.
 ///
-/// Interactive mode only accepts cssh options and positional arguments;
-/// any subcommand is rejected with a message so the prompt loop can keep
-/// running.
+/// Interactive mode accepts only cssh options and positional arguments.
 async fn execute_parsed_command<
     W: WindowsApi + Clone + 'static,
     T: Entrypoint,
