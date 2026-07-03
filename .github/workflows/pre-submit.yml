@@ -27,7 +27,7 @@ jobs:
       workflows: ${{ steps.changes.outputs.workflows }}
     steps:
       - uses: actions/checkout@v7.0.0
-      - uses: dorny/paths-filter@v4
+      - uses: dorny/paths-filter@v4.0.1
         id: changes
         with:
           filters: |
@@ -127,7 +127,7 @@ jobs:
         run: |
           echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-python@v6.2.0
+      - uses: actions/setup-python@v6.3.0
         with:
           python-version: ${{ steps.python.outputs.version }}
 
