@@ -41,9 +41,6 @@ MAX_LOG_TAIL_BYTES = 4096
 REMOVE_TEMPDIR_ATTEMPTS = 5
 REMOVE_TEMPDIR_RETRY_SECONDS = 0.2
 
-# sshd emits one such line per successful publickey auth at LogLevel VERBOSE.
-_ACCEPTED_CONNECTION_MARKER = "Accepted publickey"
-
 # Aliases are interpolated into filenames and the generated ssh_config, so
 # reject path separators, whitespace and control characters.
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -194,20 +191,22 @@ class SshdFixture:
         self._process = None
         self._tempdir = None
 
-    def count_established_connections(self) -> int:
-        """Return the number of accepted publickey authentications in sshd.log.
+    def count_connected_markers(self) -> int:
+        """Return how many host markers exist, one per connected ssh session.
+
+        The forced-command marker writer creates ``markers/<alias>.log`` the
+        moment its session starts and then blocks reading the channel, so a
+        marker file is a live-readable proof that the session authenticated and
+        is ready for input. This reads directory entries only, never sshd.log,
+        which Windows OpenSSH holds open without a read-share while it runs.
 
         Returns:
-            Count of successful connections so far, or 0 before sshd has
-            written its log.
+            Count of existing marker files, or 0 before any session connects.
         """
         if self._tempdir is None:
             raise SshdFixtureError("sshd fixture is not running")
-        log = self._tempdir / "sshd.log"
-        if not log.exists():
-            return 0
-        text = log.read_text(encoding="utf-8", errors="replace")
-        return text.count(_ACCEPTED_CONNECTION_MARKER)
+        markers_dir = self._tempdir / "markers"
+        return len(list(markers_dir.glob("*.log")))
 
     def read_marker(self, alias: str) -> str:
         """Return the contents of ``markers/<alias>.log`` as UTF-8 text.

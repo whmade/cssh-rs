@@ -281,24 +281,25 @@ def test_remove_tempdir_keeps_tree_when_env_set(
     assert target.exists()
 
 
-def test_count_established_connections_counts_accepted_lines(tmp_path: Path) -> None:
+def test_count_connected_markers_counts_marker_files(tmp_path: Path) -> None:
     fixture = SshdFixture()
     fixture._tempdir = tmp_path
-    (tmp_path / "sshd.log").write_text(
-        "Accepted publickey for alpha\nnoise\nAccepted publickey for bravo\n",
-        encoding="utf-8",
-    )
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    (markers / "alpha.log").write_bytes(b"")
+    (markers / "bravo.log").write_bytes(b"")
 
-    assert fixture.count_established_connections() == 2
+    assert fixture.count_connected_markers() == 2
 
 
-def test_count_established_connections_zero_before_log(tmp_path: Path) -> None:
+def test_count_connected_markers_zero_before_connections(tmp_path: Path) -> None:
     fixture = SshdFixture()
     fixture._tempdir = tmp_path
+    (tmp_path / "markers").mkdir()
 
-    assert fixture.count_established_connections() == 0
+    assert fixture.count_connected_markers() == 0
 
 
-def test_count_established_connections_raises_before_start() -> None:
+def test_count_connected_markers_raises_before_start() -> None:
     with pytest.raises(SshdFixtureError):
-        SshdFixture().count_established_connections()
+        SshdFixture().count_connected_markers()

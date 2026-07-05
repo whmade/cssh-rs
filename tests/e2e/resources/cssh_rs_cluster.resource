@@ -82,9 +82,11 @@ Assert All Ssh Connections Established
     Wait Until Keyword Succeeds    30x    1s    All Connections Reported    ${count}
 
 All Connections Reported
-    [Documentation]    Assert sshd reports at least ${expected} accepted connections.
+    [Documentation]    Assert at least ${expected} host markers exist, one per connected
+    ...                ssh session; the marker writer creates its marker as soon as its
+    ...                session is ready for input.
     [Arguments]    ${expected}
-    ${connected}=    Count Established Connections
+    ${connected}=    Count Connected Markers
     Should Be True    ${connected} >= ${expected}
     ...    Only ${connected} of ${expected} ssh sessions connected
 
