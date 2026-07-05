@@ -11,8 +11,8 @@ use windows::Win32::System::Threading::PROCESS_INFORMATION;
 use crate::utils::windows::MockWindowsApi;
 use crate::{
     create_process, init_logger_with_fs, is_launched_from_gui, spawn_console_process,
-    MockFileSystem, MockRegistry, PreviousValue, WindowsSettingsDefaultTerminalApplicationGuard,
-    CLSID_CONHOST, DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_CONSOLE, DELEGATION_TERMINAL,
+    MockFileSystem, MockRegistry, WindowsSettingsDefaultTerminalApplicationGuard, CLSID_CONHOST,
+    DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_CONSOLE, DELEGATION_TERMINAL,
 };
 
 /// Test module for WindowsSettingsDefaultTerminalApplicationGuard functionality.
@@ -74,15 +74,10 @@ mod windows_settings_guard_test {
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
+        assert!(guard.changed);
         assert!(!guard.key_existed);
-        assert_eq!(
-            guard.old_windows_terminal_console,
-            Some(PreviousValue::Absent)
-        );
-        assert_eq!(
-            guard.old_windows_terminal_terminal,
-            Some(PreviousValue::Absent)
-        );
+        assert_eq!(guard.old_windows_terminal_console, None);
+        assert_eq!(guard.old_windows_terminal_terminal, None);
         drop(guard);
     }
 
@@ -119,8 +114,7 @@ mod windows_settings_guard_test {
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
-        assert!(guard.old_windows_terminal_console.is_none());
-        assert!(guard.old_windows_terminal_terminal.is_none());
+        assert!(!guard.changed);
         drop(guard);
     }
 
@@ -208,14 +202,12 @@ mod windows_settings_guard_test {
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
+        assert!(guard.changed);
         assert!(guard.key_existed);
-        assert_eq!(
-            guard.old_windows_terminal_console,
-            Some(PreviousValue::Existing(old_console_value))
-        );
+        assert_eq!(guard.old_windows_terminal_console, Some(old_console_value));
         assert_eq!(
             guard.old_windows_terminal_terminal,
-            Some(PreviousValue::Existing(old_terminal_value))
+            Some(old_terminal_value)
         );
         drop(guard);
     }
@@ -286,15 +278,10 @@ mod windows_settings_guard_test {
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
+        assert!(guard.changed);
         assert!(guard.key_existed);
-        assert_eq!(
-            guard.old_windows_terminal_console,
-            Some(PreviousValue::Absent)
-        );
-        assert_eq!(
-            guard.old_windows_terminal_terminal,
-            Some(PreviousValue::Absent)
-        );
+        assert_eq!(guard.old_windows_terminal_console, None);
+        assert_eq!(guard.old_windows_terminal_terminal, None);
         drop(guard);
     }
 }
