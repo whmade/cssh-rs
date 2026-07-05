@@ -10,7 +10,7 @@ use std::fs::{create_dir, File};
 use std::mem;
 
 use log::warn;
-use registry::{value, Data, Hive, Security};
+use registry::{key, value, Data, Hive, Security};
 use simplelog::{format_description, ConfigBuilder, LevelFilter, WriteLogger};
 use windows::core::PWSTR;
 use windows::Win32::Foundation::HWND;
@@ -106,8 +106,16 @@ impl Registry for DefaultRegistry {
     fn delete_registry_string_value(&self, path: &str, name: &str) -> bool {
         let key = match Hive::CurrentUser.open(path, Security::Read | Security::Write) {
             Ok(key) => key,
-            // No key means the value is already absent.
-            Err(_) => return true,
+            // A missing key means the value is already absent; any other error
+            // (access denied, transient failure) must not masquerade as success.
+            Err(key::Error::NotFound(_, _)) => return true,
+            Err(err) => {
+                warn!(
+                    "Failed to open registry key {} to delete {}: {}",
+                    path, name, err
+                );
+                return false;
+            }
         };
         match key.delete_value(name) {
             Ok(()) => return true,
