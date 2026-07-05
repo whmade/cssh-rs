@@ -51,9 +51,24 @@ jobs:
             exit 0
           fi
 
-          # Read labels from live PR state; the `opened` payload can predate a label applied moments later.
-          LABELS=$(gh pr view "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" --json labels --jq '.labels[].name')
+          # Read labels from live PR state (the `opened` payload can predate a
+          # label applied moments later). Retry to ride out transient gh
+          # failures; if every attempt fails, error out rather than treating an
+          # unread result as "no label present". `if` keeps `set -e` from
+          # aborting on a failed attempt.
+          LABELS=""
+          for attempt in 1 2 3; do
+            if LABELS=$(gh pr view "${{ github.event.pull_request.number }}" \
+                 --repo "${{ github.repository }}" --json labels --jq '.labels[].name'); then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "❌ Failed to read PR labels after 3 attempts"
+              exit 1
+            fi
+            echo "gh pr view failed (attempt $attempt); retrying in 2s..." >&2
+            sleep 2
+          done
 
           if grep -qxF "${{ env.OVERRIDE_LABEL }}" <<< "$LABELS"; then
             echo "✅ No news fragment needed (acknowledged via '${{ env.OVERRIDE_LABEL }}' label)"
