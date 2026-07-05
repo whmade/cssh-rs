@@ -26,6 +26,8 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.1
 _VALID_MATCH_MODES = ("exact", "substring")
 
 _SW_RESTORE = 9
+# GetWindow relationship: the next window below in the z-order.
+_GW_HWNDNEXT = 2
 # SystemParametersInfoW action codes; the foreground-lock timeout is in milliseconds.
 _SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
 _SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
@@ -148,6 +150,62 @@ class WindowFocus:
         import pywinctl
 
         return pywinctl.getActiveWindowTitle() or ""
+
+    def window_z_order_index(self, title: str, match_mode: str = "exact") -> int:
+        """Return how many top-level windows sit above the one matching ``title``.
+
+        0 is topmost, so comparing two windows' indices reveals which is stacked
+        above the other - unlike a minimized-state check, this catches a window
+        left hidden beneath another rather than raised on top.
+
+        Args:
+            title: Window title to match.
+            match_mode: ``"exact"`` (full title) or ``"substring"`` (contains).
+
+        Returns:
+            The window's index in the top-level z-order, 0 for the topmost.
+        """
+        if match_mode not in _VALID_MATCH_MODES:
+            raise WindowFocusError(
+                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+            )
+
+        import pywinctl
+
+        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
+        matches = pywinctl.getWindowsWithTitle(title, condition=condition)
+        if len(matches) != 1:
+            titles = [window.title for window in matches]
+            raise WindowFocusError(f"expected exactly one window matching {title!r}, got {titles}")
+        return _z_order_index(int(matches[0].getHandle()))
+
+
+def _z_order_index(hwnd: int) -> int:
+    """Return how many top-level windows sit above ``hwnd`` (0 = topmost).
+
+    Walks the top-level z-order from the front with ``GetWindow``/``GW_HWNDNEXT``.
+    """
+    if sys.platform != "win32":
+        raise WindowFocusError("window focus is only supported on Windows")
+
+    import ctypes
+    from ctypes import wintypes
+
+    # ctypes.windll exists only in the Windows typeshed stub; guarded above.
+    user32 = ctypes.windll.user32  # pyrefly: ignore[missing-attribute]
+    user32.GetTopWindow.argtypes = [wintypes.HWND]
+    user32.GetTopWindow.restype = wintypes.HWND
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+
+    index = 0
+    current = user32.GetTopWindow(None)
+    while current:
+        if current == hwnd:
+            return index
+        index += 1
+        current = user32.GetWindow(current, _GW_HWNDNEXT)
+    raise WindowFocusError(f"window {hwnd} is not in the top-level z-order")
 
 
 def _validate_match_args(match_mode: str, timeout: float, poll_interval: float) -> None:

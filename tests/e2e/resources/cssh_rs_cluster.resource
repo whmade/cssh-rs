@@ -215,3 +215,15 @@ Close All Client Windows
         Focus Window    @${alias}    substring
         Send Hotkey    alt    f4
     END
+
+Assert All Client Windows Raised Above
+    [Documentation]    Assert every client window sits above ${other_title} in the z-order,
+    ...                proving the daemon's focus sync raised them all rather than leaving
+    ...                any hidden beneath it.
+    [Arguments]    ${other_title}    ${other_match_mode}=substring
+    ${other_index}=    Window Z Order Index    ${other_title}    ${other_match_mode}
+    FOR    ${alias}    IN    @{ALIASES}
+        ${client_index}=    Window Z Order Index    @${alias}    substring
+        Should Be True    ${client_index} < ${other_index}
+        ...    Client window for ${alias} is hidden under ${other_title}
+    END
