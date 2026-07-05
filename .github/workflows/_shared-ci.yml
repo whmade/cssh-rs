@@ -310,6 +310,47 @@ jobs:
         working-directory: tests/e2e/harness
         run: pytest
 
+  # Runs the E2E suite; lives in the reusable workflow so it is per-PR blocking.
+  e2e-run:
+    timeout-minutes: 20
+    runs-on: *runner-version
+    needs: build-stable
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - uses: *rust-cache-action
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
+      # Reuse the warm build-stable target cache instead of rebuilding.
+      - name: Verify cached cssh-rs binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path target/debug/cssh-rs.exe)) {
+            throw "target/debug/cssh-rs.exe missing - build-stable target cache was not restored"
+          }
+      - *e2e-read-python
+      - *e2e-setup-python
+      - *e2e-install
+      # The runner ships the OpenSSH client but not the server the sshd fixture needs.
+      - name: Enable OpenSSH server
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+      - name: Run E2E suite
+        shell: pwsh
+        run: >-
+          robot
+          --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
+          --outputdir e2e-output
+          tests/e2e/suites/cluster_e2e.robot
+      - name: Upload E2E report
+        if: always()
+        uses: *upload-artifact-action
+        with:
+          name: e2e-robot-report
+          path: e2e-output/
+          retention-days: 7
+
   # Compile-only cross-checks for the portable crate subset on native
   # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still
   # Windows-tied (ported off the windows crate in M4/M5) and are excluded;

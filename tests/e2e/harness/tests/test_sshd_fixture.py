@@ -188,3 +188,118 @@ def test_terminate_survives_process_that_never_reaps() -> None:
     sshd_fixture._terminate(process)  # type: ignore[arg-type]
 
     assert process.killed
+
+
+class _FakeProcess:
+    def __init__(self, pid: int = 1234) -> None:
+        self.pid = pid
+        self._alive = True
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        return None if self._alive else 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self._alive = False
+
+    def kill(self) -> None:
+        self._alive = False
+
+    def wait(self, **_kwargs: object) -> int:
+        self._alive = False
+        return 0
+
+
+def test_terminate_tree_kills_whole_tree_via_taskkill_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sshd_fixture.os, "name", "nt")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        sshd_fixture.subprocess,
+        "run",
+        lambda args, **_: calls.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    process = _FakeProcess(pid=4321)
+
+    sshd_fixture._terminate_tree(process)  # type: ignore[arg-type]
+
+    assert calls == [["taskkill", "/F", "/T", "/PID", "4321"]]
+    assert not process.terminated
+
+
+def test_terminate_tree_falls_back_to_terminate_off_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sshd_fixture.os, "name", "posix")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        sshd_fixture.subprocess,
+        "run",
+        lambda args, **_: calls.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    process = _FakeProcess()
+
+    sshd_fixture._terminate_tree(process)  # type: ignore[arg-type]
+
+    assert process.terminated
+    assert calls == []
+
+
+def test_remove_tempdir_retries_until_directory_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "run"
+    target.mkdir()
+    real_rmtree = sshd_fixture.shutil.rmtree
+    calls = {"n": 0}
+
+    def fake_rmtree(path: object, ignore_errors: bool = False) -> None:
+        calls["n"] += 1
+        if calls["n"] >= 3:
+            real_rmtree(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(sshd_fixture.shutil, "rmtree", fake_rmtree)
+    monkeypatch.setattr(sshd_fixture.time, "sleep", lambda _seconds: None)
+
+    sshd_fixture._remove_tempdir(target)
+
+    assert not target.exists()
+    assert calls["n"] == 3
+
+
+def test_remove_tempdir_keeps_tree_when_env_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "run"
+    target.mkdir()
+    monkeypatch.setenv("CSSH_E2E_KEEP_TEMP", "1")
+
+    sshd_fixture._remove_tempdir(target)
+
+    assert target.exists()
+
+
+def test_count_connected_markers_counts_marker_files(tmp_path: Path) -> None:
+    fixture = SshdFixture()
+    fixture._tempdir = tmp_path
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    (markers / "alpha.log").write_bytes(b"")
+    (markers / "bravo.log").write_bytes(b"")
+
+    assert fixture.count_connected_markers() == 2
+
+
+def test_count_connected_markers_zero_before_connections(tmp_path: Path) -> None:
+    fixture = SshdFixture()
+    fixture._tempdir = tmp_path
+    (tmp_path / "markers").mkdir()
+
+    assert fixture.count_connected_markers() == 0
+
+
+def test_count_connected_markers_raises_before_start() -> None:
+    with pytest.raises(SshdFixtureError):
+        SshdFixture().count_connected_markers()

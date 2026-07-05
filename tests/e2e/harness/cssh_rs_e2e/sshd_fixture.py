@@ -5,7 +5,7 @@ This Robot Framework library starts a fresh OpenSSH ``sshd`` on
 no shared system state. Each host alias gets its own Ed25519 keypair whose
 ``authorized_keys`` entry pins a ``command="..."`` restriction piping the
 SSH channel's stdin into ``markers/<alias>.log``; suites assert cssh-rs
-fan-out by reading those marker files.
+keystroke broadcast by reading those marker files.
 
 All per-run state lives in one temp directory that ``Stop Sshd`` removes.
 """
@@ -37,6 +37,9 @@ READINESS_TIMEOUT_SECONDS = 10.0
 READINESS_POLL_INTERVAL_SECONDS = 0.1
 STOP_GRACE_SECONDS = 3.0
 MAX_LOG_TAIL_BYTES = 4096
+
+REMOVE_TEMPDIR_ATTEMPTS = 5
+REMOVE_TEMPDIR_RETRY_SECONDS = 0.2
 
 # Aliases are interpolated into filenames and the generated ssh_config, so
 # reject path separators, whitespace and control characters.
@@ -182,11 +185,26 @@ class SshdFixture:
         }
 
     def stop_sshd(self) -> None:
-        """Terminate sshd and remove the per-run temp directory."""
-        _terminate(self._process)
+        """Terminate the sshd process tree and remove the per-run temp directory."""
+        _terminate_tree(self._process)
         _remove_tempdir(self._tempdir)
         self._process = None
         self._tempdir = None
+
+    def count_connected_markers(self) -> int:
+        """Return how many host markers exist, one per connected ssh session.
+
+        A marker exists once its forced-command writer starts, so its presence
+        proves the session authenticated; this globs marker files only, never
+        the read-share-locked sshd.log.
+
+        Returns:
+            Count of existing marker files, or 0 before any session connects.
+        """
+        if self._tempdir is None:
+            raise SshdFixtureError("sshd fixture is not running")
+        markers_dir = self._tempdir / "markers"
+        return len(list(markers_dir.glob("*.log")))
 
     def read_marker(self, alias: str) -> str:
         """Return the contents of ``markers/<alias>.log`` as UTF-8 text.
@@ -222,10 +240,42 @@ def _terminate(process: subprocess.Popen[bytes] | None) -> None:
             process.wait(timeout=STOP_GRACE_SECONDS)
 
 
+def _terminate_tree(process: subprocess.Popen[bytes] | None) -> None:
+    """Kill ``process`` and its children.
+
+    The per-connection sshd children hold the marker files open, so on Windows
+    ``taskkill /F /T`` must tear down the whole tree; a plain ``terminate`` on
+    the listener PID would leave them running.
+    """
+    if process is None or process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=STOP_GRACE_SECONDS)
+        if process.poll() is not None:
+            return
+    _terminate(process)
+
+
 def _remove_tempdir(tempdir: Path | None) -> None:
-    """Remove ``tempdir`` unless ``CSSH_E2E_KEEP_TEMP=1`` keeps it for debugging."""
-    if tempdir is not None and os.environ.get("CSSH_E2E_KEEP_TEMP") != "1":
+    """Remove ``tempdir`` unless ``CSSH_E2E_KEEP_TEMP=1`` keeps it for debugging.
+
+    Retries because Windows releases a killed child's file handles asynchronously,
+    so the first rmtree can still hit a locked marker.
+    """
+    if tempdir is None or os.environ.get("CSSH_E2E_KEEP_TEMP") == "1":
+        return
+    for attempt in range(REMOVE_TEMPDIR_ATTEMPTS):
         shutil.rmtree(tempdir, ignore_errors=True)
+        if not tempdir.exists():
+            return
+        if attempt < REMOVE_TEMPDIR_ATTEMPTS - 1:
+            time.sleep(REMOVE_TEMPDIR_RETRY_SECONDS)
 
 
 def _write_openssh_keypair(private_path: Path) -> None:
