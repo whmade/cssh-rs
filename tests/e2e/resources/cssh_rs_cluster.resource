@@ -22,17 +22,24 @@ ${DAEMON_TITLE}     cssh-rs daemon
 
 *** Keywords ***
 Start Cssh Cluster
-    [Documentation]    Start sshd for the suite aliases, generate the config into the
-    ...                binary's own directory (cssh-rs loads cssh-rs-config.toml from
-    ...                there), and launch the cluster. Stores suite variables for the
-    ...                tests and Tear Down Cssh Cluster.
-    ${sshd}=    Start Sshd    ${ALIASES}
+    [Documentation]    Start sshd, generate the config into the binary's own directory
+    ...                (cssh-rs loads cssh-rs-config.toml from there), and launch the
+    ...                cluster. Stores suite variables for the tests and Tear Down Cssh
+    ...                Cluster. ${cluster_aliases} are the hosts the cluster launches;
+    ...                ${sshd_aliases} are the aliases sshd serves and defaults to
+    ...                ${cluster_aliases}. Pass a superset as ${sshd_aliases} to leave
+    ...                spare hosts a test can add at runtime.
+    [Arguments]    ${cluster_aliases}=${ALIASES}    ${sshd_aliases}=${NONE}
+    IF    $sshd_aliases is None
+        ${sshd_aliases}=    Set Variable    ${cluster_aliases}
+    END
+    ${sshd}=    Start Sshd    ${sshd_aliases}
     Set Suite Variable    ${SSHD}    ${sshd}
     ${binary_dir}=    Evaluate    os.path.dirname(os.path.abspath(r"${CSSH_RS_BINARY}"))    modules=os
     ${config_path}=    Generate Config    ${CSSH_RS_BINARY}    ${binary_dir}
-    ...    ${sshd}[ssh_config]    ${ALIASES}    cluster_name=${CLUSTER_NAME}
+    ...    ${sshd}[ssh_config]    ${cluster_aliases}    cluster_name=${CLUSTER_NAME}
     Set Suite Variable    ${CONFIG_PATH}    ${config_path}
-    Start Process    ${CSSH_RS_BINARY}    ${CLUSTER_NAME}    alias=cssh
+    Start Process    ${CSSH_RS_BINARY}    ${CLUSTER_NAME}
 
 Tear Down Cssh Cluster
     [Documentation]    Stop cssh-rs and sshd and verify the per-run temp tree is gone.
@@ -106,7 +113,13 @@ Assert Every Host Received
     [Documentation]    Assert ${message} arrived as a complete line (exact, not substring)
     ...                in every host's marker.
     [Arguments]    ${message}
-    FOR    ${alias}    IN    @{ALIASES}
+    Assert Hosts Received    ${ALIASES}    ${message}
+
+Assert Hosts Received
+    [Documentation]    Assert ${message} arrived as a complete line (exact, not substring)
+    ...                in the marker of every alias in ${aliases}.
+    [Arguments]    ${aliases}    ${message}
+    FOR    ${alias}    IN    @{aliases}
         Assert Marker Has Line    ${alias}    ${message}
     END
 
@@ -136,3 +149,14 @@ Marker Lines
     ${content}=    Read Marker    ${alias}
     ${lines}=    Split To Lines    ${content}
     RETURN    ${lines}
+
+Enter Control Mode
+    [Documentation]    Focus the daemon and press Ctrl+A so subsequent keys drive the
+    ...                control-mode menu instead of broadcasting to clients.
+    Focus Window    ${DAEMON_TITLE}
+    Send Hotkey    ctrl    a
+
+Send Control Mode Key
+    [Documentation]    Press a single control-mode menu key.
+    [Arguments]    ${key}
+    Press Key    ${key}

@@ -342,7 +342,7 @@ jobs:
           robot
           --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
           --outputdir e2e-output
-          tests/e2e/suites/cluster_e2e.robot
+          tests/e2e/suites/
       - name: Upload E2E report
         if: always()
         uses: *upload-artifact-action
