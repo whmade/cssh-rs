@@ -75,8 +75,14 @@ mod windows_settings_guard_test {
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
         assert!(!guard.key_existed);
-        assert_eq!(guard.console, Some(PreviousValue::Absent));
-        assert_eq!(guard.terminal, Some(PreviousValue::Absent));
+        assert_eq!(
+            guard.old_windows_terminal_console,
+            Some(PreviousValue::Absent)
+        );
+        assert_eq!(
+            guard.old_windows_terminal_terminal,
+            Some(PreviousValue::Absent)
+        );
         drop(guard);
     }
 
@@ -113,8 +119,8 @@ mod windows_settings_guard_test {
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
-        assert!(guard.console.is_none());
-        assert!(guard.terminal.is_none());
+        assert!(guard.old_windows_terminal_console.is_none());
+        assert!(guard.old_windows_terminal_terminal.is_none());
         drop(guard);
     }
 
@@ -204,11 +210,11 @@ mod windows_settings_guard_test {
 
         assert!(guard.key_existed);
         assert_eq!(
-            guard.console,
+            guard.old_windows_terminal_console,
             Some(PreviousValue::Existing(old_console_value))
         );
         assert_eq!(
-            guard.terminal,
+            guard.old_windows_terminal_terminal,
             Some(PreviousValue::Existing(old_terminal_value))
         );
         drop(guard);
@@ -281,8 +287,14 @@ mod windows_settings_guard_test {
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
         assert!(guard.key_existed);
-        assert_eq!(guard.console, Some(PreviousValue::Absent));
-        assert_eq!(guard.terminal, Some(PreviousValue::Absent));
+        assert_eq!(
+            guard.old_windows_terminal_console,
+            Some(PreviousValue::Absent)
+        );
+        assert_eq!(
+            guard.old_windows_terminal_terminal,
+            Some(PreviousValue::Absent)
+        );
         drop(guard);
     }
 }
