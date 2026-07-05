@@ -310,9 +310,7 @@ jobs:
         working-directory: tests/e2e/harness
         run: pytest
 
-  # The black-box Robot Framework E2E suite against the real cssh-rs binary.
-  # Lives in this reusable workflow so its result is per-PR blocking through
-  # pre-submit's aggregate gate.
+  # Runs the E2E suite; lives in the reusable workflow so it is per-PR blocking.
   e2e-run:
     timeout-minutes: 20
     runs-on: *runner-version

@@ -1,20 +1,9 @@
 *** Settings ***
-Documentation       First Windows E2E cases for cssh-rs: cluster launch, daemon-focused
-...                 broadcast, client-focused gating and teardown.
-...
-...                 Windows-only: it drives the real cssh-rs binary and synthesises
-...                 keystrokes through the desktop, so it must run on a Windows host
-...                 with an OpenSSH server available (the sshd fixture locates sshd on
-...                 PATH, at the default OpenSSH install paths, or via CSSH_E2E_SSHD).
-...
-...                 Pass the binary under test with
-...                 --variable CSSH_RS_BINARY:<path-to-cssh-rs.exe> (or the
-...                 CSSH_RS_BINARY environment variable).
-...
-...                 Partitioning: launching a real cluster (sshd plus two ssh sessions
-...                 and their windows) is expensive, so it is launched once in Suite
-...                 Setup and each behaviour is one atomic case run in order, pinning a
-...                 failure to a single requirement without relaunching per case.
+Documentation       Windows E2E cases for cssh-rs, each asserting one behaviour:
+...                 - launch brings up the daemon window and one window per host
+...                 - input typed with the daemon focused broadcasts to every host
+...                 - input typed with one client focused reaches only that host
+...                 - teardown stops cssh-rs and sshd and removes the temp tree
 
 Resource            ../resources/cssh_rs_cluster.resource
 

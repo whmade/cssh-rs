@@ -194,10 +194,9 @@ class SshdFixture:
     def count_connected_markers(self) -> int:
         """Return how many host markers exist, one per connected ssh session.
 
-        The forced-command marker writer creates ``markers/<alias>.log`` as soon
-        as its session is ready for input, so a marker's existence proves the
-        session authenticated. This globs directory entries only, never sshd.log,
-        which Windows OpenSSH holds open without a read-share while running.
+        A marker exists once its forced-command writer starts, so its presence
+        proves the session authenticated; this globs marker files only, never
+        the read-share-locked sshd.log.
 
         Returns:
             Count of existing marker files, or 0 before any session connects.
