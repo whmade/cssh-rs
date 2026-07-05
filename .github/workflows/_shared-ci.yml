@@ -46,7 +46,7 @@ jobs:
         with: &rust-cache-stable
           shared-key: stable
 
-      - uses: &target-cache actions/cache@v5.0.5
+      - uses: &target-cache actions/cache@v6.1.0
         with: &target-cache-stable
           path: target
           key: ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-${{ github.sha }}
