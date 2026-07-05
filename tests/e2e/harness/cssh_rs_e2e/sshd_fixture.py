@@ -5,7 +5,7 @@ This Robot Framework library starts a fresh OpenSSH ``sshd`` on
 no shared system state. Each host alias gets its own Ed25519 keypair whose
 ``authorized_keys`` entry pins a ``command="..."`` restriction piping the
 SSH channel's stdin into ``markers/<alias>.log``; suites assert cssh-rs
-fan-out by reading those marker files.
+keystroke broadcast by reading those marker files.
 
 All per-run state lives in one temp directory that ``Stop Sshd`` removes.
 """
@@ -37,6 +37,15 @@ READINESS_TIMEOUT_SECONDS = 10.0
 READINESS_POLL_INTERVAL_SECONDS = 0.1
 STOP_GRACE_SECONDS = 3.0
 MAX_LOG_TAIL_BYTES = 4096
+
+# Windows releases file handles asynchronously after a process is killed, so
+# the first rmtree can still hit a locked marker file; retry a few times.
+REMOVE_TEMPDIR_ATTEMPTS = 5
+REMOVE_TEMPDIR_RETRY_SECONDS = 0.2
+
+# sshd logs one such line per successful publickey authentication at
+# LogLevel VERBOSE; counting them tells a suite how many sessions connected.
+_ACCEPTED_CONNECTION_MARKER = "Accepted publickey"
 
 # Aliases are interpolated into filenames and the generated ssh_config, so
 # reject path separators, whitespace and control characters.
@@ -182,11 +191,33 @@ class SshdFixture:
         }
 
     def stop_sshd(self) -> None:
-        """Terminate sshd and remove the per-run temp directory."""
-        _terminate(self._process)
+        """Terminate the sshd process tree and remove the per-run temp directory.
+
+        sshd forks a child process per connection and each runs the forced
+        ``_marker_writer`` command, so killing only the listener leaves those
+        children holding the marker files open. Terminate the whole tree first,
+        then remove the temp tree so nothing is left locked behind.
+        """
+        _terminate_tree(self._process)
         _remove_tempdir(self._tempdir)
         self._process = None
         self._tempdir = None
+
+    def count_established_connections(self) -> int:
+        """Return the number of accepted publickey authentications in sshd.log.
+
+        Returns:
+            The count of successful connections observed so far, or 0 before
+            sshd has written its log. A suite polls this to gate input until
+            every ssh session has actually connected.
+        """
+        if self._tempdir is None:
+            raise SshdFixtureError("sshd fixture is not running")
+        log = self._tempdir / "sshd.log"
+        if not log.exists():
+            return 0
+        text = log.read_text(encoding="utf-8", errors="replace")
+        return text.count(_ACCEPTED_CONNECTION_MARKER)
 
     def read_marker(self, alias: str) -> str:
         """Return the contents of ``markers/<alias>.log`` as UTF-8 text.
@@ -222,10 +253,44 @@ def _terminate(process: subprocess.Popen[bytes] | None) -> None:
             process.wait(timeout=STOP_GRACE_SECONDS)
 
 
+def _terminate_tree(process: subprocess.Popen[bytes] | None) -> None:
+    """Terminate ``process`` and its children, escalating from the tree kill.
+
+    On Windows ``taskkill /F /T`` kills the whole tree (the per-connection sshd
+    children and their forced ``_marker_writer`` commands), which a plain
+    ``terminate`` on the listener PID would leave running. Fall back to the
+    single-process ``_terminate`` on other platforms or if taskkill is absent.
+    """
+    if process is None or process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=STOP_GRACE_SECONDS)
+        if process.poll() is not None:
+            return
+    _terminate(process)
+
+
 def _remove_tempdir(tempdir: Path | None) -> None:
-    """Remove ``tempdir`` unless ``CSSH_E2E_KEEP_TEMP=1`` keeps it for debugging."""
-    if tempdir is not None and os.environ.get("CSSH_E2E_KEEP_TEMP") != "1":
+    """Remove ``tempdir`` unless ``CSSH_E2E_KEEP_TEMP=1`` keeps it for debugging.
+
+    Retries because Windows may not have released a killed child's file handles
+    by the time the first rmtree runs; a lingering lock would otherwise leave
+    the tree behind and fail the suite's teardown assertion.
+    """
+    if tempdir is None or os.environ.get("CSSH_E2E_KEEP_TEMP") == "1":
+        return
+    for attempt in range(REMOVE_TEMPDIR_ATTEMPTS):
         shutil.rmtree(tempdir, ignore_errors=True)
+        if not tempdir.exists():
+            return
+        if attempt < REMOVE_TEMPDIR_ATTEMPTS - 1:
+            time.sleep(REMOVE_TEMPDIR_RETRY_SECONDS)
 
 
 def _write_openssh_keypair(private_path: Path) -> None:

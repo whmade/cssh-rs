@@ -29,7 +29,7 @@ Start Cssh Cluster
     ...                Tear Down Cssh Cluster.
     ${sshd}=    Start Sshd    ${ALIASES}
     Set Suite Variable    ${SSHD}    ${sshd}
-    ${binary_dir}=    Evaluate    os.path.dirname(r"${CSSH_RS_BINARY}")    modules=os
+    ${binary_dir}=    Evaluate    os.path.dirname(os.path.abspath(r"${CSSH_RS_BINARY}"))    modules=os
     ${config_path}=    Generate Config    ${CSSH_RS_BINARY}    ${binary_dir}
     ...    ${sshd}[ssh_config]    ${ALIASES}    cluster_name=${CLUSTER_NAME}
     Set Suite Variable    ${CONFIG_PATH}    ${config_path}
@@ -59,25 +59,85 @@ Stop Cssh Process
     ${image}=    Evaluate    os.path.basename(r"${CSSH_RS_BINARY}")    modules=os
     Run Process    taskkill    /F    /T    /IM    ${image}
 
-Fan Out Line Reaches All Hosts
-    [Documentation]    Focus the daemon, type ${text}, and assert it reached every host's
-    ...                marker. Retried by the caller until the ssh sessions are connected;
-    ...                duplicate appends from earlier attempts are harmless because the
-    ...                assertion is a substring check.
-    [Arguments]    ${text}
-    Focus Window    ${DAEMON_TITLE}
-    Type Line    ${text}
+Unique Message
+    [Documentation]    Return ${prefix} with a random suffix so each scenario's typed line
+    ...                is unique and cases sharing the suite fixture cannot cross-contaminate.
+    [Arguments]    ${prefix}
+    ${suffix}=    Generate Random String    16    [LOWER][NUMBERS]
+    RETURN    ${prefix}${suffix}
+
+Assert Daemon Window Appears
+    [Documentation]    Wait until the daemon window can be focused; a unique title match
+    ...                proves exactly one such window exists.
+    Wait Until Keyword Succeeds    15x    1s    Focus Window    ${DAEMON_TITLE}
+
+Assert Client Window Appears For Each Host
+    [Documentation]    Wait until one client window per host can be focused.
     FOR    ${alias}    IN    @{ALIASES}
-        ${content}=    Read Marker    ${alias}
-        Should Contain    ${content}    ${text}
+        Wait Until Keyword Succeeds    15x    1s    Focus Window    @${alias}    substring
     END
 
-Client Line Reaches Only
-    [Documentation]    Focus the ${target} client window, type ${text}, and assert it
-    ...                reached that host's marker. The negative half (other hosts stay
-    ...                clean) is asserted by the test after this confirms delivery.
-    [Arguments]    ${target}    ${text}
+Assert All Ssh Connections Established
+    [Documentation]    Wait until every host's ssh session has authenticated so typed
+    ...                input is not dropped into a session that has not connected yet.
+    ${count}=    Get Length    ${ALIASES}
+    Wait Until Keyword Succeeds    30x    1s    All Connections Reported    ${count}
+
+All Connections Reported
+    [Documentation]    Assert sshd reports at least ${expected} accepted connections.
+    [Arguments]    ${expected}
+    ${connected}=    Count Established Connections
+    Should Be True    ${connected} >= ${expected}
+    ...    Only ${connected} of ${expected} ssh sessions connected
+
+Focus Daemon And Broadcast
+    [Documentation]    Focus the daemon window and type ${message} once. With the daemon
+    ...                focused, cssh-rs broadcasts the input to every client's ssh session.
+    [Arguments]    ${message}
+    Focus Window    ${DAEMON_TITLE}
+    Type Line    ${message}
+
+Focus Client And Type
+    [Documentation]    Focus the ${target} client window and type ${message} once. A
+    ...                focused client console routes input to that client's ssh session only.
+    [Arguments]    ${target}    ${message}
     Focus Window    @${target}    substring
-    Type Line    ${text}
-    ${content}=    Read Marker    ${target}
-    Should Contain    ${content}    ${text}
+    Type Line    ${message}
+
+Assert Every Host Received
+    [Documentation]    Assert ${message} arrived as a complete line in every host's marker.
+    ...                Matching whole lines (not substrings) keeps the assertion exact.
+    [Arguments]    ${message}
+    FOR    ${alias}    IN    @{ALIASES}
+        Assert Marker Has Line    ${alias}    ${message}
+    END
+
+Assert Only Host Received
+    [Documentation]    Assert ${message} reached ${target}'s marker as a complete line and
+    ...                no other host's marker.
+    [Arguments]    ${target}    ${message}
+    Assert Marker Has Line    ${target}    ${message}
+    FOR    ${alias}    IN    @{ALIASES}
+        IF    '${alias}' != '${target}'
+            Assert Marker Missing Line    ${alias}    ${message}
+        END
+    END
+
+Assert Marker Has Line
+    [Documentation]    Assert ${message} is one of the complete lines in ${alias}'s marker.
+    [Arguments]    ${alias}    ${message}
+    ${lines}=    Marker Lines    ${alias}
+    Should Contain    ${lines}    ${message}    Marker for ${alias} is missing ${message}
+
+Assert Marker Missing Line
+    [Documentation]    Assert ${message} is not any complete line in ${alias}'s marker.
+    [Arguments]    ${alias}    ${message}
+    ${lines}=    Marker Lines    ${alias}
+    Should Not Contain    ${lines}    ${message}    Marker for ${alias} unexpectedly has ${message}
+
+Marker Lines
+    [Documentation]    Return ${alias}'s marker content split into complete lines.
+    [Arguments]    ${alias}
+    ${content}=    Read Marker    ${alias}
+    ${lines}=    Split To Lines    ${content}
+    RETURN    ${lines}

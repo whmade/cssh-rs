@@ -1,6 +1,6 @@
 *** Settings ***
 Documentation       First Windows E2E cases for cssh-rs: cluster launch, daemon-focused
-...                 fan-out, client-focused gating and teardown.
+...                 broadcast, client-focused gating and teardown.
 ...
 ...                 Windows-only: it drives the real cssh-rs binary and synthesises
 ...                 keystrokes through the desktop, so it must run on a Windows host
@@ -31,33 +31,19 @@ ${CLUSTER_NAME}         e2e
 
 
 *** Test Cases ***
-Cluster Launch Brings Up Daemon And All Client Windows
-    [Documentation]    The daemon window and one client window per host come up. Each
-    ...                unique focus proves that exactly one window with that title exists.
-    Wait Until Keyword Succeeds    15x    1s    Focus Window    ${DAEMON_TITLE}
-    FOR    ${alias}    IN    @{ALIASES}
-        Wait Until Keyword Succeeds    15x    1s    Focus Window    @${alias}    substring
-    END
+Cluster Launch Brings Up Daemon And Client Windows
+    Assert Daemon Window Appears
+    Assert Client Window Appears For Each Host
 
-Daemon-Focused Input Fans Out To Every Host
-    [Documentation]    Input typed while the daemon is focused reaches every host's marker.
-    ...                Retried until the ssh sessions are connected and accept input.
-    ${suffix}=    Generate Random String    16    [LOWER][NUMBERS]
-    ${marker}=    Set Variable    FANOUT${suffix}
-    Wait Until Keyword Succeeds    30x    1s    Fan Out Line Reaches All Hosts    ${marker}
+Broadcast Reaches Every Host When Daemon Focused
+    Assert All Ssh Connections Established
+    ${message}=    Unique Message    BROADCAST
+    Focus Daemon And Broadcast    ${message}
+    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${message}
 
-Client-Focused Input Reaches Only The Focused Host
-    [Documentation]    Input typed while a single client is focused reaches only that
-    ...                host. The other hosts are checked only after the target confirms
-    ...                delivery, which is sound because a focused client console cannot
-    ...                route input to another host's ssh session.
-    ${suffix}=    Generate Random String    16    [LOWER][NUMBERS]
-    ${marker}=    Set Variable    GATED${suffix}
+Focused Client Receives Input Alone
+    Assert All Ssh Connections Established
+    ${message}=    Unique Message    GATED
     ${target}=    Set Variable    ${ALIASES}[0]
-    Wait Until Keyword Succeeds    30x    1s    Client Line Reaches Only    ${target}    ${marker}
-    FOR    ${alias}    IN    @{ALIASES}
-        IF    '${alias}' != '${target}'
-            ${content}=    Read Marker    ${alias}
-            Should Not Contain    ${content}    ${marker}
-        END
-    END
+    Focus Client And Type    ${target}    ${message}
+    Wait Until Keyword Succeeds    10x    0.5s    Assert Only Host Received    ${target}    ${message}

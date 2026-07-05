@@ -324,10 +324,14 @@ jobs:
         with: *rust-cache-stable
       - uses: *target-cache
         with: *target-cache-stable
-      # No-op against the warm target from build-stable, but guarantees
-      # target/debug/cssh-rs.exe exists even if cache pruning dropped it.
-      - name: Build cssh-rs binary
-        run: cargo build --profile dev -p cssh-rs
+      # e2e-run reuses the warm target cache from build-stable rather than
+      # rebuilding. Fail loudly if the cache restore did not produce the binary.
+      - name: Verify cached cssh-rs binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path target/debug/cssh-rs.exe)) {
+            throw "target/debug/cssh-rs.exe missing - build-stable target cache was not restored"
+          }
       - *e2e-read-python
       - *e2e-setup-python
       - *e2e-install

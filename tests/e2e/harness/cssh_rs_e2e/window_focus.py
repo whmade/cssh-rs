@@ -1,7 +1,7 @@
 """Focus a terminal window by its title for the cssh-rs Windows E2E suite.
 
 This Robot Framework library activates a window so synthetic input from the
-keystroke library lands in the intended target: the daemon window for fan-out
+keystroke library lands in the intended target: the daemon window for broadcast
 tests, or one client window for control-mode tests. cssh-rs sets deterministic
 titles (``cssh-rs daemon`` and ``cssh-rs - <user>@<host>[:port]``), so suites
 pass those verbatim.
