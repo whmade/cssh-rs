@@ -194,11 +194,10 @@ class SshdFixture:
     def count_connected_markers(self) -> int:
         """Return how many host markers exist, one per connected ssh session.
 
-        The forced-command marker writer creates ``markers/<alias>.log`` the
-        moment its session starts and then blocks reading the channel, so a
-        marker file is a live-readable proof that the session authenticated and
-        is ready for input. This reads directory entries only, never sshd.log,
-        which Windows OpenSSH holds open without a read-share while it runs.
+        The forced-command marker writer creates ``markers/<alias>.log`` as soon
+        as its session is ready for input, so a marker's existence proves the
+        session authenticated. This globs directory entries only, never sshd.log,
+        which Windows OpenSSH holds open without a read-share while running.
 
         Returns:
             Count of existing marker files, or 0 before any session connects.
@@ -246,9 +245,8 @@ def _terminate_tree(process: subprocess.Popen[bytes] | None) -> None:
     """Kill ``process`` and its children.
 
     The per-connection sshd children hold the marker files open, so on Windows
-    ``taskkill /F /T`` tears down the whole tree; a plain ``terminate`` on the
-    listener PID would leave them running. Other platforms, and any process the
-    tree kill leaves alive, fall back to ``_terminate``.
+    ``taskkill /F /T`` must tear down the whole tree; a plain ``terminate`` on
+    the listener PID would leave them running.
     """
     if process is None or process.poll() is not None:
         return

@@ -18,9 +18,9 @@ _READ_CHUNK_BYTES = 4096
 def main() -> int:
     """Append stdin to the file named in ``sys.argv[1]``.
 
-    Reads with ``os.read`` and flushes each chunk so input surfaces while the
-    SSH channel is still open; a buffered copy would surface it only at EOF,
-    which never comes while cssh-rs holds the session.
+    Flushes each chunk so input surfaces while the SSH channel is open; a
+    buffered copy would surface it only at EOF, which never comes while cssh-rs
+    holds the session.
 
     Returns:
         Exit code: 2 if the marker path argument is missing, 1 if writing
