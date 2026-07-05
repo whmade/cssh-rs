@@ -52,8 +52,12 @@ jobs:
           fi
 
           # Read labels from live PR state; the `opened` payload can predate a label applied moments later.
-          LABELS=$(gh pr view "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" --json labels --jq '.labels[].name')
+          LABELS=""
+          for _ in 1 2 3; do
+            LABELS=$(gh pr view "${{ github.event.pull_request.number }}" \
+              --repo "${{ github.repository }}" --json labels --jq '.labels[].name' 2>/dev/null) && break
+            sleep 1
+          done
 
           if grep -qxF "${{ env.OVERRIDE_LABEL }}" <<< "$LABELS"; then
             echo "✅ No news fragment needed (acknowledged via '${{ env.OVERRIDE_LABEL }}' label)"
