@@ -3,6 +3,7 @@ Documentation       Windows E2E cases for cssh-rs, each asserting one behaviour:
 ...                 - launch brings up the daemon window and one window per host
 ...                 - input typed with the daemon focused broadcasts to every host
 ...                 - input typed with one client focused reaches only that host
+...                 - closing the daemon closes every client window
 ...                 - teardown stops cssh-rs and sshd and removes the temp tree
 
 Resource            ../resources/cssh_rs_cluster.resource
@@ -34,3 +35,11 @@ Focused Client Receives Input Alone
     ${target}=    Set Variable    ${ALIASES}[0]
     Focus Client And Type    ${target}    ${message}
     Wait Until Keyword Succeeds    10x    0.5s    Assert Only Host Received    ${target}    ${message}
+
+Closing The Daemon Closes Every Client
+    Assert All Ssh Connections Established
+    Close Daemon Window
+    Wait Until Keyword Succeeds    15x    1s    Assert Daemon Window Gone
+    FOR    ${alias}    IN    @{ALIASES}
+        Wait Until Keyword Succeeds    15x    1s    Assert Client Window Gone    ${alias}
+    END
