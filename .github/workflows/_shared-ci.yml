@@ -324,8 +324,7 @@ jobs:
         with: *rust-cache-stable
       - uses: *target-cache
         with: *target-cache-stable
-      # e2e-run reuses the warm target cache from build-stable rather than
-      # rebuilding. Fail loudly if the cache restore did not produce the binary.
+      # Reuse the warm build-stable target cache instead of rebuilding; fail loud if absent.
       - name: Verify cached cssh-rs binary
         shell: pwsh
         run: |
@@ -347,7 +346,6 @@ jobs:
           --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
           --outputdir e2e-output
           tests/e2e/suites/cluster_e2e.robot
-
       - name: Upload E2E report
         if: always()
         uses: *upload-artifact-action

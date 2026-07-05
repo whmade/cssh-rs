@@ -12,18 +12,15 @@ import os
 import sys
 from pathlib import Path
 
-# Read whatever bytes are already available rather than waiting for a full
-# buffer. os.read returns as soon as any data arrives, so each keystroke
-# surfaces in the marker promptly.
 _READ_CHUNK_BYTES = 4096
 
 
 def main() -> int:
     """Append stdin to the file named in ``sys.argv[1]``.
 
-    Each chunk is flushed as it arrives so suites can observe input over a
-    still-open SSH channel; a buffered copy would only surface bytes once the
-    channel closed (EOF), which never happens while cssh-rs holds the session.
+    Reads with ``os.read`` and flushes each chunk so input surfaces while the
+    SSH channel is still open; a buffered copy would surface it only at EOF,
+    which never comes while cssh-rs holds the session.
 
     Returns:
         Exit code: 2 if the marker path argument is missing, 1 if writing

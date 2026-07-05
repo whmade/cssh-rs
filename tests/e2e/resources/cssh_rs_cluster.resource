@@ -22,11 +22,10 @@ ${DAEMON_TITLE}     cssh-rs daemon
 
 *** Keywords ***
 Start Cssh Cluster
-    [Documentation]    Start sshd for the suite aliases, generate the cssh-rs config into
-    ...                the binary's own directory, and launch the cluster. cssh-rs loads
-    ...                cssh-rs-config.toml from its exe directory, so the config must be
-    ...                written there. Stores suite variables consumed by the tests and by
-    ...                Tear Down Cssh Cluster.
+    [Documentation]    Start sshd for the suite aliases, generate the config into the
+    ...                binary's own directory (cssh-rs loads cssh-rs-config.toml from
+    ...                there), and launch the cluster. Stores suite variables for the
+    ...                tests and Tear Down Cssh Cluster.
     ${sshd}=    Start Sshd    ${ALIASES}
     Set Suite Variable    ${SSHD}    ${sshd}
     ${binary_dir}=    Evaluate    os.path.dirname(os.path.abspath(r"${CSSH_RS_BINARY}"))    modules=os
@@ -37,11 +36,8 @@ Start Cssh Cluster
 
 Tear Down Cssh Cluster
     [Documentation]    Stop cssh-rs and sshd and verify the per-run temp tree is gone.
-    ...                The launcher spawns a detached daemon console, so terminating the
-    ...                launched process is not enough; taskkill /T /F by image name kills
-    ...                the daemon, every client and their ssh children. Each cleanup step
-    ...                is best-effort so a single failure does not mask the others or an
-    ...                early Suite Setup failure where the suite variables are unset.
+    ...                Each step is best-effort so one failure - or an early Suite Setup
+    ...                failure that left the suite variables unset - cannot mask the rest.
     Run Keyword And Ignore Error    Stop Cssh Process
     ${config_path}=    Get Variable Value    ${CONFIG_PATH}    ${NONE}
     IF    $config_path is not None
@@ -55,13 +51,15 @@ Tear Down Cssh Cluster
     END
 
 Stop Cssh Process
-    [Documentation]    Kill the daemon, client and ssh process trees by image name.
+    [Documentation]    Kill the daemon, every client and their ssh children by image name.
+    ...                The launcher spawns a detached daemon console, so killing the
+    ...                launched process alone would leave the tree running.
     ${image}=    Evaluate    os.path.basename(r"${CSSH_RS_BINARY}")    modules=os
     Run Process    taskkill    /F    /T    /IM    ${image}
 
 Unique Message
-    [Documentation]    Return ${prefix} with a random suffix so each scenario's typed line
-    ...                is unique and cases sharing the suite fixture cannot cross-contaminate.
+    [Documentation]    Return ${prefix} with a random suffix so scenarios sharing the suite
+    ...                fixture cannot cross-contaminate each other's marker assertions.
     [Arguments]    ${prefix}
     ${suffix}=    Generate Random String    16    [LOWER][NUMBERS]
     RETURN    ${prefix}${suffix}
@@ -105,8 +103,8 @@ Focus Client And Type
     Type Line    ${message}
 
 Assert Every Host Received
-    [Documentation]    Assert ${message} arrived as a complete line in every host's marker.
-    ...                Matching whole lines (not substrings) keeps the assertion exact.
+    [Documentation]    Assert ${message} arrived as a complete line (exact, not substring)
+    ...                in every host's marker.
     [Arguments]    ${message}
     FOR    ${alias}    IN    @{ALIASES}
         Assert Marker Has Line    ${alias}    ${message}
@@ -124,19 +122,16 @@ Assert Only Host Received
     END
 
 Assert Marker Has Line
-    [Documentation]    Assert ${message} is one of the complete lines in ${alias}'s marker.
     [Arguments]    ${alias}    ${message}
     ${lines}=    Marker Lines    ${alias}
     Should Contain    ${lines}    ${message}    Marker for ${alias} is missing ${message}
 
 Assert Marker Missing Line
-    [Documentation]    Assert ${message} is not any complete line in ${alias}'s marker.
     [Arguments]    ${alias}    ${message}
     ${lines}=    Marker Lines    ${alias}
     Should Not Contain    ${lines}    ${message}    Marker for ${alias} unexpectedly has ${message}
 
 Marker Lines
-    [Documentation]    Return ${alias}'s marker content split into complete lines.
     [Arguments]    ${alias}
     ${content}=    Read Marker    ${alias}
     ${lines}=    Split To Lines    ${content}

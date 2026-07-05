@@ -12,11 +12,7 @@ from cssh_rs_e2e import _marker_writer
 
 
 def _run_with_stdin(monkeypatch: pytest.MonkeyPatch, marker: Path, data: bytes) -> int:
-    """Run ``main`` with ``data`` fed through a real pipe as stdin.
-
-    The writer reads via ``os.read`` on the stdin fd, so the test supplies a
-    pipe whose write end is closed to signal EOF.
-    """
+    """Run ``main`` with ``data`` fed via a pipe it reads with ``os.read`` on the stdin fd."""
     read_fd, write_fd = os.pipe()
     os.write(write_fd, data)
     os.close(write_fd)

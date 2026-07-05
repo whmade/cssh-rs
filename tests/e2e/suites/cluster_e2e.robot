@@ -12,11 +12,9 @@ Documentation       First Windows E2E cases for cssh-rs: cluster launch, daemon-
 ...                 CSSH_RS_BINARY environment variable).
 ...
 ...                 Partitioning: launching a real cluster (sshd plus two ssh sessions
-...                 and their windows) is expensive, so the cluster is launched once in
-...                 Suite Setup and each behaviour is one atomic test case run in order.
-...                 This keeps a failure pinned to a single requirement without paying to
-...                 relaunch the cluster per behaviour. Teardown is the Suite Teardown,
-...                 the natural home for shutting down a suite-scoped fixture.
+...                 and their windows) is expensive, so it is launched once in Suite
+...                 Setup and each behaviour is one atomic case run in order, pinning a
+...                 failure to a single requirement without relaunching per case.
 
 Resource            ../resources/cssh_rs_cluster.resource
 
