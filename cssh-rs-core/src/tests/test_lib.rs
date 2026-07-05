@@ -11,19 +11,25 @@ use windows::Win32::System::Threading::PROCESS_INFORMATION;
 use crate::utils::windows::MockWindowsApi;
 use crate::{
     create_process, init_logger_with_fs, is_launched_from_gui, spawn_console_process,
-    MockFileSystem, MockRegistry, WindowsSettingsDefaultTerminalApplicationGuard, CLSID_CONHOST,
-    DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_CONSOLE, DELEGATION_TERMINAL,
+    MockFileSystem, MockRegistry, PreviousValue, WindowsSettingsDefaultTerminalApplicationGuard,
+    CLSID_CONHOST, DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_CONSOLE, DELEGATION_TERMINAL,
 };
 
 /// Test module for WindowsSettingsDefaultTerminalApplicationGuard functionality.
 mod windows_settings_guard_test {
     use super::*;
 
-    /// Tests guard creation when registry operations fail.
-    /// Validates that guard defaults to no-op behavior when registry access fails.
+    /// Tests guard creation on a profile with no startup key.
+    /// Validates that the guard creates the key, forces conhost, and deletes the
+    /// key it created on drop.
     #[test]
-    fn test_guard_new_registry_failure() {
+    fn test_guard_creates_key_when_absent_and_deletes_on_drop() {
         let mut mock_registry = MockRegistry::new();
+        mock_registry
+            .expect_registry_key_exists()
+            .with(eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH))
+            .times(1)
+            .returning(|_| return false);
         mock_registry
             .expect_get_registry_string_value()
             .with(
@@ -32,7 +38,6 @@ mod windows_settings_guard_test {
             )
             .times(1)
             .returning(|_, _| return None);
-
         mock_registry
             .expect_get_registry_string_value()
             .with(
@@ -41,20 +46,50 @@ mod windows_settings_guard_test {
             )
             .times(1)
             .returning(|_, _| return None);
+        mock_registry
+            .expect_set_registry_string_value()
+            .with(
+                eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
+                eq(DELEGATION_CONSOLE),
+                eq(CLSID_CONHOST),
+            )
+            .times(1)
+            .returning(|_, _, _| return true);
+        mock_registry
+            .expect_set_registry_string_value()
+            .with(
+                eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
+                eq(DELEGATION_TERMINAL),
+                eq(CLSID_CONHOST),
+            )
+            .times(1)
+            .returning(|_, _, _| return true);
+        // On drop the created key is removed, which undoes the values too.
+        mock_registry
+            .expect_delete_registry_key()
+            .with(eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH))
+            .times(1)
+            .returning(|_| return true);
 
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
-        assert!(guard.old_windows_terminal_console.is_none());
-        assert!(guard.old_windows_terminal_terminal.is_none());
+        assert!(!guard.key_existed);
+        assert_eq!(guard.console, Some(PreviousValue::Absent));
+        assert_eq!(guard.terminal, Some(PreviousValue::Absent));
+        drop(guard);
     }
 
     /// Tests guard creation when current settings already match conhost.
-    /// Validates that guard skips modification when conhost is already configured.
+    /// Validates that the guard changes nothing and does nothing on drop.
     #[test]
     fn test_guard_new_already_conhost() {
         let mut mock_registry = MockRegistry::new();
-
+        mock_registry
+            .expect_registry_key_exists()
+            .with(eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH))
+            .times(1)
+            .returning(|_| return true);
         mock_registry
             .expect_get_registry_string_value()
             .with(
@@ -73,16 +108,19 @@ mod windows_settings_guard_test {
             .times(1)
             .returning(|_, _| return Some(CLSID_CONHOST.to_string()));
 
+        // No set/delete expectations: an already-conhost profile is left untouched,
+        // and MockRegistry panics on any unexpected call, including during drop.
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
-        // Should be no-op since values are already conhost
-        assert!(guard.old_windows_terminal_console.is_none());
-        assert!(guard.old_windows_terminal_terminal.is_none());
+        assert!(guard.console.is_none());
+        assert!(guard.terminal.is_none());
+        drop(guard);
     }
 
     /// Tests guard creation with different existing registry values.
-    /// Validates that guard stores original values and sets conhost values.
+    /// Validates that the guard stores the originals, sets conhost, and restores
+    /// the originals on drop (the key already existed, so it is not deleted).
     #[test]
     fn test_guard_new_with_existing_values() {
         let mut mock_registry = MockRegistry::new();
@@ -91,6 +129,12 @@ mod windows_settings_guard_test {
         let old_terminal_value = "old-terminal-value".to_string();
 
         mock_registry
+            .expect_registry_key_exists()
+            .with(eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH))
+            .times(1)
+            .returning(|_| return true);
+
+        mock_registry
             .expect_get_registry_string_value()
             .with(
                 eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
@@ -134,7 +178,7 @@ mod windows_settings_guard_test {
             .times(1)
             .returning(|_, _, _| return true);
 
-        // Setup for guard drop
+        // On drop the original values are set back.
         mock_registry
             .expect_set_registry_string_value()
             .with(
@@ -158,54 +202,29 @@ mod windows_settings_guard_test {
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
 
-        assert_eq!(guard.old_windows_terminal_console, Some(old_console_value));
+        assert!(guard.key_existed);
         assert_eq!(
-            guard.old_windows_terminal_terminal,
-            Some(old_terminal_value)
+            guard.console,
+            Some(PreviousValue::Existing(old_console_value))
         );
-    }
-
-    /// Tests guard drop behavior when no restoration is needed.
-    /// Validates that drop is no-op when original values weren't stored.
-    #[test]
-    fn test_guard_drop_no_restoration() {
-        let mut mock_registry = MockRegistry::new();
-        mock_registry
-            .expect_get_registry_string_value()
-            .with(
-                eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
-                eq(DELEGATION_CONSOLE),
-            )
-            .times(1)
-            .returning(|_, _| return None);
-
-        mock_registry
-            .expect_get_registry_string_value()
-            .with(
-                eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
-                eq(DELEGATION_TERMINAL),
-            )
-            .times(1)
-            .returning(|_, _| return None);
-
-        let guard =
-            WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
-
-        // Drop should not call any registry operations since no values were stored
+        assert_eq!(
+            guard.terminal,
+            Some(PreviousValue::Existing(old_terminal_value))
+        );
         drop(guard);
-        // Test passes if no panic occurs during drop
     }
 
-    /// Tests guard drop behavior with stored values.
-    /// Validates that drop attempts to restore original registry values.
+    /// Tests guard drop when the key existed but the delegation values did not.
+    /// Validates that the guard deletes the values it created (and does not
+    /// delete the pre-existing key) on drop.
     #[test]
-    fn test_guard_drop_with_restoration() {
+    fn test_guard_deletes_created_values_when_key_existed() {
         let mut mock_registry = MockRegistry::new();
-
-        let old_console_value = "original-console".to_string();
-        let old_terminal_value = "original-terminal".to_string();
-
-        // Setup for guard creation
+        mock_registry
+            .expect_registry_key_exists()
+            .with(eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH))
+            .times(1)
+            .returning(|_| return true);
         mock_registry
             .expect_get_registry_string_value()
             .with(
@@ -213,11 +232,7 @@ mod windows_settings_guard_test {
                 eq(DELEGATION_CONSOLE),
             )
             .times(1)
-            .returning({
-                let val = old_console_value.clone();
-                move |_, _| return Some(val.clone())
-            });
-
+            .returning(|_, _| return None);
         mock_registry
             .expect_get_registry_string_value()
             .with(
@@ -225,11 +240,7 @@ mod windows_settings_guard_test {
                 eq(DELEGATION_TERMINAL),
             )
             .times(1)
-            .returning({
-                let val = old_terminal_value.clone();
-                move |_, _| return Some(val.clone())
-            });
-
+            .returning(|_, _| return None);
         mock_registry
             .expect_set_registry_string_value()
             .with(
@@ -239,7 +250,6 @@ mod windows_settings_guard_test {
             )
             .times(1)
             .returning(|_, _, _| return true);
-
         mock_registry
             .expect_set_registry_string_value()
             .with(
@@ -249,32 +259,31 @@ mod windows_settings_guard_test {
             )
             .times(1)
             .returning(|_, _, _| return true);
-
-        // Setup for guard drop
+        // On drop the created values are deleted; the pre-existing key is kept.
         mock_registry
-            .expect_set_registry_string_value()
+            .expect_delete_registry_string_value()
             .with(
                 eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
                 eq(DELEGATION_CONSOLE),
-                eq(old_console_value.clone()),
             )
             .times(1)
-            .returning(|_, _, _| return true);
-
+            .returning(|_, _| return true);
         mock_registry
-            .expect_set_registry_string_value()
+            .expect_delete_registry_string_value()
             .with(
                 eq(DEFAULT_TERMINAL_APP_REGISTRY_PATH),
                 eq(DELEGATION_TERMINAL),
-                eq(old_terminal_value.clone()),
             )
             .times(1)
-            .returning(|_, _, _| return true);
+            .returning(|_, _| return true);
 
         let guard =
             WindowsSettingsDefaultTerminalApplicationGuard::new_with_registry(mock_registry);
+
+        assert!(guard.key_existed);
+        assert_eq!(guard.console, Some(PreviousValue::Absent));
+        assert_eq!(guard.terminal, Some(PreviousValue::Absent));
         drop(guard);
-        // Test passes if restoration calls were made during drop
     }
 }
 
