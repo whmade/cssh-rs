@@ -13,9 +13,7 @@ on:
       - main
       - "*-maintenance"
 
-concurrency:
-  group: news-fragment-check-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No `concurrency` cancellation: superseded runs leave `cancelled` check runs the required-check gate never clears, so let all runs complete (each is ~4s and reads live PR state).
 
 env:
   OVERRIDE_LABEL: "no-news-fragment-needed"
@@ -26,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.0
         with:
@@ -33,6 +32,8 @@ jobs:
 
       - name: Check for news fragments
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "🔍 Checking for news fragments in PR..."
 
@@ -50,8 +51,11 @@ jobs:
             exit 0
           fi
 
-          # Check for override label
-          if [[ "${{ contains(github.event.pull_request.labels.*.name, env.OVERRIDE_LABEL) }}" == "true" ]]; then
+          # Read labels from live PR state; the `opened` payload can predate a label applied moments later.
+          LABELS=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --json labels --jq '.labels[].name')
+
+          if grep -qxF "${{ env.OVERRIDE_LABEL }}" <<< "$LABELS"; then
             echo "✅ No news fragment needed (acknowledged via '${{ env.OVERRIDE_LABEL }}' label)"
             echo ""
             echo "News fragment check passed!"
