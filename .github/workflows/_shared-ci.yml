@@ -310,6 +310,48 @@ jobs:
         working-directory: tests/e2e/harness
         run: pytest
 
+  # Run the black-box Robot Framework E2E suite against the real cssh-rs binary on
+  # windows-latest, the harness's target platform. Living in this reusable workflow
+  # makes the job per-PR blocking: pre-submit's aggregate result fails if it fails.
+  e2e-run:
+    timeout-minutes: 20
+    runs-on: *runner-version
+    needs: build-stable
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - uses: *rust-cache-action
+        with: *rust-cache-stable
+      - uses: *target-cache
+        with: *target-cache-stable
+      # No-op against the warm target from build-stable, but guarantees
+      # target/debug/cssh-rs.exe exists even if cache pruning dropped it.
+      - name: Build cssh-rs binary
+        run: cargo build --profile dev -p cssh-rs
+      - *e2e-read-python
+      - *e2e-setup-python
+      - *e2e-install
+      # The runner ships the OpenSSH client but not the server; the sshd fixture
+      # needs sshd.exe, installed here at C:\Windows\System32\OpenSSH\sshd.exe.
+      - name: Enable OpenSSH server
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+      - name: Run E2E suite
+        shell: pwsh
+        run: >-
+          robot
+          --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
+          --outputdir e2e-output
+          tests/e2e/suites/cluster_e2e.robot
+
+      - name: Upload E2E report
+        if: always()
+        uses: *upload-artifact-action
+        with:
+          name: e2e-robot-report
+          path: e2e-output/
+          retention-days: 7
+
   # Compile-only cross-checks for the portable crate subset on native
   # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still
   # Windows-tied (ported off the windows crate in M4/M5) and are excluded;
