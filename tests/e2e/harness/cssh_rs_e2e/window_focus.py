@@ -6,17 +6,13 @@ tests, or one client window for control-mode tests. cssh-rs sets deterministic
 titles (``cssh-rs daemon`` and ``cssh-rs - <user>@<host>[:port]``), so suites
 pass those verbatim.
 
-Activation uses ``SetForegroundWindow`` wrapped in the documented
-``AttachThreadInput`` workaround (Windows refuses a foreground change from a
-background process otherwise) with the foreground-lock timeout dropped to zero,
-then polls ``GetForegroundWindow`` until the target settles: focusing the daemon
-makes cssh-rs raise the client windows and refocus the daemon, so the foreground
-dips for a few milliseconds before landing on the target.
+Foregrounding a window from this background process takes more than a plain
+``SetForegroundWindow``; see ``_activate_window`` for the mechanism and the
+Microsoft references behind it.
 
-This assumes cssh-rs consoles are hosted by conhost (real windows titled by the
-console title). On a machine whose default terminal is Windows Terminal the
-consoles are ConPTY-hosted and this matching/activation does not apply, so the
-suite forces conhost as the default terminal before launching cssh.
+Matching and activation assume cssh-rs consoles are real conhost windows titled
+by the console title; the suite forces conhost as the default terminal so this
+holds even where Windows Terminal (ConPTY-hosted) would otherwise be used.
 """
 
 from __future__ import annotations
@@ -29,13 +25,11 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.1
 
 _VALID_MATCH_MODES = ("exact", "substring")
 
-# windows-sdk ShowWindow command: restore a minimized window to its prior size.
 _SW_RESTORE = 9
-# SystemParametersInfo action to set the foreground-lock timeout.
+# SystemParametersInfoW action codes; the foreground-lock timeout is in milliseconds.
+_SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
 _SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
 _SPIF_SENDCHANGE = 0x0002
-# After SetForegroundWindow, cssh-rs raises the clients and refocuses the daemon;
-# poll the foreground until it settles on the target.
 _ACTIVATION_SETTLE_SECONDS = 2.0
 _ACTIVATION_POLL_SECONDS = 0.02
 
@@ -99,8 +93,7 @@ class WindowFocus:
                 window = matches[0]
                 if _activate_window(window):
                     return window.title
-                # Activation can lose the foreground race right after a window
-                # spawns; retry under the same poll/deadline.
+                # Activation can lose the foreground race right after a spawn; retry.
                 activation_failed = True
             if time.monotonic() >= deadline:
                 if activation_failed:
@@ -116,20 +109,17 @@ class WindowFocus:
 
 
 def _activate_window(window: object) -> bool:
-    """Bring ``window`` to the foreground, then confirm it settled there.
+    """Bring ``window`` to the foreground and return whether it settled there.
 
-    Drops the foreground-lock timeout, attaches the calling thread to the
-    current foreground thread (the documented workaround for a background caller),
-    restores the window if minimized, then BringWindowToTop + SetForegroundWindow.
-    Polls ``GetForegroundWindow`` until it equals the target, because focusing the
-    daemon makes cssh-rs raise the clients and refocus the daemon - the foreground
-    dips before it lands on the target.
+    A background process may foreground a window only once the foreground-lock
+    timeout has expired [1]; it is dropped to zero (and restored afterwards) and
+    the calling thread is attached to the foreground thread to share its focus
+    state [2]. The foreground is then polled until it lands on the target, since
+    focusing the daemon makes cssh-rs raise the clients and refocus the daemon -
+    it dips first.
 
-    # Arguments
-    * `window` - pywinctl window to activate (needs ``getHandle``).
-
-    # Returns
-    `True` if the target is the foreground window afterwards, else `False`.
+    [1] https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow
+    [2] https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-attachthreadinput
     """
     if sys.platform != "win32":
         raise WindowFocusError("window focus is only supported on Windows")
@@ -163,28 +153,36 @@ def _activate_window(window: object) -> bool:
     kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
     hwnd = int(window.getHandle())  # pyrefly: ignore[missing-attribute]
-    target = wintypes.HWND(hwnd)
-    user32.SystemParametersInfoW(_SPI_SETFOREGROUNDLOCKTIMEOUT, 0, None, _SPIF_SENDCHANGE)
-    if user32.IsIconic(target):
-        user32.ShowWindow(target, _SW_RESTORE)
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, _SW_RESTORE)
 
-    foreground = user32.GetForegroundWindow()
-    fg_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
-    current_thread = kernel32.GetCurrentThreadId()
-    attached = False
-    if fg_thread and fg_thread != current_thread:
-        attached = bool(user32.AttachThreadInput(current_thread, fg_thread, True))
+    previous_lock_timeout = wintypes.DWORD()
+    user32.SystemParametersInfoW(
+        _SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(previous_lock_timeout), 0
+    )
+    user32.SystemParametersInfoW(_SPI_SETFOREGROUNDLOCKTIMEOUT, 0, 0, _SPIF_SENDCHANGE)
     try:
-        user32.BringWindowToTop(target)
-        user32.SetForegroundWindow(target)
-    finally:
-        if attached:
-            user32.AttachThreadInput(current_thread, fg_thread, False)
+        foreground = user32.GetForegroundWindow()
+        foreground_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+        current_thread = kernel32.GetCurrentThreadId()
+        attached = False
+        if foreground_thread and foreground_thread != current_thread:
+            attached = bool(user32.AttachThreadInput(current_thread, foreground_thread, True))
+        try:
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(current_thread, foreground_thread, False)
 
-    deadline = time.monotonic() + _ACTIVATION_SETTLE_SECONDS
-    while True:
-        if user32.GetForegroundWindow() == hwnd:
-            return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(_ACTIVATION_POLL_SECONDS)
+        deadline = time.monotonic() + _ACTIVATION_SETTLE_SECONDS
+        while True:
+            if user32.GetForegroundWindow() == hwnd:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(_ACTIVATION_POLL_SECONDS)
+    finally:
+        user32.SystemParametersInfoW(
+            _SPI_SETFOREGROUNDLOCKTIMEOUT, 0, previous_lock_timeout.value, _SPIF_SENDCHANGE
+        )
