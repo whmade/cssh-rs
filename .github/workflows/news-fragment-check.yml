@@ -13,9 +13,7 @@ on:
       - main
       - "*-maintenance"
 
-concurrency:
-  group: news-fragment-check-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No `concurrency` cancellation: superseded runs leave `cancelled` check runs the required-check gate never clears, so let all runs complete (each is ~4s and reads live PR state).
 
 env:
   OVERRIDE_LABEL: "no-news-fragment-needed"
@@ -26,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7.0.0
         with:
@@ -33,6 +32,8 @@ jobs:
 
       - name: Check for news fragments
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "🔍 Checking for news fragments in PR..."
 
@@ -50,8 +51,26 @@ jobs:
             exit 0
           fi
 
-          # Check for override label
-          if [[ "${{ contains(github.event.pull_request.labels.*.name, env.OVERRIDE_LABEL) }}" == "true" ]]; then
+          # Read labels from live PR state (the `opened` payload can predate a
+          # label applied moments later). Retry to ride out transient gh
+          # failures; if every attempt fails, error out rather than treating an
+          # unread result as "no label present". `if` keeps `set -e` from
+          # aborting on a failed attempt.
+          LABELS=""
+          for attempt in 1 2 3; do
+            if LABELS=$(gh pr view "${{ github.event.pull_request.number }}" \
+                 --repo "${{ github.repository }}" --json labels --jq '.labels[].name'); then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "❌ Failed to read PR labels after 3 attempts"
+              exit 1
+            fi
+            echo "gh pr view failed (attempt $attempt); retrying in 2s..." >&2
+            sleep 2
+          done
+
+          if grep -qxF "${{ env.OVERRIDE_LABEL }}" <<< "$LABELS"; then
             echo "✅ No news fragment needed (acknowledged via '${{ env.OVERRIDE_LABEL }}' label)"
             echo ""
             echo "News fragment check passed!"
