@@ -11,6 +11,7 @@ Library             cssh_rs_e2e.sshd_fixture.SshdFixture
 Library             cssh_rs_e2e.config_gen.ConfigGen
 Library             cssh_rs_e2e.window_focus.WindowFocus
 Library             cssh_rs_e2e.keystrokes.Keystrokes
+Library             cssh_rs_e2e.clipboard.Clipboard
 Library             Process
 Library             OperatingSystem
 Library             String

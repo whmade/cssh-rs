@@ -11,6 +11,7 @@ dependencies = [
     "robotframework==7.4.2",
     "pyautogui==0.9.54",
     "pywinctl==0.4.1",
+    "pyperclip==1.11.0",
     "cryptography==49.0.0",
 ]
 
