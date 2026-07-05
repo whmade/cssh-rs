@@ -10,7 +10,7 @@ use std::fs::{create_dir, File};
 use std::mem;
 
 use log::warn;
-use registry::{value, Data, Hive, Security};
+use registry::{key, value, Data, Hive, Security};
 use simplelog::{format_description, ConfigBuilder, LevelFilter, WriteLogger};
 use windows::core::PWSTR;
 use windows::Win32::Foundation::HWND;
@@ -31,12 +31,6 @@ use utils::windows::WindowsApi;
 /// As used in Windows Terminal:
 /// <https://github.com/microsoft/terminal/blob/v1.22.3232.0/src/propslib/DelegationConfig.hpp#L105>
 const CLSID_CONHOST: &str = "{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}";
-/// CLSID identifying the default configuration in the registry.
-///
-/// The default configuration is "let windows choose".
-/// Also defined in Windows Terminal:
-/// <https://github.com/microsoft/terminal/blob/v1.22.3232.0/src/propslib/DelegationConfig.hpp#L104>
-const CLSID_DEFAULT: &str = "{00000000-0000-0000-0000-000000000000}";
 /// Registry path where `DelegationConsole` and `DelegationTerminal` registry keys are stored.
 ///
 /// These registry keys store the configuration value for the default terminal application.
@@ -55,10 +49,17 @@ const DELEGATION_TERMINAL: &str = "DelegationTerminal";
 /// Trait for registry operations to enable mocking in tests
 #[cfg_attr(test, automock)]
 pub trait Registry {
-    /// Get a string value from the registry
+    /// Return the string value at `path`/`name`, or `None` if the key or value
+    /// does not exist.
     fn get_registry_string_value(&self, path: &str, name: &str) -> Option<String>;
-    /// Set a string value in the registry
+    /// Set a string value, creating the key if it does not exist. Return whether it succeeded.
     fn set_registry_string_value(&self, path: &str, name: &str, value: &str) -> bool;
+    /// Delete a value; an already-absent value counts as success.
+    fn delete_registry_string_value(&self, path: &str, name: &str) -> bool;
+    /// Return whether the registry key at `path` exists.
+    fn registry_key_exists(&self, path: &str) -> bool;
+    /// Delete the registry key at `path` recursively. Return whether it succeeded.
+    fn delete_registry_key(&self, path: &str) -> bool;
 }
 
 /// Default implementation of Registry trait that performs actual Windows registry API calls
@@ -67,13 +68,11 @@ pub struct DefaultRegistry;
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Registry for DefaultRegistry {
     fn get_registry_string_value(&self, path: &str, name: &str) -> Option<String> {
-        let key = Hive::CurrentUser
-            .open(path, Security::Read | Security::Write)
-            .ok()?;
+        let key = Hive::CurrentUser.open(path, Security::Read).ok()?;
         match key.value(name) {
             Ok(Data::String(value)) => return Some(value.to_string_lossy()),
             Ok(_) => panic!("Expected string data for {name} registry value"),
-            Err(value::Error::NotFound(_, _)) => return Some(CLSID_DEFAULT.to_owned()),
+            Err(value::Error::NotFound(_, _)) => return None,
             Err(err) => {
                 warn!("Failed to read {} value from registry: {}", name, err);
                 return None;
@@ -82,19 +81,63 @@ impl Registry for DefaultRegistry {
     }
 
     fn set_registry_string_value(&self, path: &str, name: &str, value: &str) -> bool {
-        if let Ok(key) = Hive::CurrentUser.open(path, Security::Read | Security::Write) {
-            match key.set_value::<String>(
+        // create() opens the key or makes it when absent, forcing conhost on a fresh profile.
+        match Hive::CurrentUser.create(path, Security::Read | Security::Write) {
+            Ok(key) => match key.set_value::<String>(
                 name.to_owned(),
                 &Data::String(value.to_owned().try_into().unwrap()),
             ) {
                 Ok(()) => return true,
-                Err(_) => {
-                    warn!("Failed to set registry value {} to {}", name, value);
+                Err(err) => {
+                    warn!(
+                        "Failed to set registry value {} to {}: {}",
+                        name, value, err
+                    );
                     return false;
                 }
+            },
+            Err(err) => {
+                warn!("Failed to open or create registry key {}: {}", path, err);
+                return false;
             }
-        } else {
-            return false;
+        }
+    }
+
+    fn delete_registry_string_value(&self, path: &str, name: &str) -> bool {
+        let key = match Hive::CurrentUser.open(path, Security::Read | Security::Write) {
+            Ok(key) => key,
+            // A missing key means the value is already absent; any other error
+            // (access denied, transient failure) must not masquerade as success.
+            Err(key::Error::NotFound(_, _)) => return true,
+            Err(err) => {
+                warn!(
+                    "Failed to open registry key {} to delete {}: {}",
+                    path, name, err
+                );
+                return false;
+            }
+        };
+        match key.delete_value(name) {
+            Ok(()) => return true,
+            Err(value::Error::NotFound(_, _)) => return true,
+            Err(err) => {
+                warn!("Failed to delete registry value {}: {}", name, err);
+                return false;
+            }
+        }
+    }
+
+    fn registry_key_exists(&self, path: &str) -> bool {
+        return Hive::CurrentUser.open(path, Security::Read).is_ok();
+    }
+
+    fn delete_registry_key(&self, path: &str) -> bool {
+        match Hive::CurrentUser.delete(path, true) {
+            Ok(()) => return true,
+            Err(err) => {
+                warn!("Failed to delete registry key {}: {}", path, err);
+                return false;
+            }
         }
     }
 }
@@ -173,21 +216,26 @@ impl FileSystem for ProductionFileSystem {
     }
 }
 
-/// Guard storing previous/old `DelegationConsole` and `DelegationTerminal` registry values.
+/// Guard that configures `conhost.exe` as the default terminal application and
+/// fully reverts its changes when dropped.
 ///
-/// Configures `conhost.exe` as the default terminal application
-/// and reverts to the original configuration when being dropped.
+/// Restoration is exact: values the guard overwrote are set back, values it
+/// created are deleted, and a startup key the guard had to create is removed.
 pub struct WindowsSettingsDefaultTerminalApplicationGuard<R: Registry> {
-    /// Old `DelegationConsole` registry value
+    /// Whether the guard changed the registry and must undo it on drop.
+    changed: bool,
+    /// Whether the startup key existed before the guard; if not, drop deletes it.
+    key_existed: bool,
+    /// `DelegationConsole` before the guard overwrote it, or `None` if it was absent.
     old_windows_terminal_console: Option<String>,
-    /// Old `DelegationTerminal` registry value
+    /// `DelegationTerminal` before the guard overwrote it, or `None` if it was absent.
     old_windows_terminal_terminal: Option<String>,
     /// Registry operations trait
     registry: R,
 }
 
 impl<R: Registry> WindowsSettingsDefaultTerminalApplicationGuard<R> {
-    /// Create a new guard with the given registry operations
+    /// Create a new guard, forcing `conhost.exe` as the default terminal application.
     ///
     /// # Arguments
     ///
@@ -195,50 +243,54 @@ impl<R: Registry> WindowsSettingsDefaultTerminalApplicationGuard<R> {
     ///
     /// # Returns
     ///
-    /// A new guard that will restore registry values on drop
+    /// A new guard that reverts its registry changes on drop.
     pub fn new_with_registry(registry: R) -> Self {
-        let mut guard = WindowsSettingsDefaultTerminalApplicationGuard {
-            old_windows_terminal_console: None,
-            old_windows_terminal_terminal: None,
-            registry,
-        };
+        let key_existed = registry.registry_key_exists(DEFAULT_TERMINAL_APP_REGISTRY_PATH);
+        let old_windows_terminal_console = registry
+            .get_registry_string_value(DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_CONSOLE);
+        let old_windows_terminal_terminal = registry
+            .get_registry_string_value(DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_TERMINAL);
 
-        if let (Some(console_val), Some(terminal_val)) = (
-            guard
-                .registry
-                .get_registry_string_value(DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_CONSOLE),
-            guard
-                .registry
-                .get_registry_string_value(DEFAULT_TERMINAL_APP_REGISTRY_PATH, DELEGATION_TERMINAL),
-        ) {
-            // No need to change if already set to conhost
-            if console_val == CLSID_CONHOST && terminal_val == CLSID_CONHOST {
-                return guard;
-            }
+        let already_conhost = old_windows_terminal_console.as_deref() == Some(CLSID_CONHOST)
+            && old_windows_terminal_terminal.as_deref() == Some(CLSID_CONHOST);
 
-            // Store old values and set new ones
-            guard.old_windows_terminal_console = Some(console_val);
-            guard.old_windows_terminal_terminal = Some(terminal_val);
-
-            guard.registry.set_registry_string_value(
+        if !already_conhost {
+            registry.set_registry_string_value(
                 DEFAULT_TERMINAL_APP_REGISTRY_PATH,
                 DELEGATION_CONSOLE,
                 CLSID_CONHOST,
             );
-            guard.registry.set_registry_string_value(
+            registry.set_registry_string_value(
                 DEFAULT_TERMINAL_APP_REGISTRY_PATH,
                 DELEGATION_TERMINAL,
                 CLSID_CONHOST,
             );
-        } else {
-            warn!(
-                "Failed to read registry key {}, \
-                cannot make sure conhost.exe is the configured default terminal application",
-                DEFAULT_TERMINAL_APP_REGISTRY_PATH,
-            );
         }
 
-        return guard;
+        return WindowsSettingsDefaultTerminalApplicationGuard {
+            changed: !already_conhost,
+            key_existed,
+            old_windows_terminal_console,
+            old_windows_terminal_terminal,
+            registry,
+        };
+    }
+
+    /// Restore `name` to its pre-guard value, or delete it if it was absent.
+    fn restore_value(&self, name: &str, previous: &Option<String>) {
+        match previous {
+            Some(value) => {
+                self.registry.set_registry_string_value(
+                    DEFAULT_TERMINAL_APP_REGISTRY_PATH,
+                    name,
+                    value,
+                );
+            }
+            None => {
+                self.registry
+                    .delete_registry_string_value(DEFAULT_TERMINAL_APP_REGISTRY_PATH, name);
+            }
+        };
     }
 }
 
@@ -265,25 +317,19 @@ impl Default for DefaultRegistry {
 }
 
 impl<R: Registry> Drop for WindowsSettingsDefaultTerminalApplicationGuard<R> {
-    /// Restore the original default terminal application setting to the registry.
-    ///
-    /// If old values weren't stored, nothing is done.
+    /// Revert every registry change the guard made.
     fn drop(&mut self) {
-        if let (Some(old_console), Some(old_terminal)) = (
-            &self.old_windows_terminal_console,
-            &self.old_windows_terminal_terminal,
-        ) {
-            self.registry.set_registry_string_value(
-                DEFAULT_TERMINAL_APP_REGISTRY_PATH,
-                DELEGATION_CONSOLE,
-                old_console,
-            );
-            self.registry.set_registry_string_value(
-                DEFAULT_TERMINAL_APP_REGISTRY_PATH,
-                DELEGATION_TERMINAL,
-                old_terminal,
-            );
+        if !self.changed {
+            return;
         }
+        // The guard created the startup key; deleting it removes the values too.
+        if !self.key_existed {
+            self.registry
+                .delete_registry_key(DEFAULT_TERMINAL_APP_REGISTRY_PATH);
+            return;
+        }
+        self.restore_value(DELEGATION_CONSOLE, &self.old_windows_terminal_console);
+        self.restore_value(DELEGATION_TERMINAL, &self.old_windows_terminal_terminal);
     }
 }
 
