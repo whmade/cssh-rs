@@ -24,7 +24,7 @@ simplelog     = "0.12.2"
 time          = "0.3.47"
 
 [dev-dependencies]
-mockall         = "0.14"
+mockall         = "0.15"
 # Thread-local log capture for tests that assert on log output.
 testing_logger  = "0.1"
 
