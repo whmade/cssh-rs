@@ -6,8 +6,9 @@ Documentation       Windows E2E case: adding a host in control mode.
 
 Resource            ../resources/cssh_rs_cluster.resource
 
-Suite Setup         Start Cssh Cluster    ${CLUSTER_ALIASES}    ${ALL_ALIASES}
-Suite Teardown      Tear Down Cssh Cluster
+Suite Setup         Run Keywords    Start Suite Recording
+...                     AND    Start Cssh Cluster    ${CLUSTER_ALIASES}    ${ALL_ALIASES}
+Suite Teardown      Run Keywords    Tear Down Cssh Cluster    AND    Stop Suite Recording
 
 
 *** Variables ***
