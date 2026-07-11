@@ -263,12 +263,8 @@ fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
 ///
 /// `true` for a Ctrl-modified C or Break key, `false` otherwise.
 fn is_console_signal_key(key_event: &KEY_EVENT_RECORD) -> bool {
-    let ctrl_held = key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0;
-    if !ctrl_held {
-        return false;
-    }
-    // Only Ctrl+C and Ctrl+Break are translated by conhost into console control signals; every other key is plain console input.
-    return matches!(VIRTUAL_KEY(key_event.wVirtualKeyCode), VK_C | VK_CANCEL);
+    return key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0
+        && matches!(VIRTUAL_KEY(key_event.wVirtualKeyCode), VK_C | VK_CANCEL);
 }
 
 /// Report whether the console input buffer has processed input enabled.
@@ -298,8 +294,7 @@ fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
 ///
 /// * `api` - The Windows API implementation to use.
 fn signal_console_ctrl_event(api: &dyn WindowsApi) {
-    // The group-0 signal also reaches this client; the handler installed at
-    // startup shields it so only the SSH child reacts.
+    // Group-0 also signals this client, but the startup handler shields it.
     if let Err(err) = api.interrupt_console_process_group() {
         warn!("Failed to relay console control event: {}", err);
     }
@@ -319,8 +314,7 @@ fn signal_console_ctrl_event(api: &dyn WindowsApi) {
 fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     let key_event = unsafe { input_record.KeyEvent };
     if is_console_signal_key(&key_event) && processed_input_enabled(api) {
-        // Raise the signal once on key-down; drop both down/up records so
-        // no stray 0x03 reaches the cooked-input child.
+        // Signal on key-down only; drop both records so no literal Ctrl+C reaches the child.
         if key_event.bKeyDown.as_bool() {
             signal_console_ctrl_event(api);
         }
@@ -474,9 +468,8 @@ impl ChildProcess for Child {
 /// * `api`   - The Windows API implementation to use.
 /// * `child` - Handle to the SSH child process.
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // A child that ignores Ctrl+C would never exit on CTRL_C_EVENT, so interrupt the
-    // whole group; the startup handler shields this client so it survives to enforce
-    // the kill.
+    // Interrupt the whole group so even a child that ignores Ctrl+C exits; the
+    // startup handler shields this client so it survives to force the kill.
     if let Err(err) = api.interrupt_console_process_group() {
         warn!("Failed to interrupt console process group: {}", err);
     }
@@ -950,8 +943,7 @@ pub async fn main(
     cli_port: Option<u16>,
     config: &ClientConfig,
 ) {
-    // Shield the client from CTRL+C and CTRL+Break before any are relayed to
-    // the console process group, so only the SSH child reacts to them.
+    // Shield this client from relayed CTRL+C/CTRL+Break so only the SSH child reacts.
     if let Err(err) = api.install_console_ctrl_handler() {
         warn!("Failed to install console control handler: {}", err);
     }
