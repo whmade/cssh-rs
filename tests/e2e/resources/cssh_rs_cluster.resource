@@ -196,3 +196,22 @@ Stop Suite Recording
     [Documentation]    Stop the suite recording. Wrapped so a recorder error
     ...                cannot mask a real teardown failure.
     Run Keyword And Ignore Error    Stop Recording
+
+Close Daemon Window
+    [Documentation]    Terminate only the daemon by its window title, leaving the clients
+    ...                to notice the closed pipe and exit on their own.
+    Run Process    taskkill    /F    /FI    WINDOWTITLE eq ${DAEMON_TITLE}
+
+Assert Window Gone
+    [Documentation]    Assert no window matching ${title} exists. Uses a short focus probe:
+    ...                a still-present window would be focused and fail the assertion.
+    [Arguments]    ${title}    ${match_mode}=exact
+    ${present}=    Run Keyword And Return Status    Focus Window    ${title}    ${match_mode}    2
+    Should Not Be True    ${present}    Window '${title}' is still present
+
+Assert Daemon Window Gone
+    Assert Window Gone    ${DAEMON_TITLE}
+
+Assert Client Window Gone
+    [Arguments]    ${alias}
+    Assert Window Gone    @${alias}    substring
