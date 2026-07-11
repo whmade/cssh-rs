@@ -248,9 +248,9 @@ jobs:
       - name: Run check-typography
         run: cargo xtask check-typography
 
-  # Lint, format, type-check and test the Python E2E harness as four parallel
-  # jobs on windows-latest, the harness's target platform. Deps via pyproject.toml.
-  e2e-harness-lint:
+  # Lint, format, type-check and test the cssh-rs-automation library as four parallel
+  # jobs on windows-latest, its target platform. Deps via pyproject.toml.
+  automation-lint:
     runs-on: *runner-version
     steps:
       - uses: *checkout-action
@@ -267,14 +267,14 @@ jobs:
           cache: pip
           cache-dependency-path: automation/pyproject.toml
       - &e2e-install
-        name: Install harness package with dev tooling
+        name: Install automation package with dev tooling
         working-directory: automation
         run: pip install -e ".[dev]"
       - name: Ruff lint
         working-directory: automation
         run: ruff check
 
-  e2e-harness-format:
+  automation-format:
     runs-on: *runner-version
     steps:
       - uses: *checkout-action
@@ -286,7 +286,7 @@ jobs:
         working-directory: automation
         run: ruff format --check
 
-  e2e-harness-typecheck:
+  automation-typecheck:
     runs-on: *runner-version
     steps:
       - uses: *checkout-action
@@ -298,7 +298,7 @@ jobs:
         working-directory: automation
         run: pyrefly check
 
-  e2e-harness-test:
+  automation-test:
     runs-on: *runner-version
     steps:
       - uses: *checkout-action
