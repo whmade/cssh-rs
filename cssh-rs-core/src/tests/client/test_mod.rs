@@ -10,8 +10,8 @@ use windows::Win32::System::Console::{
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
 
 use crate::client::{
-    build_ssh_arguments, console_ctrl_event_for, get_effective_color, get_flash_color,
-    is_alt_shift_c_combination, paint_console_color, read_write_loop, replay_input_record,
+    build_ssh_arguments, get_effective_color, get_flash_color, is_alt_shift_c_combination,
+    is_console_signal_key, paint_console_color, read_write_loop, replay_input_record,
     resolve_username, run_visuals_loop, send_pid_handshake, shutdown_child, write_console_input,
     ChildProcess, ReadWriteResult,
 };
@@ -517,35 +517,33 @@ fn fake_std_handle() -> windows::Win32::Foundation::HANDLE {
 }
 
 #[test]
-fn test_console_ctrl_event_for_maps_ctrl_c_and_ctrl_break() {
-    use windows::Win32::System::Console::{
-        CTRL_BREAK_EVENT, CTRL_C_EVENT, LEFT_CTRL_PRESSED, RIGHT_CTRL_PRESSED,
-    };
+fn test_is_console_signal_key_detects_ctrl_c_and_ctrl_break() {
+    use windows::Win32::System::Console::{LEFT_CTRL_PRESSED, RIGHT_CTRL_PRESSED};
     use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_CANCEL};
 
     let ctrl_c = create_test_key_event(true, VK_C.0, LEFT_CTRL_PRESSED);
-    assert_eq!(console_ctrl_event_for(&ctrl_c), Some(CTRL_C_EVENT));
+    assert!(is_console_signal_key(&ctrl_c));
 
     let ctrl_c_right = create_test_key_event(true, VK_C.0, RIGHT_CTRL_PRESSED);
-    assert_eq!(console_ctrl_event_for(&ctrl_c_right), Some(CTRL_C_EVENT));
+    assert!(is_console_signal_key(&ctrl_c_right));
 
     let ctrl_break = create_test_key_event(true, VK_CANCEL.0, LEFT_CTRL_PRESSED);
-    assert_eq!(console_ctrl_event_for(&ctrl_break), Some(CTRL_BREAK_EVENT));
+    assert!(is_console_signal_key(&ctrl_break));
 
     // Bare C without Ctrl -> not a control event.
     let bare_c = create_test_key_event(true, VK_C.0, 0);
-    assert_eq!(console_ctrl_event_for(&bare_c), None);
+    assert!(!is_console_signal_key(&bare_c));
 
     // Ctrl held but a different key -> not a control event.
     let ctrl_a = create_test_key_event(true, VK_A.0, LEFT_CTRL_PRESSED);
-    assert_eq!(console_ctrl_event_for(&ctrl_a), None);
+    assert!(!is_console_signal_key(&ctrl_a));
 }
 
 #[test]
-fn test_replay_input_record_signals_ctrl_c_in_processed_mode() {
+fn test_replay_input_record_signals_ctrl_break_for_ctrl_c_in_processed_mode() {
     use mockall::predicate::eq;
     use windows::Win32::System::Console::{
-        CTRL_C_EVENT, ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED,
+        CTRL_BREAK_EVENT, ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED,
     };
 
     let mut mock_api = MockWindowsApi::new();
@@ -556,10 +554,12 @@ fn test_replay_input_record_signals_ctrl_c_in_processed_mode() {
         .expect_get_console_mode()
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
     mock_api.expect_install_console_ctrl_handler().times(0);
+    // A relayed Ctrl+C is re-raised as CTRL_BREAK_EVENT, not CTRL_C_EVENT, because a
+    // child that ignores Ctrl+C never sees the latter.
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)
-        .with(eq(CTRL_C_EVENT), eq(0u32))
+        .with(eq(CTRL_BREAK_EVENT), eq(0u32))
         .returning(|_, _| return Ok(()));
     mock_api.expect_write_console_input().times(0);
 
@@ -1235,7 +1235,7 @@ async fn test_send_pid_handshake() -> Result<(), Box<dyn std::error::Error>> {
 
 struct FakeChild {
     /// `None` makes `wait` pend forever, simulating a child that survives
-    /// CTRL_C_EVENT.
+    /// CTRL_BREAK_EVENT.
     wait_outcome: Option<std::io::Result<std::process::ExitStatus>>,
     killed: bool,
 }
@@ -1258,13 +1258,13 @@ impl ChildProcess for FakeChild {
 async fn test_shutdown_child_signals_and_skips_kill_on_graceful_exit() {
     use mockall::predicate::eq;
     use std::os::windows::process::ExitStatusExt;
-    use windows::Win32::System::Console::CTRL_C_EVENT;
+    use windows::Win32::System::Console::CTRL_BREAK_EVENT;
 
     let mut mock_api = MockWindowsApi::new();
     mock_api
         .expect_generate_console_ctrl_event()
         .times(1)
-        .with(eq(CTRL_C_EVENT), eq(0u32))
+        .with(eq(CTRL_BREAK_EVENT), eq(0u32))
         .returning(|_, _| return Ok(()));
 
     let mut child = FakeChild {
@@ -1278,7 +1278,7 @@ async fn test_shutdown_child_signals_and_skips_kill_on_graceful_exit() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn test_shutdown_child_force_kills_child_that_survives_ctrl_c() {
+async fn test_shutdown_child_force_kills_child_that_survives_signal() {
     let mut mock_api = MockWindowsApi::new();
     mock_api
         .expect_generate_console_ctrl_event()

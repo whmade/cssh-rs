@@ -20,8 +20,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::{io::Interest, net::windows::named_pipe::ClientOptions};
 use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_BREAK_EVENT, CTRL_C_EVENT, ENABLE_PROCESSED_INPUT,
-    INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED,
+    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_BREAK_EVENT, ENABLE_PROCESSED_INPUT, INPUT_RECORD,
+    INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED,
     RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED, STD_INPUT_HANDLE,
 };
 
@@ -66,7 +66,7 @@ enum ReadWriteResult {
 /// when the user toggles the state.
 const HIGHLIGHT_FLASH_DURATION: Duration = Duration::from_millis(250);
 
-/// Grace period for the SSH child to exit after CTRL_C_EVENT before
+/// Grace period for the SSH child to exit after CTRL_BREAK_EVENT before
 /// [`shutdown_child`] force-kills it.
 const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
@@ -250,8 +250,10 @@ fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     };
 }
 
-/// Map a forwarded key event to the console control event conhost would
-/// have raised for it, if any.
+/// Report whether a forwarded key event is the Ctrl+C or Ctrl+Break combination.
+///
+/// These are the two keystrokes conhost turns into console control signals; the
+/// caller re-raises them as a signal instead of injecting them as input.
 ///
 /// # Arguments
 ///
@@ -259,19 +261,14 @@ fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
 ///
 /// # Returns
 ///
-/// `Some(CTRL_C_EVENT)` / `Some(CTRL_BREAK_EVENT)` for a Ctrl-modified C or
-/// Break key, `None` otherwise.
-fn console_ctrl_event_for(key_event: &KEY_EVENT_RECORD) -> Option<u32> {
+/// `true` for a Ctrl-modified C or Break key, `false` otherwise.
+fn is_console_signal_key(key_event: &KEY_EVENT_RECORD) -> bool {
     let ctrl_held = key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0;
     if !ctrl_held {
-        return None;
+        return false;
     }
-    // Only Ctrl+C and Ctrl+Break are translated by conhost into console control signals (and the only events GenerateConsoleCtrlEvent accepts); every other key is plain console input.
-    return match VIRTUAL_KEY(key_event.wVirtualKeyCode) {
-        VK_C => Some(CTRL_C_EVENT),
-        VK_CANCEL => Some(CTRL_BREAK_EVENT),
-        _ => None,
-    };
+    // Only Ctrl+C and Ctrl+Break are translated by conhost into console control signals; every other key is plain console input.
+    return matches!(VIRTUAL_KEY(key_event.wVirtualKeyCode), VK_C | VK_CANCEL);
 }
 
 /// Report whether the console input buffer has processed input enabled.
@@ -295,18 +292,19 @@ fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
     };
 }
 
-/// Re-raise a console control event for the current console process group.
+/// Interrupt the current console process group for a relayed Ctrl+C or Ctrl+Break.
 ///
 /// # Arguments
 ///
-/// * `api`        - The Windows API implementation to use.
-/// * `ctrl_event` - The control event to generate (`CTRL_C_EVENT` or
-///                  `CTRL_BREAK_EVENT`).
-fn signal_console_ctrl_event(api: &dyn WindowsApi, ctrl_event: u32) {
-    // Group-0 signals every process on the console, including this client; the
-    // handler installed at startup shields the client so only the SSH child
-    // reacts. https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent
-    if let Err(err) = api.generate_console_ctrl_event(ctrl_event, 0) {
+/// * `api` - The Windows API implementation to use.
+fn signal_console_ctrl_event(api: &dyn WindowsApi) {
+    // Always raise CTRL_BREAK_EVENT, never CTRL_C_EVENT: GenerateConsoleCtrlEvent's
+    // CTRL_C_EVENT is silently swallowed by a child that ignores Ctrl+C (ssh.exe with
+    // no pty, confirmed on windows-latest), whereas CTRL+BREAK always invokes the
+    // child's handler and interrupts it. Group-0 also signals this client; the handler
+    // installed at startup shields the client so only the SSH child reacts.
+    // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
+    if let Err(err) = api.generate_console_ctrl_event(CTRL_BREAK_EVENT, 0) {
         warn!("Failed to relay console control event: {}", err);
     }
 }
@@ -324,15 +322,13 @@ fn signal_console_ctrl_event(api: &dyn WindowsApi, ctrl_event: u32) {
 /// * `input_record` - The [INPUT_RECORD_0].`KeyEvent` record to replay.
 fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     let key_event = unsafe { input_record.KeyEvent };
-    if let Some(ctrl_event) = console_ctrl_event_for(&key_event) {
-        if processed_input_enabled(api) {
-            // Raise the signal once on key-down; drop both down/up records so
-            // no stray 0x03 reaches the cooked-input child.
-            if key_event.bKeyDown.as_bool() {
-                signal_console_ctrl_event(api, ctrl_event);
-            }
-            return;
+    if is_console_signal_key(&key_event) && processed_input_enabled(api) {
+        // Raise the signal once on key-down; drop both down/up records so
+        // no stray 0x03 reaches the cooked-input child.
+        if key_event.bKeyDown.as_bool() {
+            signal_console_ctrl_event(api);
         }
+        return;
     }
     write_console_input(api, input_record);
 }
@@ -473,8 +469,8 @@ impl ChildProcess for Child {
 
 /// Guarantee the SSH child terminates once the client's run loop has ended.
 ///
-/// Signals CTRL_C_EVENT for a graceful exit, then force-kills after
-/// [`CHILD_EXIT_GRACE_PERIOD`]; children that handle CTRL+C themselves
+/// Signals CTRL_BREAK_EVENT for a graceful exit, then force-kills after
+/// [`CHILD_EXIT_GRACE_PERIOD`]; children that handle the signal themselves
 /// (e.g. cmd.exe) would otherwise keep the client window open forever.
 ///
 /// # Arguments
@@ -482,18 +478,19 @@ impl ChildProcess for Child {
 /// * `api`   - The Windows API implementation to use.
 /// * `child` - Handle to the SSH child process.
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // Group-0 CTRL_C_EVENT also signals this client, but the handler installed
-    // at startup shields it, so the client survives to enforce the kill.
-    // https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent
-    if let Err(err) = api.generate_console_ctrl_event(CTRL_C_EVENT, 0) {
+    // CTRL_BREAK_EVENT, not CTRL_C_EVENT: a child that ignores Ctrl+C never sees the
+    // latter, so it would never exit gracefully. Group-0 also signals this client, but
+    // the handler installed at startup shields it, so the client survives to enforce
+    // the kill. https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
+    if let Err(err) = api.generate_console_ctrl_event(CTRL_BREAK_EVENT, 0) {
         warn!(
-            "Failed to send CTRL_C_EVENT to console process group: {}",
+            "Failed to send CTRL_BREAK_EVENT to console process group: {}",
             err
         );
     }
     match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
         Ok(Ok(exit_status)) => {
-            info!("Child exited after CTRL_C_EVENT: {}", exit_status);
+            info!("Child exited after CTRL_BREAK_EVENT: {}", exit_status);
             return;
         }
         Ok(Err(err)) => {
@@ -501,7 +498,7 @@ async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
         }
         Err(_) => {
             warn!(
-                "Child still running {}ms after CTRL_C_EVENT; force-killing it",
+                "Child still running {}ms after CTRL_BREAK_EVENT; force-killing it",
                 CHILD_EXIT_GRACE_PERIOD.as_millis()
             );
         }
