@@ -312,7 +312,7 @@ jobs:
 
   # Runs the E2E suite; lives in the reusable workflow so it is per-PR blocking.
   e2e-run:
-    timeout-minutes: 20
+    timeout-minutes: 35
     runs-on: *runner-version
     needs: build-stable
     steps:

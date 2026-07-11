@@ -10,8 +10,12 @@ from cssh_rs_e2e.window_focus import WindowFocus, WindowFocusError
 
 
 class _FakeWindow:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, handle: int = 0) -> None:
         self.title = title
+        self._handle = handle
+
+    def getHandle(self) -> int:  # noqa: N802 - mirrors pywinctl's method name
+        return self._handle
 
 
 class _FakeClosableWindow(_FakeWindow):
@@ -248,3 +252,26 @@ def test_close_window_times_out_when_window_persists(
         WindowFocus().close_window("@bravo", match_mode="substring", timeout=0.0)
 
     assert window.closed is True
+
+
+def test_window_z_order_index_returns_walk_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_matches(monkeypatch, [_FakeWindow("cssh-rs - tester@h1", handle=42)])
+    walked: list[int] = []
+    monkeypatch.setattr(window_focus, "_z_order_index", lambda hwnd: walked.append(hwnd) or 3)
+
+    assert WindowFocus().window_z_order_index("@h1", match_mode="substring") == 3
+    assert walked == [42]
+
+
+def test_window_z_order_index_rejects_unknown_match_mode() -> None:
+    with pytest.raises(WindowFocusError, match="match_mode must be"):
+        WindowFocus().window_z_order_index("cssh-rs daemon", match_mode="fuzzy")
+
+
+def test_window_z_order_index_raises_when_not_exactly_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_matches(monkeypatch, [])
+
+    with pytest.raises(WindowFocusError, match="expected exactly one window"):
+        WindowFocus().window_z_order_index("cssh-rs daemon")
