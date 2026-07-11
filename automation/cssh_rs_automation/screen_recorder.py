@@ -15,8 +15,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PIL.ImageDraw import ImageDraw
     from PIL.ImageFont import FreeTypeFont, ImageFont
+
+    # A per-frame overlay: takes the RGB frame and the monotonic capture time,
+    # returns the (possibly modified) frame.
+    Overlay = Callable[[object, float], object]
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +49,9 @@ class ScreenRecorder:
         self._banner_lock = threading.Lock()
         self._banner_text: str | None = None
         self._banner_until = 0.0
+        # Overlays run in registration order on every captured frame; the
+        # built-in banner is first so consumer overlays composite on top of it.
+        self._overlays: list[Overlay] = [self._banner_overlay]
 
     def start_recording(self, name: str, output_dir: str, fps: int = DEFAULT_FPS) -> str:
         """Start recording the desktop in the background; return the MP4 path.
@@ -124,12 +133,30 @@ class ScreenRecorder:
             self._banner_text = text
             self._banner_until = time.monotonic() + seconds
 
+    def add_overlay(self, overlay: Overlay) -> None:
+        """Register a per-frame overlay applied to every captured frame.
+
+        Args:
+            overlay: Callable ``(frame, now) -> frame`` invoked for each frame
+                with the RGB uint8 array and the monotonic capture time; it
+                returns the frame to write. Overlays run in registration order,
+                after the built-in banner.
+        """
+        self._overlays.append(overlay)
+
     def _current_banner(self) -> str | None:
         """Return the banner text while its deadline is live, else ``None``."""
         with self._banner_lock:
             if self._banner_text is not None and time.monotonic() < self._banner_until:
                 return self._banner_text
             return None
+
+    def _banner_overlay(self, frame: object, _now: float) -> object:
+        """Built-in overlay: draw the active banner over ``frame``, if any."""
+        banner = self._current_banner()
+        if banner is not None:
+            return _draw_banner(frame, banner)
+        return frame
 
     def _record(self, output_path: Path, fps: int, stop_event: threading.Event) -> None:
         """Capture frames until ``stop_event`` is set; best-effort.
@@ -159,9 +186,9 @@ class ScreenRecorder:
                 while not stop_event.is_set():
                     # mss grabs BGRA; reorder to the RGB imageio wants, dropping alpha.
                     frame = np.asarray(sct.grab(region))[..., [2, 1, 0]]
-                    banner = self._current_banner()
-                    if banner is not None:
-                        frame = _draw_banner(frame, banner)
+                    now = time.monotonic()
+                    for overlay in self._overlays:
+                        frame = overlay(frame, now)
                     # get_writer's declared return type omits append_data.
                     writer.append_data(frame)  # pyrefly: ignore[missing-attribute]
                     next_capture += frame_interval
