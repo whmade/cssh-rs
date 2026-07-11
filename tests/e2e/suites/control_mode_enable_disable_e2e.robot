@@ -26,9 +26,9 @@ Enable Disable Controls Broadcast Targeting
     Assert Client Window Appears For Each Host
     Assert All Ssh Connections Established
 
-    ${all}=    Unique Message    ENABLEDALL
-    Focus Daemon And Broadcast    ${all}
-    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${all}
+    ${baseline}=    Unique Message    BASELINE
+    Focus Daemon And Broadcast    ${baseline}
+    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${baseline}
 
     Disable Second Client
     ${one_off}=    Unique Message    ONEOFF
@@ -46,23 +46,21 @@ Enable Disable Controls Broadcast Targeting
     Enable All Clients
     ${reenabled}=    Unique Message    REENABLED
     Focus Daemon And Broadcast    ${reenabled}
-    # By the time the re-enabled broadcast has landed everywhere, any leak of
-    # the silenced one would have arrived too.
+    # Any leak of the silenced broadcast would have arrived before the re-enabled one lands.
     Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${reenabled}
     Assert No Host Received    ${silenced}
 
 
 *** Keywords ***
 Navigate To Second Client
-    [Documentation]    Step from the default top-left selection to the second client. With
-    ...                two clients one of right/down moves and the other clamps, so this
-    ...                lands on the second client regardless of the grid orientation.
+    [Documentation]    Move the submenu selection from its default top-left to the second
+    ...                client. One of right/down moves and the other clamps, so this works
+    ...                for either grid orientation.
     Send Control Mode Key    right
     Send Control Mode Key    down
 
 Disable Second Client
-    [Documentation]    Open the submenu, navigate to the second client and disable it with
-    ...                [d], then leave control mode.
+    [Documentation]    Disable the second client through the submenu [d].
     Enter Control Mode
     Send Control Mode Key    e
     Navigate To Second Client
@@ -70,8 +68,7 @@ Disable Second Client
     Exit Control Mode
 
 Enable Second Client
-    [Documentation]    Re-open the submenu, navigate to the second client and enable it with
-    ...                [e], then leave control mode.
+    [Documentation]    Enable the second client through the submenu [e].
     Enter Control Mode
     Send Control Mode Key    e
     Navigate To Second Client
@@ -79,14 +76,14 @@ Enable Second Client
     Exit Control Mode
 
 Disable All Clients
-    [Documentation]    Force every client enabled with [n], then toggle all with [t] so
-    ...                they all end disabled regardless of prior state.
+    [Documentation]    Enable all with [n] then toggle all with [t] so every client ends
+    ...                disabled; the menu has no dedicated disable-all.
     Enter Control Mode
     Send Control Mode Key    n
     Enter Control Mode
     Send Control Mode Key    t
 
 Enable All Clients
-    [Documentation]    Force every client back to enabled with [n].
+    [Documentation]    Enable every client with [n].
     Enter Control Mode
     Send Control Mode Key    n

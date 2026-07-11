@@ -174,8 +174,7 @@ Assert No Host Received
     END
 
 Assert Only Host Missing
-    [Documentation]    Assert ${message} reached every host except ${target}, whose marker
-    ...                must not contain it.
+    [Documentation]    Assert ${message} reached every host except ${target}.
     [Arguments]    ${target}    ${message}
     FOR    ${alias}    IN    @{ALIASES}
         IF    '${alias}' == '${target}'
