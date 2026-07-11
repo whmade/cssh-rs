@@ -312,9 +312,7 @@ fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
 fn signal_console_ctrl_event(api: &dyn WindowsApi) {
     // Group-0 also signals this client, but the startup handler shields it.
     match api.interrupt_console_process_group() {
-        Ok(()) => info!(
-            "[ctrlc-debug] interrupt_console_process_group ok (GenerateConsoleCtrlEvent CTRL_BREAK_EVENT, group 0)"
-        ),
+        Ok(()) => info!("[ctrlc-debug] interrupt_console_process_group returned ok"),
         Err(err) => warn!(
             "[ctrlc-debug] interrupt_console_process_group failed: {} (last_error=0x{:x})",
             err,
@@ -460,6 +458,11 @@ async fn launch_ssh_process(
                 config.program, args
             )
         });
+    info!(
+        "[ctrlc-debug] launched child pid={:?} program={}",
+        child.id(),
+        config.program
+    );
     return child;
 }
 

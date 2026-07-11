@@ -741,9 +741,34 @@ impl WindowsApi for DefaultWindowsApi {
     }
 
     fn interrupt_console_process_group(&self) -> windows::core::Result<()> {
-        return unsafe {
-            windows::Win32::System::Console::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0)
+        // TEMP diagnostic: dump the processes attached to this console so we can
+        // confirm the child shares it, and let CSSH_CTRLC_SIGNAL=ctrl_c switch the
+        // control event so CTRL_C_EVENT and CTRL_BREAK_EVENT can be A/B compared.
+        let mut pids = [0u32; 16];
+        let count = unsafe { GetConsoleProcessList(&mut pids) } as usize;
+        log::info!(
+            "[ctrlc-debug] self_pid={} console process list: count={} pids={:?}",
+            std::process::id(),
+            count,
+            &pids[..count.min(pids.len())]
+        );
+        let use_ctrl_c = matches!(std::env::var("CSSH_CTRLC_SIGNAL").as_deref(), Ok("ctrl_c"));
+        let event = if use_ctrl_c {
+            CTRL_C_EVENT
+        } else {
+            CTRL_BREAK_EVENT
         };
+        let result = unsafe { windows::Win32::System::Console::GenerateConsoleCtrlEvent(event, 0) };
+        log::info!(
+            "[ctrlc-debug] GenerateConsoleCtrlEvent(event={}, group=0) -> {:?}",
+            if use_ctrl_c {
+                "CTRL_C_EVENT"
+            } else {
+                "CTRL_BREAK_EVENT"
+            },
+            result
+        );
+        return result;
     }
 
     fn install_console_ctrl_handler(&self) -> windows::core::Result<()> {
