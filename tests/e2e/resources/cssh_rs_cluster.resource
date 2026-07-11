@@ -59,6 +59,12 @@ Tear Down Cssh Cluster
         Directory Should Not Exist    ${sshd}[tempdir]
     END
 
+Restart Cssh Cluster
+    [Documentation]    Tear the current cluster down before starting a fresh one: the
+    ...                single-instance sshd fixture refuses to start while one runs.
+    Tear Down Cssh Cluster
+    Start Cssh Cluster
+
 Stop Cssh Process
     [Documentation]    Kill the daemon, every client and their ssh children by image name.
     ...                The launcher spawns a detached daemon console, so killing the
@@ -215,3 +221,10 @@ Assert Daemon Window Gone
 Assert Client Window Gone
     [Arguments]    ${alias}
     Assert Window Gone    @${alias}    substring
+
+Close All Client Windows
+    [Documentation]    Close each client console window with Alt+F4, as a user would.
+    FOR    ${alias}    IN    @{ALIASES}
+        Focus Window    @${alias}    substring
+        Send Hotkey    alt    f4
+    END

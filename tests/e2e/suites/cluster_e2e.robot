@@ -4,6 +4,7 @@ Documentation       Windows E2E cases for cssh-rs, each asserting one behaviour:
 ...                 - input typed with the daemon focused broadcasts to every host
 ...                 - input typed with one client focused reaches only that host
 ...                 - closing the daemon closes every client window
+...                 - closing every client closes the daemon
 ...                 - teardown stops cssh-rs and sshd and removes the temp tree
 
 Resource            ../resources/cssh_rs_cluster.resource
@@ -43,3 +44,9 @@ Closing The Daemon Closes Every Client
     FOR    ${alias}    IN    @{ALIASES}
         Wait Until Keyword Succeeds    15x    1s    Assert Client Window Gone    ${alias}
     END
+
+Closing Every Client Closes The Daemon
+    [Setup]    Restart Cssh Cluster
+    Assert All Ssh Connections Established
+    Close All Client Windows
+    Wait Until Keyword Succeeds    15x    1s    Assert Daemon Window Gone
