@@ -190,16 +190,20 @@ def _draw_banner(frame: object, text: str) -> object:
     import numpy as np
     from PIL import Image, ImageDraw
 
-    image = Image.fromarray(np.asarray(frame)).convert("RGB")
+    image = Image.fromarray(np.asarray(frame))
     dimmed = Image.blend(image, Image.new("RGB", image.size, (0, 0, 0)), 0.6)
     draw = ImageDraw.Draw(dimmed)
     width, height = dimmed.size
     font = _banner_font(max(10, int(height / 15 * 0.8)))
     wrapped = _wrap_text(draw, text, font, int(width * 0.9))
-    left, top, right, bottom = draw.multiline_textbbox((0, 0), wrapped, font=font, align="center")
-    x = (width - (right - left)) // 2 - left
-    y = (height - (bottom - top)) // 2 - top
-    draw.multiline_text((x, y), wrapped, fill=(255, 255, 255), font=font, align="center")
+    draw.multiline_text(
+        (width // 2, height // 2),
+        wrapped,
+        fill=(255, 255, 255),
+        font=font,
+        align="center",
+        anchor="mm",
+    )
     return np.asarray(dimmed)
 
 
