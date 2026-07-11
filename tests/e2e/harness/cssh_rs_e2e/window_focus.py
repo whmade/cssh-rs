@@ -66,14 +66,7 @@ class WindowFocus:
         Returns:
             The matched window's title.
         """
-        if match_mode not in _VALID_MATCH_MODES:
-            raise WindowFocusError(
-                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
-            )
-        if timeout < 0:
-            raise WindowFocusError(f"timeout must be non-negative, got {timeout}")
-        if poll_interval < 0:
-            raise WindowFocusError(f"poll_interval must be non-negative, got {poll_interval}")
+        _validate_match_args(match_mode, timeout, poll_interval)
 
         # Imported lazily, not at module top: cssh_rs_e2e/__init__ re-exports
         # this module and is itself imported by the SSH-invoked marker writer,
@@ -101,11 +94,72 @@ class WindowFocus:
                 raise WindowFocusError(f"no window matching {title!r} within {timeout}s")
             time.sleep(poll_interval)
 
+    def close_window(
+        self,
+        title: str,
+        match_mode: str = "exact",
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    ) -> str:
+        """Close the single window whose title matches; return its title.
+
+        Polls for exactly one match, closes it, then polls until no window
+        matches so callers can treat the close as complete. More than one match
+        at any poll - so substring ``@h1`` cannot grab ``@h10`` - or a window
+        still present after ``timeout`` is an error.
+
+        Args:
+            title: Window title to match.
+            match_mode: ``"exact"`` (full title) or ``"substring"`` (contains).
+            timeout: Seconds to wait for the unique match and for it to vanish.
+            poll_interval: Seconds between match attempts.
+
+        Returns:
+            The closed window's title.
+        """
+        _validate_match_args(match_mode, timeout, poll_interval)
+
+        # Imported lazily for the same reason as focus_window; see its comment.
+        import pywinctl
+
+        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
+
+        deadline = time.monotonic() + timeout
+        closed_title: str | None = None
+        while True:
+            matches = pywinctl.getWindowsWithTitle(title, condition=condition)
+            if len(matches) > 1:
+                matched_titles = [window.title for window in matches]
+                raise WindowFocusError(f"multiple windows match {title!r}: {matched_titles}")
+            if closed_title is None:
+                if len(matches) == 1:
+                    closed_title = matches[0].title
+                    matches[0].close()
+            elif not matches:
+                return closed_title
+            if time.monotonic() >= deadline:
+                if closed_title is None:
+                    raise WindowFocusError(f"no window matching {title!r} within {timeout}s")
+                raise WindowFocusError(f"window {title!r} still present {timeout}s after close")
+            time.sleep(poll_interval)
+
     def get_active_window_title(self) -> str:
         """Return the foreground window's title, or ``""`` when none is active."""
         import pywinctl
 
         return pywinctl.getActiveWindowTitle() or ""
+
+
+def _validate_match_args(match_mode: str, timeout: float, poll_interval: float) -> None:
+    """Reject an invalid match mode or a negative timeout or poll interval."""
+    if match_mode not in _VALID_MATCH_MODES:
+        raise WindowFocusError(
+            f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+        )
+    if timeout < 0:
+        raise WindowFocusError(f"timeout must be non-negative, got {timeout}")
+    if poll_interval < 0:
+        raise WindowFocusError(f"poll_interval must be non-negative, got {poll_interval}")
 
 
 def _activate_window(window: object) -> bool:
