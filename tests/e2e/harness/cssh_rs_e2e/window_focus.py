@@ -179,6 +179,44 @@ class WindowFocus:
             raise WindowFocusError(f"expected exactly one window matching {title!r}, got {titles}")
         return _z_order_index(int(matches[0].getHandle()))
 
+    def right_click_window(self, title: str, match_mode: str = "exact") -> str:
+        """Right-click the center of the single window matching ``title``; return its title.
+
+        conhost pastes the clipboard on a right-click in QuickEdit mode but has no
+        Ctrl+V paste, so a paste test drives the daemon this way. The caller must
+        focus the window first so it is on top and the click lands on it.
+
+        Args:
+            title: Window title to match.
+            match_mode: ``"exact"`` (full title) or ``"substring"`` (contains).
+
+        Returns:
+            The clicked window's title.
+        """
+        if match_mode not in _VALID_MATCH_MODES:
+            raise WindowFocusError(
+                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+            )
+
+        import pywinctl
+
+        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
+        matches = pywinctl.getWindowsWithTitle(title, condition=condition)
+        if len(matches) != 1:
+            titles = [window.title for window in matches]
+            raise WindowFocusError(f"expected exactly one window matching {title!r}, got {titles}")
+        box = matches[0].box
+        center_x = box.left + box.width // 2
+        center_y = box.top + box.height // 2
+
+        # pyautogui imported lazily and its corner failsafe disabled for the same
+        # reasons as the keystroke library; a center click never nears a corner.
+        import pyautogui
+
+        pyautogui.FAILSAFE = False
+        pyautogui.rightClick(center_x, center_y)
+        return matches[0].title
+
 
 def _z_order_index(hwnd: int) -> int:
     """Return how many top-level windows sit above ``hwnd`` (0 = topmost).
