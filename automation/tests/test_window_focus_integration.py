@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 
-from cssh_rs_e2e.window_focus import WindowFocus
+from cssh_rs_automation.window_focus import WindowFocus
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="requires a Windows desktop")
 
@@ -34,7 +34,7 @@ _GRACE_SECONDS = 3.0
 
 
 def test_focus_window_activates_a_real_window() -> None:
-    title = f"cssh-rs-e2e-focus-{uuid.uuid4().hex}"
+    title = f"cssh-rs-automation-focus-{uuid.uuid4().hex}"
     helper = subprocess.Popen(
         [sys.executable, "-c", _TK_WINDOW_SCRIPT, title],
         stdout=subprocess.PIPE,

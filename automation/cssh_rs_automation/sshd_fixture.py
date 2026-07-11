@@ -329,10 +329,10 @@ def _harden_private_key_permissions(private_path: Path) -> None:
 
 def _build_forced_command(executable: str, marker: str) -> str:
     """Return the authorized_keys ``command="..."`` payload (without the outer
-    quotes) that runs ``<executable> -m cssh_rs_e2e._marker_writer <marker>``.
+    quotes) that runs ``<executable> -m cssh_rs_automation._marker_writer <marker>``.
     """
     return (
-        f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_e2e._marker_writer "
+        f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_automation._marker_writer "
         f"{_quote_authorized_keys_arg(marker)}"
     )
 

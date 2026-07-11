@@ -11,7 +11,7 @@ import types
 
 import pytest
 
-from cssh_rs_e2e.keystrokes import Keystrokes, KeystrokesError
+from cssh_rs_automation.keystrokes import Keystrokes, KeystrokesError
 
 
 class _FakePyAutoGui(types.SimpleNamespace):

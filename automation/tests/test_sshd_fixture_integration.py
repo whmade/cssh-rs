@@ -13,7 +13,7 @@ import subprocess
 
 import pytest
 
-from cssh_rs_e2e.sshd_fixture import SshdFixture, SshdFixtureError, _resolve_sshd_path
+from cssh_rs_automation.sshd_fixture import SshdFixture, SshdFixtureError, _resolve_sshd_path
 
 
 def _ssh_stack_available() -> bool:

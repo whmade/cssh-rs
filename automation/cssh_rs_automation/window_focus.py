@@ -70,7 +70,7 @@ class WindowFocus:
         """
         _validate_match_args(match_mode, timeout, poll_interval)
 
-        # Imported lazily, not at module top: cssh_rs_e2e/__init__ re-exports
+        # Imported lazily, not at module top: cssh_rs_automation/__init__ re-exports
         # this module and is itself imported by the SSH-invoked marker writer,
         # which must stay free of pywinctl's display/GUI dependencies.
         import pywinctl

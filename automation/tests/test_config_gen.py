@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from cssh_rs_e2e import config_gen
-from cssh_rs_e2e.config_gen import CONFIG_FILENAME, ConfigGen, ConfigGenError
+from cssh_rs_automation import config_gen
+from cssh_rs_automation.config_gen import CONFIG_FILENAME, ConfigGen, ConfigGenError
 
 
 class _FakeRun:

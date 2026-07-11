@@ -1,7 +1,7 @@
 """Read and write the system clipboard for the cssh-rs Windows E2E suite.
 
 pyperclip is imported lazily, for the same reason as keystrokes.Keystrokes:
-cssh_rs_e2e/__init__ re-exports this module and the SSH-invoked marker writer
+cssh_rs_automation/__init__ re-exports this module and the SSH-invoked marker writer
 must import the package headless.
 """
 
