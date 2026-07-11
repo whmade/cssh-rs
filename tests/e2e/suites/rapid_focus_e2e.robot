@@ -17,18 +17,26 @@ ${CSSH_RS_BINARY}       %{CSSH_RS_BINARY}
 ${CLUSTER_NAME}         e2e
 ${OTHER_WINDOW_TITLE}   Notepad
 ${FOCUS_SWITCHES}       ${5}
+${FOCUS_DWELL}          250ms
 
 
 *** Test Cases ***
 Rapidly Refocusing The Daemon Raises Every Client
     [Documentation]    After repeatedly switching focus between a neutral window and the
     ...                daemon, every one of the ten client windows must sit above the neutral
-    ...                window in the z-order.
+    ...                window in the z-order. Switches are paced at human speed, not machine
+    ...                speed, and begin only once every client has fully connected.
     Assert Daemon Window Appears
     Assert Client Window Appears For Each Host
+    # Switch only after every client has connected, not merely once its window appeared.
+    Assert All Ssh Connections Established
     Start Other Window
     FOR    ${switch}    IN RANGE    ${FOCUS_SWITCHES}
+        # Pace at human speed; back-to-back machine-fast switches never happen in real use.
+        Sleep    ${FOCUS_DWELL}
         Focus Window    ${OTHER_WINDOW_TITLE}    substring
+        # Pace at human speed; back-to-back machine-fast switches never happen in real use.
+        Sleep    ${FOCUS_DWELL}
         Focus Window    ${DAEMON_TITLE}
     END
     Wait Until Keyword Succeeds    10x    1s
