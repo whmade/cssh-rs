@@ -12,6 +12,11 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL.ImageDraw import ImageDraw
+    from PIL.ImageFont import FreeTypeFont, ImageFont
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +40,9 @@ class ScreenRecorder:
         self._thread: threading.Thread | None = None
         self._stop_event: threading.Event | None = None
         self._output_path: Path | None = None
+        self._banner_lock = threading.Lock()
+        self._banner_text: str | None = None
+        self._banner_until = 0.0
 
     def start_recording(self, name: str, output_dir: str, fps: int = DEFAULT_FPS) -> str:
         """Start recording the desktop in the background; return the MP4 path.
@@ -102,6 +110,27 @@ class ScreenRecorder:
         self._output_path = None
         return str(output_path)
 
+    def show_banner(self, text: str, seconds: float) -> None:
+        """Display ``text`` centered over the next ``seconds`` of captured frames.
+
+        Called from the Robot execution thread; the capture thread reads the
+        banner under a lock and draws it until the deadline passes.
+
+        Args:
+            text: Banner caption to render (typically the test name).
+            seconds: How long the banner stays visible, in seconds.
+        """
+        with self._banner_lock:
+            self._banner_text = text
+            self._banner_until = time.monotonic() + seconds
+
+    def _current_banner(self) -> str | None:
+        """Return the banner text while its deadline is live, else ``None``."""
+        with self._banner_lock:
+            if self._banner_text is not None and time.monotonic() < self._banner_until:
+                return self._banner_text
+            return None
+
     def _record(self, output_path: Path, fps: int, stop_event: threading.Event) -> None:
         """Capture frames until ``stop_event`` is set; best-effort.
 
@@ -130,6 +159,9 @@ class ScreenRecorder:
                 while not stop_event.is_set():
                     # mss grabs BGRA; reorder to the RGB imageio wants, dropping alpha.
                     frame = np.asarray(sct.grab(region))[..., [2, 1, 0]]
+                    banner = self._current_banner()
+                    if banner is not None:
+                        frame = _draw_banner(frame, banner)
                     # get_writer's declared return type omits append_data.
                     writer.append_data(frame)  # pyrefly: ignore[missing-attribute]
                     next_capture += frame_interval
@@ -143,3 +175,69 @@ def _safe_filename(name: str) -> str:
     """Return ``name`` reduced to filesystem-safe characters for a file stem."""
     safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name.strip())
     return safe or "recording"
+
+
+def _draw_banner(frame: object, text: str) -> object:
+    """Return ``frame`` dimmed with ``text`` drawn centered, as a title card.
+
+    Args:
+        frame: RGB uint8 numpy array of shape ``(height, width, 3)``.
+        text: Caption to center on the dimmed frame.
+
+    Returns:
+        A new RGB uint8 numpy array of the same shape.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    image = Image.fromarray(np.asarray(frame))
+    dimmed = Image.blend(image, Image.new("RGB", image.size, (0, 0, 0)), 0.6)
+    draw = ImageDraw.Draw(dimmed)
+    width, height = dimmed.size
+    font = _banner_font(max(10, int(height / 15 * 0.8)))
+    wrapped = _wrap_text(draw, text, font, int(width * 0.9))
+    draw.multiline_text(
+        (width // 2, height // 2),
+        wrapped,
+        fill=(255, 255, 255),
+        font=font,
+        align="center",
+        anchor="mm",
+    )
+    return np.asarray(dimmed)
+
+
+def _wrap_text(draw: ImageDraw, text: str, font: FreeTypeFont | ImageFont, max_width: int) -> str:
+    """Return ``text`` with newlines inserted so each line fits within ``max_width``.
+
+    Args:
+        draw: Drawing context used to measure rendered line widths.
+        text: Caption to wrap on whitespace boundaries.
+        font: Font the caption is rendered with.
+        max_width: Maximum rendered line width in pixels.
+
+    Returns:
+        The caption with ``\\n`` between wrapped lines. A single word wider than
+        ``max_width`` is left on its own line rather than broken mid-word.
+    """
+    words = text.split()
+    if not words:
+        return text
+    lines = [words[0]]
+    for word in words[1:]:
+        candidate = f"{lines[-1]} {word}"
+        if draw.textlength(candidate, font=font) <= max_width:
+            lines[-1] = candidate
+        else:
+            lines.append(word)
+    return "\n".join(lines)
+
+
+def _banner_font(size: int) -> FreeTypeFont | ImageFont:
+    """Return a TrueType banner font of ``size``, falling back to the bundled default."""
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.truetype("arial.ttf", size)
+    except OSError:
+        return ImageFont.load_default(size)
