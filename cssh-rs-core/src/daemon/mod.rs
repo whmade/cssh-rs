@@ -799,6 +799,13 @@ impl<'a> Daemon<'a> {
         workspace_area: &workspace::WorkspaceArea,
         servers: &mut Arc<Mutex<Vec<JoinHandle<()>>>>,
     ) {
+        let debug_key_event = unsafe { input_record.KeyEvent };
+        debug!(
+            "[ctrlc-debug] daemon read record vk=0x{:x} ctrl=0x{:x} down={}",
+            debug_key_event.wVirtualKeyCode,
+            debug_key_event.dwControlKeyState,
+            debug_key_event.bKeyDown.as_bool()
+        );
         if self.control_mode_is_active(windows_api, clients, input_record) {
             if self.control_mode_state == ControlModeState::Initiated {
                 clear_screen(windows_api);
@@ -954,6 +961,14 @@ impl<'a> Daemon<'a> {
                 input_record.string_repr()
             )
         };
+        let forwarded_key_event = unsafe { input_record.KeyEvent };
+        debug!(
+            "[ctrlc-debug] daemon forwarding record to clients vk=0x{:x} ctrl=0x{:x} down={} receivers={}",
+            forwarded_key_event.wVirtualKeyCode,
+            forwarded_key_event.dwControlKeyState,
+            forwarded_key_event.bKeyDown.as_bool(),
+            sender.receiver_count()
+        );
         match sender.send(
             serialize_input_record_0(&input_record)[..]
                 .try_into()
