@@ -11,8 +11,8 @@ import types
 
 import pytest
 
-from cssh_rs_e2e import recording_listener
-from cssh_rs_e2e.recording_listener import (
+from cssh_rs_automation import recording_listener
+from cssh_rs_automation.recording_listener import (
     DEFAULT_BANNER_SECONDS,
     DEFAULT_OUTPUT_DIR,
     RecordingListener,

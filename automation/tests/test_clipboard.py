@@ -12,7 +12,7 @@ import types
 
 import pytest
 
-from cssh_rs_e2e.clipboard import Clipboard, ClipboardError
+from cssh_rs_automation.clipboard import Clipboard, ClipboardError
 
 
 class _FakePyperclip(types.SimpleNamespace):

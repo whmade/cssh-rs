@@ -36,6 +36,7 @@ jobs:
               - '.config/coverage/**'
               - '.config/python.version'
               - 'tests/e2e/**'
+              - 'automation/**'
               - 'cssh-rs/**'
               - 'cssh-rs-core/**'
               - 'cssh-rs-meta/**'

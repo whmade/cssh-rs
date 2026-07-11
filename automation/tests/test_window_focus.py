@@ -8,8 +8,8 @@ import types
 import pytest
 import pywinctl
 
-from cssh_rs_e2e import window_focus
-from cssh_rs_e2e.window_focus import WindowFocus, WindowFocusError
+from cssh_rs_automation import window_focus
+from cssh_rs_automation.window_focus import WindowFocus, WindowFocusError
 
 
 class _FakeWindow:

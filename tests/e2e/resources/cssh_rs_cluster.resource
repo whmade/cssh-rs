@@ -7,11 +7,11 @@ Documentation       Reusable keywords for the cssh-rs Windows E2E cluster suite.
 ...                 polled by the suite with Wait Until Keyword Succeeds; these
 ...                 keywords hold no sleeps.
 
-Library             cssh_rs_e2e.sshd_fixture.SshdFixture
-Library             cssh_rs_e2e.config_gen.ConfigGen
-Library             cssh_rs_e2e.window_focus.WindowFocus
-Library             cssh_rs_e2e.keystrokes.Keystrokes
-Library             cssh_rs_e2e.clipboard.Clipboard
+Library             cssh_rs_automation.sshd_fixture.SshdFixture
+Library             cssh_rs_automation.config_gen.ConfigGen
+Library             cssh_rs_automation.window_focus.WindowFocus
+Library             cssh_rs_automation.keystrokes.Keystrokes
+Library             cssh_rs_automation.clipboard.Clipboard
 Library             Process
 Library             OperatingSystem
 Library             String

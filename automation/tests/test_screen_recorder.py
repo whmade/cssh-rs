@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from cssh_rs_e2e.screen_recorder import (
+from cssh_rs_automation.screen_recorder import (
     ScreenRecorder,
     ScreenRecorderError,
     _banner_font,

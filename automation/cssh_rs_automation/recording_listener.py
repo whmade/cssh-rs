@@ -15,7 +15,7 @@ from robot.result import TestSuite as ResultSuite
 from robot.running import TestCase as RunningTest
 from robot.running import TestSuite as RunningSuite
 
-from cssh_rs_e2e.screen_recorder import ScreenRecorder
+from cssh_rs_automation.screen_recorder import ScreenRecorder
 
 LOGGER = logging.getLogger(__name__)
 

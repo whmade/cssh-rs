@@ -49,10 +49,10 @@ updates:
     cooldown:
       default-days: 14
 
-  # Python E2E harness (tests/e2e/harness/pyproject.toml). PEP 621
+  # Shared desktop-automation library (automation/pyproject.toml). PEP 621
   # dependencies plus the [dev] extra are read directly from pyproject.
   - package-ecosystem: pip
-    directory: /tests/e2e/harness
+    directory: /automation
     schedule:
       interval: weekly
       day: friday

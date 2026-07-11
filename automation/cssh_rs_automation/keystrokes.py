@@ -72,7 +72,7 @@ class Keystrokes:
     def _pyautogui() -> Any:
         """Import pyautogui lazily, disable its failsafe, and return the module.
 
-        Imported here, not at module top: cssh_rs_e2e/__init__ re-exports this
+        Imported here, not at module top: cssh_rs_automation/__init__ re-exports this
         module, which the SSH-invoked marker writer imports headless and must
         stay free of pyautogui's GUI dependencies. The failsafe aborts input
         on a mouse move into a screen corner, which would kill these

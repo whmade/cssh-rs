@@ -72,7 +72,7 @@ class ScreenRecorder:
         thread = threading.Thread(
             target=self._record,
             args=(output_path, fps, stop_event),
-            name="cssh-rs-e2e-screen-recorder",
+            name="cssh-rs-automation-screen-recorder",
             daemon=True,
         )
         self._output_path = output_path

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cssh_rs_e2e import _marker_writer
+from cssh_rs_automation import _marker_writer
 
 
 def _run_with_stdin(monkeypatch: pytest.MonkeyPatch, marker: Path, data: bytes) -> int:
