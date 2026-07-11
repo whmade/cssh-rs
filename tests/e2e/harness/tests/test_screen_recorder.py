@@ -158,7 +158,7 @@ def test_recording_survives_capture_backend_error(
     ("raw", "expected"),
     [
         ("Cluster E2E", "Cluster_E2E"),
-        ("control_mode_add_host", "control_mode_add_host"),
+        ("control_mode_hostnames", "control_mode_hostnames"),
         ("a/b:c*d", "a_b_c_d"),
         ("  spaced  ", "spaced"),
         ("v1.2-final", "v1.2-final"),

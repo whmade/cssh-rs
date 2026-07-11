@@ -14,6 +14,15 @@ class _FakeWindow:
         self.title = title
 
 
+class _FakeClosableWindow(_FakeWindow):
+    def __init__(self, title: str) -> None:
+        super().__init__(title)
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _patch_matches(
     monkeypatch: pytest.MonkeyPatch, matches: list[_FakeWindow]
 ) -> list[dict[str, object]]:
@@ -165,3 +174,77 @@ def test_get_active_window_title_returns_empty_when_none(
     monkeypatch.setattr(pywinctl, "getActiveWindowTitle", lambda: None)
 
     assert WindowFocus().get_active_window_title() == ""
+
+
+def _patch_match_sequence(
+    monkeypatch: pytest.MonkeyPatch, results: list[list[object]]
+) -> list[int]:
+    """Patch getWindowsWithTitle to return one entry of ``results`` per call."""
+    conditions: list[int] = []
+
+    def fake(_title: str, condition: int = pywinctl.Re.IS, **_: object) -> list[object]:
+        conditions.append(condition)
+        return results.pop(0)
+
+    monkeypatch.setattr(pywinctl, "getWindowsWithTitle", fake)
+    monkeypatch.setattr(window_focus.time, "sleep", lambda _: None)
+    return conditions
+
+
+def test_close_window_rejects_unknown_match_mode() -> None:
+    with pytest.raises(WindowFocusError, match="match_mode must be"):
+        WindowFocus().close_window("cssh-rs daemon", match_mode="fuzzy")
+
+
+def test_close_window_closes_match_and_returns_title_once_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _FakeClosableWindow("cssh-rs - tester@bravo")
+    _patch_match_sequence(monkeypatch, [[window], []])
+
+    result = WindowFocus().close_window("@bravo", match_mode="substring", poll_interval=0.0)
+
+    assert result == "cssh-rs - tester@bravo"
+    assert window.closed is True
+
+
+def test_close_window_substring_uses_contains_condition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _FakeClosableWindow("cssh-rs - tester@bravo")
+    conditions = _patch_match_sequence(monkeypatch, [[window], []])
+
+    WindowFocus().close_window("@bravo", match_mode="substring", poll_interval=0.0)
+
+    assert conditions[0] == pywinctl.Re.CONTAINS
+
+
+def test_close_window_rejects_multiple_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_matches(
+        monkeypatch,
+        [_FakeClosableWindow("cssh-rs - tester@h1"), _FakeClosableWindow("cssh-rs - tester@h10")],
+    )
+
+    with pytest.raises(WindowFocusError, match=r"multiple windows match.*h10"):
+        WindowFocus().close_window("@h1", match_mode="substring")
+
+
+def test_close_window_times_out_without_a_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_matches(monkeypatch, [])
+    monkeypatch.setattr(window_focus.time, "sleep", lambda _: None)
+
+    with pytest.raises(WindowFocusError, match="no window matching"):
+        WindowFocus().close_window("@bravo", match_mode="substring", timeout=0.0)
+
+
+def test_close_window_times_out_when_window_persists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    window = _FakeClosableWindow("cssh-rs - tester@bravo")
+    _patch_matches(monkeypatch, [window])
+    monkeypatch.setattr(window_focus.time, "sleep", lambda _: None)
+
+    with pytest.raises(WindowFocusError, match="still present"):
+        WindowFocus().close_window("@bravo", match_mode="substring", timeout=0.0)
+
+    assert window.closed is True
