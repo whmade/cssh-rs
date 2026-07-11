@@ -389,6 +389,9 @@ def _render_ssh_config(
             "    StrictHostKeyChecking no\n"
             f"    UserKnownHostsFile {_as_forward_slash(known_hosts)}\n"
             "    BatchMode yes\n"
+            # cssh runs an interactive ssh (no remote command), which requests a
+            # PTY by default; the e2e sshd grants none, so opt out here.
+            "    RequestTTY no\n"
             "    LogLevel ERROR\n"
         )
     return "\n".join(blocks)
