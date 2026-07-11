@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 import pywinctl
 
@@ -275,3 +278,37 @@ def test_window_z_order_index_raises_when_not_exactly_one(
 
     with pytest.raises(WindowFocusError, match="expected exactly one window"):
         WindowFocus().window_z_order_index("cssh-rs daemon")
+
+
+def _patch_pyautogui(monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
+    """Inject a fake pyautogui recording right-clicks and its failsafe state."""
+    fake = types.SimpleNamespace(
+        FAILSAFE=True, clicks=[], rightClick=lambda x, y: fake.clicks.append((x, y))
+    )
+    monkeypatch.setitem(sys.modules, "pyautogui", fake)
+    return fake
+
+
+def test_right_click_window_clicks_center(monkeypatch: pytest.MonkeyPatch) -> None:
+    window = _FakeWindow("cssh-rs daemon")
+    window.box = types.SimpleNamespace(left=10, top=20, width=100, height=80)
+    _patch_matches(monkeypatch, [window])
+    fake = _patch_pyautogui(monkeypatch)
+
+    assert WindowFocus().right_click_window("cssh-rs daemon") == "cssh-rs daemon"
+    assert fake.clicks == [(60, 60)]
+    assert fake.FAILSAFE is False
+
+
+def test_right_click_window_rejects_unknown_match_mode() -> None:
+    with pytest.raises(WindowFocusError, match="match_mode must be"):
+        WindowFocus().right_click_window("cssh-rs daemon", match_mode="fuzzy")
+
+
+def test_right_click_window_raises_when_not_exactly_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_matches(monkeypatch, [])
+
+    with pytest.raises(WindowFocusError, match="expected exactly one window"):
+        WindowFocus().right_click_window("cssh-rs daemon")
