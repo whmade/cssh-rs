@@ -12,7 +12,6 @@ Library             cssh_rs_e2e.config_gen.ConfigGen
 Library             cssh_rs_e2e.window_focus.WindowFocus
 Library             cssh_rs_e2e.keystrokes.Keystrokes
 Library             cssh_rs_e2e.clipboard.Clipboard
-Library             cssh_rs_e2e.screen_recorder.ScreenRecorder
 Library             Process
 Library             OperatingSystem
 Library             String
@@ -190,18 +189,6 @@ Assert Only Host Missing
             Assert Marker Has Line    ${alias}    ${message}
         END
     END
-
-Start Suite Recording
-    [Documentation]    Record the suite to the e2e-recordings directory, a sibling
-    ...                of the Robot output dir so it stays out of the report
-    ...                artifact. Best-effort, so it is safe to run before the cluster.
-    ${recordings_dir}=    Normalize Path    ${OUTPUT DIR}${/}..${/}e2e-recordings
-    Start Recording    ${SUITE NAME}    ${recordings_dir}
-
-Stop Suite Recording
-    [Documentation]    Stop the suite recording. Wrapped so a recorder error
-    ...                cannot mask a real teardown failure.
-    Run Keyword And Ignore Error    Stop Recording
 
 Close Daemon Window
     [Documentation]    Terminate only the daemon by its window title, leaving the clients
