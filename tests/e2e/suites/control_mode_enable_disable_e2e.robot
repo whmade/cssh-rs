@@ -1,13 +1,15 @@
 *** Settings ***
-Documentation       Windows E2E case: enabling, disabling and toggling clients in control
+Documentation       Windows E2E cases: enabling, disabling and toggling clients in control
 ...                 mode. Exercises the submenu [d]/[e]/[t] on a navigated-to client and the
 ...                 top-level [n] enable-all and [t] toggle-all, asserting broadcast targeting
-...                 follows each client's enabled state.
+...                 follows each client's enabled state. Every case shares one cluster and
+...                 resets to all-enabled on teardown so it starts from a known baseline.
 
 Resource            ../resources/cssh_rs_cluster.resource
 
-Suite Setup         Start Cssh Cluster
+Suite Setup         Start Cluster And Await Readiness
 Suite Teardown      Tear Down Cssh Cluster
+Test Teardown       Enable All Clients
 
 
 *** Variables ***
@@ -18,38 +20,37 @@ ${CLUSTER_NAME}         e2e
 
 
 *** Test Cases ***
-Enable Disable And Toggle Controls Broadcast Targeting
-    [Documentation]    Baseline reaches both. Submenu [d] silences the second client, [n]
-    ...                restores all, submenu [t] silences that client again, [e] restores it,
-    ...                and top-level [t] silences all then restores all.
-    Assert Daemon Window Appears
-    Assert Client Window Appears For Each Host
-    Assert All Ssh Connections Established
+Baseline Broadcast Reaches Every Client
+    [Documentation]    With every client enabled, a daemon broadcast reaches all hosts.
+    Broadcast And Assert Every Host Received    BASELINE
 
-    ${baseline}=    Unique Message    BASELINE
-    Focus Daemon And Broadcast    ${baseline}
-    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${baseline}
-
+Submenu Disable Silences A Single Client
+    [Documentation]    Submenu [d] on the second client stops daemon broadcasts reaching it
+    ...                while every other client still receives them.
     Disable Second Client
     ${disabled}=    Unique Message    DISABLED
     Focus Daemon And Broadcast    ${disabled}
     Wait Until Keyword Succeeds    10x    0.5s    Assert Only Host Missing    ${SECOND_HOST}    ${disabled}
 
+Enable All Restores A Disabled Client
+    [Documentation]    After disabling the second client, the top-level [n] enable-all brings
+    ...                every client back into broadcast targeting.
+    Disable Second Client
     Enable All Clients
-    ${enabled}=    Unique Message    ENABLED
-    Focus Daemon And Broadcast    ${enabled}
-    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${enabled}
+    Broadcast And Assert Every Host Received    ENABLED
 
+Submenu Toggle Silences And Enable Restores A Client
+    [Documentation]    Submenu [t] silences the second client, then submenu [e] restores it.
     Toggle Second Client
     ${toggled_off}=    Unique Message    TOGGLEDOFF
     Focus Daemon And Broadcast    ${toggled_off}
     Wait Until Keyword Succeeds    10x    0.5s    Assert Only Host Missing    ${SECOND_HOST}    ${toggled_off}
-
     Enable Second Client
-    ${restored}=    Unique Message    RESTORED
-    Focus Daemon And Broadcast    ${restored}
-    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${restored}
+    Broadcast And Assert Every Host Received    RESTORED
 
+Toggle All Silences Then Restores Every Client
+    [Documentation]    Top-level [t] silences every client and a second [t] restores them; the
+    ...                broadcast sent while all were silenced reaches nobody.
     Toggle All Clients
     ${silenced}=    Unique Message    SILENCED
     Focus Daemon And Broadcast    ${silenced}
@@ -62,6 +63,22 @@ Enable Disable And Toggle Controls Broadcast Targeting
 
 
 *** Keywords ***
+Start Cluster And Await Readiness
+    [Documentation]    Start the cluster and wait for the daemon, every client window and
+    ...                every ssh session to be ready.
+    Start Cssh Cluster
+    Assert Daemon Window Appears
+    Assert Client Window Appears For Each Host
+    Assert All Ssh Connections Established
+
+Broadcast And Assert Every Host Received
+    [Documentation]    Broadcast a unique message built from ${prefix} and assert every host
+    ...                received it.
+    [Arguments]    ${prefix}
+    ${message}=    Unique Message    ${prefix}
+    Focus Daemon And Broadcast    ${message}
+    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${message}
+
 Navigate To Second Client
     [Documentation]    Move the submenu selection from its default top-left to the second
     ...                client. One of right/down moves and the other clamps, so this works
