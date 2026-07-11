@@ -143,7 +143,7 @@ jobs:
         run: cargo lint
 
   tests:
-    timeout-minutes: 30
+    timeout-minutes: 8
     runs-on: *runner-version
     needs: build-nightly
     steps:
@@ -209,7 +209,7 @@ jobs:
           retention-days: 1
 
   tests-docs:
-    timeout-minutes: 15
+    timeout-minutes: 6
     runs-on: *runner-version
     needs: build-stable
     steps:
@@ -312,7 +312,7 @@ jobs:
 
   # Runs the E2E suite; lives in the reusable workflow so it is per-PR blocking.
   e2e-run:
-    timeout-minutes: 35
+    timeout-minutes: 10
     runs-on: *runner-version
     needs: build-stable
     steps:
