@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from PIL.ImageDraw import ImageDraw
     from PIL.ImageFont import FreeTypeFont, ImageFont
 
 LOGGER = logging.getLogger(__name__)
@@ -193,12 +194,39 @@ def _draw_banner(frame: object, text: str) -> object:
     dimmed = Image.blend(image, Image.new("RGB", image.size, (0, 0, 0)), 0.6)
     draw = ImageDraw.Draw(dimmed)
     width, height = dimmed.size
-    font = _banner_font(max(12, height // 15))
-    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    font = _banner_font(max(10, int(height / 15 * 0.8)))
+    wrapped = _wrap_text(draw, text, font, int(width * 0.9))
+    left, top, right, bottom = draw.multiline_textbbox((0, 0), wrapped, font=font, align="center")
     x = (width - (right - left)) // 2 - left
     y = (height - (bottom - top)) // 2 - top
-    draw.text((x, y), text, fill=(255, 255, 255), font=font)
+    draw.multiline_text((x, y), wrapped, fill=(255, 255, 255), font=font, align="center")
     return np.asarray(dimmed)
+
+
+def _wrap_text(draw: ImageDraw, text: str, font: FreeTypeFont | ImageFont, max_width: int) -> str:
+    """Return ``text`` with newlines inserted so each line fits within ``max_width``.
+
+    Args:
+        draw: Drawing context used to measure rendered line widths.
+        text: Caption to wrap on whitespace boundaries.
+        font: Font the caption is rendered with.
+        max_width: Maximum rendered line width in pixels.
+
+    Returns:
+        The caption with ``\\n`` between wrapped lines. A single word wider than
+        ``max_width`` is left on its own line rather than broken mid-word.
+    """
+    words = text.split()
+    if not words:
+        return text
+    lines = [words[0]]
+    for word in words[1:]:
+        candidate = f"{lines[-1]} {word}"
+        if draw.textlength(candidate, font=font) <= max_width:
+            lines[-1] = candidate
+        else:
+            lines.append(word)
+    return "\n".join(lines)
 
 
 def _banner_font(size: int) -> FreeTypeFont | ImageFont:

@@ -20,8 +20,10 @@ import pytest
 from cssh_rs_e2e.screen_recorder import (
     ScreenRecorder,
     ScreenRecorderError,
+    _banner_font,
     _draw_banner,
     _safe_filename,
+    _wrap_text,
 )
 
 
@@ -168,6 +170,29 @@ def test_draw_banner_preserves_shape_and_changes_pixels() -> None:
     assert drawn.dtype == frame.dtype
     # The dim-and-caption pass must visibly alter the frame.
     assert not np.array_equal(drawn, frame)
+
+
+def test_wrap_text_breaks_long_names_across_lines() -> None:
+    from PIL import Image, ImageDraw
+
+    draw = ImageDraw.Draw(Image.new("RGB", (400, 200)))
+    text = "A Very Long Test Name That Should Wrap"
+
+    wrapped = _wrap_text(draw, text, _banner_font(20), max_width=120)
+
+    assert "\n" in wrapped
+    # Wrapping only inserts newlines; every original word survives in order.
+    assert wrapped.replace("\n", " ").split() == text.split()
+
+
+def test_wrap_text_keeps_short_names_on_one_line() -> None:
+    from PIL import Image, ImageDraw
+
+    draw = ImageDraw.Draw(Image.new("RGB", (400, 200)))
+
+    wrapped = _wrap_text(draw, "Short", _banner_font(20), max_width=400)
+
+    assert wrapped == "Short"
 
 
 @pytest.mark.parametrize(
