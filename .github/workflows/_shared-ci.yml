@@ -342,6 +342,7 @@ jobs:
           robot
           --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
           --outputdir e2e-output
+          --listener cssh_rs_e2e.recording_listener.RecordingListener
           tests/e2e/suites/
       - name: Upload E2E report
         if: always()

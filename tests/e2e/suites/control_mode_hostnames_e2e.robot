@@ -7,9 +7,8 @@ Documentation       Windows E2E case: copying hostnames in control mode reflects
 
 Resource            ../resources/cssh_rs_cluster.resource
 
-Suite Setup         Run Keywords    Start Suite Recording
-...                     AND    Start Cssh Cluster    ${ALIASES}    ${ALL_ALIASES}
-Suite Teardown      Run Keywords    Tear Down Cssh Cluster    AND    Stop Suite Recording
+Suite Setup         Start Cssh Cluster    ${ALIASES}    ${ALL_ALIASES}
+Suite Teardown      Tear Down Cssh Cluster
 
 
 *** Variables ***
