@@ -17,7 +17,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from cssh_rs_e2e.screen_recorder import ScreenRecorder, ScreenRecorderError, _safe_filename
+from cssh_rs_e2e.screen_recorder import (
+    ScreenRecorder,
+    ScreenRecorderError,
+    _draw_banner,
+    _safe_filename,
+)
 
 
 class _FakeSct:
@@ -152,6 +157,17 @@ def test_recording_survives_capture_backend_error(
 
     assert returned == path
     assert fake_backends.writers == []
+
+
+def test_draw_banner_preserves_shape_and_changes_pixels() -> None:
+    frame = np.full((200, 400, 3), 120, dtype=np.uint8)
+
+    drawn = _draw_banner(frame, "Cluster Launch")
+
+    assert drawn.shape == frame.shape
+    assert drawn.dtype == frame.dtype
+    # The dim-and-caption pass must visibly alter the frame.
+    assert not np.array_equal(drawn, frame)
 
 
 @pytest.mark.parametrize(

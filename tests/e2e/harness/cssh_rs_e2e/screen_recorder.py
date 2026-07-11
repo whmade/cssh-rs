@@ -12,6 +12,10 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL.ImageFont import FreeTypeFont, ImageFont
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +39,9 @@ class ScreenRecorder:
         self._thread: threading.Thread | None = None
         self._stop_event: threading.Event | None = None
         self._output_path: Path | None = None
+        self._banner_lock = threading.Lock()
+        self._banner_text: str | None = None
+        self._banner_until = 0.0
 
     def start_recording(self, name: str, output_dir: str, fps: int = DEFAULT_FPS) -> str:
         """Start recording the desktop in the background; return the MP4 path.
@@ -102,6 +109,27 @@ class ScreenRecorder:
         self._output_path = None
         return str(output_path)
 
+    def show_banner(self, text: str, seconds: float) -> None:
+        """Display ``text`` centered over the next ``seconds`` of captured frames.
+
+        Called from the Robot execution thread; the capture thread reads the
+        banner under a lock and draws it until the deadline passes.
+
+        Args:
+            text: Banner caption to render (typically the test name).
+            seconds: How long the banner stays visible, in seconds.
+        """
+        with self._banner_lock:
+            self._banner_text = text
+            self._banner_until = time.monotonic() + seconds
+
+    def _current_banner(self) -> str | None:
+        """Return the banner text while its deadline is live, else ``None``."""
+        with self._banner_lock:
+            if self._banner_text is not None and time.monotonic() < self._banner_until:
+                return self._banner_text
+            return None
+
     def _record(self, output_path: Path, fps: int, stop_event: threading.Event) -> None:
         """Capture frames until ``stop_event`` is set; best-effort.
 
@@ -130,6 +158,9 @@ class ScreenRecorder:
                 while not stop_event.is_set():
                     # mss grabs BGRA; reorder to the RGB imageio wants, dropping alpha.
                     frame = np.asarray(sct.grab(region))[..., [2, 1, 0]]
+                    banner = self._current_banner()
+                    if banner is not None:
+                        frame = _draw_banner(frame, banner)
                     # get_writer's declared return type omits append_data.
                     writer.append_data(frame)  # pyrefly: ignore[missing-attribute]
                     next_capture += frame_interval
@@ -143,3 +174,38 @@ def _safe_filename(name: str) -> str:
     """Return ``name`` reduced to filesystem-safe characters for a file stem."""
     safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name.strip())
     return safe or "recording"
+
+
+def _draw_banner(frame: object, text: str) -> object:
+    """Return ``frame`` dimmed with ``text`` drawn centered, as a title card.
+
+    Args:
+        frame: RGB uint8 numpy array of shape ``(height, width, 3)``.
+        text: Caption to center on the dimmed frame.
+
+    Returns:
+        A new RGB uint8 numpy array of the same shape.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    image = Image.fromarray(np.asarray(frame)).convert("RGB")
+    dimmed = Image.blend(image, Image.new("RGB", image.size, (0, 0, 0)), 0.6)
+    draw = ImageDraw.Draw(dimmed)
+    width, height = dimmed.size
+    font = _banner_font(max(12, height // 15))
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    x = (width - (right - left)) // 2 - left
+    y = (height - (bottom - top)) // 2 - top
+    draw.text((x, y), text, fill=(255, 255, 255), font=font)
+    return np.asarray(dimmed)
+
+
+def _banner_font(size: int) -> FreeTypeFont | ImageFont:
+    """Return a TrueType banner font of ``size``, falling back to the bundled default."""
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.truetype("arial.ttf", size)
+    except OSError:
+        return ImageFont.load_default(size)

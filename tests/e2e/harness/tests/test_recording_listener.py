@@ -12,15 +12,21 @@ import types
 import pytest
 
 from cssh_rs_e2e import recording_listener
-from cssh_rs_e2e.recording_listener import DEFAULT_OUTPUT_DIR, RecordingListener
+from cssh_rs_e2e.recording_listener import (
+    DEFAULT_BANNER_SECONDS,
+    DEFAULT_OUTPUT_DIR,
+    RecordingListener,
+)
 
 
 class _FakeRecorder:
     def __init__(self) -> None:
         self.started: list[tuple[str, str]] = []
         self.stopped = 0
+        self.banners: list[tuple[str, float]] = []
         self.start_error: Exception | None = None
         self.stop_error: Exception | None = None
+        self.banner_error: Exception | None = None
 
     def start_recording(self, name: str, output_dir: str) -> str:
         self.started.append((name, output_dir))
@@ -34,9 +40,18 @@ class _FakeRecorder:
             raise self.stop_error
         return None
 
+    def show_banner(self, text: str, seconds: float) -> None:
+        self.banners.append((text, seconds))
+        if self.banner_error is not None:
+            raise self.banner_error
+
 
 def _suite(name: str, *, has_tests: bool) -> types.SimpleNamespace:
     return types.SimpleNamespace(name=name, tests=[object()] if has_tests else [])
+
+
+def _test(name: str) -> types.SimpleNamespace:
+    return types.SimpleNamespace(name=name)
 
 
 @pytest.fixture
@@ -44,6 +59,13 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _FakeRecorder:
     fake = _FakeRecorder()
     monkeypatch.setattr(recording_listener, "ScreenRecorder", lambda: fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    slept: list[float] = []
+    monkeypatch.setattr(recording_listener.time, "sleep", slept.append)
+    return slept
 
 
 def test_leaf_suite_is_recorded(recorder: _FakeRecorder) -> None:
@@ -91,3 +113,34 @@ def test_stop_failure_is_swallowed(recorder: _FakeRecorder) -> None:
     listener.end_suite(_suite("suite", has_tests=True), object())
 
     assert recorder.stopped == 1
+
+
+def test_start_test_shows_banner_and_pauses(
+    recorder: _FakeRecorder, _no_sleep: list[float]
+) -> None:
+    listener = RecordingListener()
+
+    listener.start_test(_test("Cluster Launch"), object())
+
+    assert recorder.banners == [("Cluster Launch", DEFAULT_BANNER_SECONDS)]
+    assert _no_sleep == [DEFAULT_BANNER_SECONDS]
+
+
+def test_banner_seconds_override_is_passed_through(
+    recorder: _FakeRecorder, _no_sleep: list[float]
+) -> None:
+    listener = RecordingListener(banner_seconds=2.5)
+
+    listener.start_test(_test("Broadcast"), object())
+
+    assert recorder.banners == [("Broadcast", 2.5)]
+    assert _no_sleep == [2.5]
+
+
+def test_banner_failure_is_swallowed(recorder: _FakeRecorder) -> None:
+    recorder.banner_error = RuntimeError("no font")
+    listener = RecordingListener()
+
+    listener.start_test(_test("suite"), object())
+
+    assert recorder.banners == [("suite", DEFAULT_BANNER_SECONDS)]
