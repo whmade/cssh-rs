@@ -161,3 +161,25 @@ Send Control Mode Key
     [Documentation]    Press a single control-mode menu key.
     [Arguments]    ${key}
     Press Key    ${key}
+
+Exit Control Mode
+    [Documentation]    Press Esc to leave control mode and any open submenu.
+    Press Key    esc
+
+Assert No Host Received
+    [Documentation]    Assert ${message} reached no host's marker as a complete line.
+    [Arguments]    ${message}
+    FOR    ${alias}    IN    @{ALIASES}
+        Assert Marker Missing Line    ${alias}    ${message}
+    END
+
+Assert Only Host Missing
+    [Documentation]    Assert ${message} reached every host except ${target}.
+    [Arguments]    ${target}    ${message}
+    FOR    ${alias}    IN    @{ALIASES}
+        IF    '${alias}' == '${target}'
+            Assert Marker Missing Line    ${alias}    ${message}
+        ELSE
+            Assert Marker Has Line    ${alias}    ${message}
+        END
+    END
