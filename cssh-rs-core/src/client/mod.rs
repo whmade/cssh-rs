@@ -20,9 +20,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::{io::Interest, net::windows::named_pipe::ClientOptions};
 use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_BREAK_EVENT, ENABLE_PROCESSED_INPUT, INPUT_RECORD,
-    INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED,
-    RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED, STD_INPUT_HANDLE,
+    CONSOLE_CHARACTER_ATTRIBUTES, ENABLE_PROCESSED_INPUT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
+    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
+    SHIFT_PRESSED, STD_INPUT_HANDLE,
 };
 
 use cssh_rs_protocol::{
@@ -66,7 +66,7 @@ enum ReadWriteResult {
 /// when the user toggles the state.
 const HIGHLIGHT_FLASH_DURATION: Duration = Duration::from_millis(250);
 
-/// Grace period for the SSH child to exit after CTRL_BREAK_EVENT before
+/// Grace period for the SSH child to exit after the console interrupt before
 /// [`shutdown_child`] force-kills it.
 const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
@@ -298,13 +298,9 @@ fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
 ///
 /// * `api` - The Windows API implementation to use.
 fn signal_console_ctrl_event(api: &dyn WindowsApi) {
-    // Always raise CTRL_BREAK_EVENT, never CTRL_C_EVENT: GenerateConsoleCtrlEvent's
-    // CTRL_C_EVENT is silently swallowed by a child that ignores Ctrl+C (ssh.exe with
-    // no pty, confirmed on windows-latest), whereas CTRL+BREAK always invokes the
-    // child's handler and interrupts it. Group-0 also signals this client; the handler
-    // installed at startup shields the client so only the SSH child reacts.
-    // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
-    if let Err(err) = api.generate_console_ctrl_event(CTRL_BREAK_EVENT, 0) {
+    // The group-0 signal also reaches this client; the handler installed at
+    // startup shields it so only the SSH child reacts.
+    if let Err(err) = api.interrupt_console_process_group() {
         warn!("Failed to relay console control event: {}", err);
     }
 }
@@ -469,8 +465,8 @@ impl ChildProcess for Child {
 
 /// Guarantee the SSH child terminates once the client's run loop has ended.
 ///
-/// Signals CTRL_BREAK_EVENT for a graceful exit, then force-kills after
-/// [`CHILD_EXIT_GRACE_PERIOD`]; children that handle the signal themselves
+/// Interrupts the console process group for a graceful exit, then force-kills
+/// after [`CHILD_EXIT_GRACE_PERIOD`]; children that handle the signal themselves
 /// (e.g. cmd.exe) would otherwise keep the client window open forever.
 ///
 /// # Arguments
@@ -478,19 +474,15 @@ impl ChildProcess for Child {
 /// * `api`   - The Windows API implementation to use.
 /// * `child` - Handle to the SSH child process.
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // CTRL_BREAK_EVENT, not CTRL_C_EVENT: a child that ignores Ctrl+C never sees the
-    // latter, so it would never exit gracefully. Group-0 also signals this client, but
-    // the handler installed at startup shields it, so the client survives to enforce
-    // the kill. https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
-    if let Err(err) = api.generate_console_ctrl_event(CTRL_BREAK_EVENT, 0) {
-        warn!(
-            "Failed to send CTRL_BREAK_EVENT to console process group: {}",
-            err
-        );
+    // A child that ignores Ctrl+C would never exit on CTRL_C_EVENT, so interrupt the
+    // whole group; the startup handler shields this client so it survives to enforce
+    // the kill.
+    if let Err(err) = api.interrupt_console_process_group() {
+        warn!("Failed to interrupt console process group: {}", err);
     }
     match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
         Ok(Ok(exit_status)) => {
-            info!("Child exited after CTRL_BREAK_EVENT: {}", exit_status);
+            info!("Child exited after console interrupt: {}", exit_status);
             return;
         }
         Ok(Err(err)) => {
@@ -498,7 +490,7 @@ async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
         }
         Err(_) => {
             warn!(
-                "Child still running {}ms after CTRL_BREAK_EVENT; force-killing it",
+                "Child still running {}ms after console interrupt; force-killing it",
                 CHILD_EXIT_GRACE_PERIOD.as_millis()
             );
         }

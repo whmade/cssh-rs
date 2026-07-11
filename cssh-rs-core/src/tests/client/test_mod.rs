@@ -541,10 +541,7 @@ fn test_is_console_signal_key_detects_ctrl_c_and_ctrl_break() {
 
 #[test]
 fn test_replay_input_record_signals_ctrl_break_for_ctrl_c_in_processed_mode() {
-    use mockall::predicate::eq;
-    use windows::Win32::System::Console::{
-        CTRL_BREAK_EVENT, ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED,
-    };
+    use windows::Win32::System::Console::{ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED};
 
     let mut mock_api = MockWindowsApi::new();
     mock_api
@@ -554,13 +551,12 @@ fn test_replay_input_record_signals_ctrl_break_for_ctrl_c_in_processed_mode() {
         .expect_get_console_mode()
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
     mock_api.expect_install_console_ctrl_handler().times(0);
-    // A relayed Ctrl+C is re-raised as CTRL_BREAK_EVENT, not CTRL_C_EVENT, because a
-    // child that ignores Ctrl+C never sees the latter.
+    // A relayed Ctrl+C interrupts the process group rather than being injected as
+    // input; the platform layer decides the signal.
     mock_api
-        .expect_generate_console_ctrl_event()
+        .expect_interrupt_console_process_group()
         .times(1)
-        .with(eq(CTRL_BREAK_EVENT), eq(0u32))
-        .returning(|_, _| return Ok(()));
+        .returning(|| return Ok(()));
     mock_api.expect_write_console_input().times(0);
 
     replay_input_record(
@@ -571,10 +567,7 @@ fn test_replay_input_record_signals_ctrl_break_for_ctrl_c_in_processed_mode() {
 
 #[test]
 fn test_replay_input_record_signals_ctrl_break_in_processed_mode() {
-    use mockall::predicate::eq;
-    use windows::Win32::System::Console::{
-        CTRL_BREAK_EVENT, ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED,
-    };
+    use windows::Win32::System::Console::{ENABLE_PROCESSED_INPUT, LEFT_CTRL_PRESSED};
     use windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL;
 
     let mut mock_api = MockWindowsApi::new();
@@ -586,10 +579,9 @@ fn test_replay_input_record_signals_ctrl_break_in_processed_mode() {
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
     mock_api.expect_install_console_ctrl_handler().times(0);
     mock_api
-        .expect_generate_console_ctrl_event()
+        .expect_interrupt_console_process_group()
         .times(1)
-        .with(eq(CTRL_BREAK_EVENT), eq(0u32))
-        .returning(|_, _| return Ok(()));
+        .returning(|| return Ok(()));
     mock_api.expect_write_console_input().times(0);
 
     replay_input_record(
@@ -611,7 +603,7 @@ fn test_replay_input_record_drops_ctrl_c_key_up_in_processed_mode() {
         .returning(|_| return Ok(ENABLE_PROCESSED_INPUT));
     // Key-up must neither signal nor inject the record.
     mock_api.expect_install_console_ctrl_handler().times(0);
-    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api.expect_interrupt_console_process_group().times(0);
     mock_api.expect_write_console_input().times(0);
 
     replay_input_record(
@@ -633,7 +625,7 @@ fn test_replay_input_record_writes_ctrl_c_in_raw_mode() {
         .expect_get_console_mode()
         .returning(|_| return Ok(CONSOLE_MODE::default()));
     mock_api.expect_install_console_ctrl_handler().times(0);
-    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api.expect_interrupt_console_process_group().times(0);
     mock_api
         .expect_write_console_input()
         .times(1)
@@ -657,7 +649,7 @@ fn test_replay_input_record_writes_plain_key_without_querying_mode() {
     mock_api.expect_get_std_handle().times(0);
     mock_api.expect_get_console_mode().times(0);
     mock_api.expect_install_console_ctrl_handler().times(0);
-    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api.expect_interrupt_console_process_group().times(0);
     mock_api
         .expect_write_console_input()
         .times(1)
@@ -681,7 +673,7 @@ fn test_replay_input_record_falls_back_to_write_on_mode_query_error() {
         .expect_get_console_mode()
         .returning(|_| return Err(windows::core::Error::from_thread()));
     mock_api.expect_install_console_ctrl_handler().times(0);
-    mock_api.expect_generate_console_ctrl_event().times(0);
+    mock_api.expect_interrupt_console_process_group().times(0);
     mock_api
         .expect_write_console_input()
         .times(1)
@@ -1256,16 +1248,13 @@ impl ChildProcess for FakeChild {
 
 #[tokio::test]
 async fn test_shutdown_child_signals_and_skips_kill_on_graceful_exit() {
-    use mockall::predicate::eq;
     use std::os::windows::process::ExitStatusExt;
-    use windows::Win32::System::Console::CTRL_BREAK_EVENT;
 
     let mut mock_api = MockWindowsApi::new();
     mock_api
-        .expect_generate_console_ctrl_event()
+        .expect_interrupt_console_process_group()
         .times(1)
-        .with(eq(CTRL_BREAK_EVENT), eq(0u32))
-        .returning(|_, _| return Ok(()));
+        .returning(|| return Ok(()));
 
     let mut child = FakeChild {
         wait_outcome: Some(Ok(std::process::ExitStatus::from_raw(0))),
@@ -1281,9 +1270,9 @@ async fn test_shutdown_child_signals_and_skips_kill_on_graceful_exit() {
 async fn test_shutdown_child_force_kills_child_that_survives_signal() {
     let mut mock_api = MockWindowsApi::new();
     mock_api
-        .expect_generate_console_ctrl_event()
+        .expect_interrupt_console_process_group()
         .times(1)
-        .returning(|_, _| return Ok(()));
+        .returning(|| return Ok(()));
 
     let mut child = FakeChild {
         wait_outcome: None,
@@ -1304,9 +1293,9 @@ async fn test_shutdown_child_force_kills_child_that_survives_signal() {
 async fn test_shutdown_child_force_kills_child_when_wait_fails() {
     let mut mock_api = MockWindowsApi::new();
     mock_api
-        .expect_generate_console_ctrl_event()
+        .expect_interrupt_console_process_group()
         .times(1)
-        .returning(|_, _| return Ok(()));
+        .returning(|| return Ok(()));
 
     let mut child = FakeChild {
         wait_outcome: Some(Err(std::io::Error::other("wait failed"))),

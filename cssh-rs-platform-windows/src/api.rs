@@ -227,21 +227,21 @@ pub trait WindowsApi: Send + Sync {
     /// The last error code from Windows API
     fn get_last_error(&self) -> u32;
 
-    /// Generates a console control event.
+    /// Interrupt every process attached to the caller's console.
     ///
-    /// # Arguments
-    ///
-    /// * `ctrl_event` - Control event type to generate
-    /// * `process_group_id` - Process group ID to send event to
+    /// Raises `CTRL_BREAK_EVENT` for process group 0, so a Ctrl+C or Ctrl+Break
+    /// relayed from the daemon interrupts the SSH child. `CTRL_BREAK_EVENT` is
+    /// used rather than `CTRL_C_EVENT` because a `CTRL_C_EVENT` sent via
+    /// `GenerateConsoleCtrlEvent` is silently dropped for any process with the
+    /// ignore-Ctrl+C attribute set (e.g. `ssh.exe` with no pty), whereas
+    /// `CTRL_BREAK_EVENT` always invokes the target's handler. The caller
+    /// shields itself with the handler from [`Self::install_console_ctrl_handler`].
+    /// <https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler>
     ///
     /// # Returns
     ///
     /// Result indicating success or failure of the operation
-    fn generate_console_ctrl_event(
-        &self,
-        ctrl_event: u32,
-        process_group_id: u32,
-    ) -> windows::core::Result<()>;
+    fn interrupt_console_process_group(&self) -> windows::core::Result<()>;
 
     /// Install a console control handler that shields this process from
     /// CTRL+C and CTRL+Break.
@@ -740,13 +740,9 @@ impl WindowsApi for DefaultWindowsApi {
         return unsafe { windows::Win32::Foundation::GetLastError().0 };
     }
 
-    fn generate_console_ctrl_event(
-        &self,
-        ctrl_event: u32,
-        process_group_id: u32,
-    ) -> windows::core::Result<()> {
+    fn interrupt_console_process_group(&self) -> windows::core::Result<()> {
         return unsafe {
-            windows::Win32::System::Console::GenerateConsoleCtrlEvent(ctrl_event, process_group_id)
+            windows::Win32::System::Console::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0)
         };
     }
 
