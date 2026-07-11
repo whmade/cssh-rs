@@ -350,6 +350,22 @@ jobs:
           name: e2e-robot-report
           path: e2e-output/
           retention-days: 7
+      - name: Upload E2E recordings (kept 24h on success)
+        if: success()
+        uses: *upload-artifact-action
+        with:
+          name: e2e-recordings
+          path: e2e-recordings/
+          retention-days: 1
+          if-no-files-found: ignore
+      - name: Upload E2E recordings (kept 7 days on failure)
+        if: failure()
+        uses: *upload-artifact-action
+        with:
+          name: e2e-recordings
+          path: e2e-recordings/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Compile-only cross-checks for the portable crate subset on native
   # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still

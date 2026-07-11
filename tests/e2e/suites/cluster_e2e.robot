@@ -7,8 +7,8 @@ Documentation       Windows E2E cases for cssh-rs, each asserting one behaviour:
 
 Resource            ../resources/cssh_rs_cluster.resource
 
-Suite Setup         Start Cssh Cluster
-Suite Teardown      Tear Down Cssh Cluster
+Suite Setup         Run Keywords    Start Suite Recording    AND    Start Cssh Cluster
+Suite Teardown      Run Keywords    Tear Down Cssh Cluster    AND    Stop Suite Recording
 
 
 *** Variables ***
