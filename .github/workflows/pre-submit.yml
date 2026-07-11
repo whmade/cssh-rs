@@ -37,6 +37,7 @@ jobs:
               - '.config/python.version'
               - 'tests/e2e/**'
               - 'automation/**'
+              - 'demo/**'
               - 'cssh-rs/**'
               - 'cssh-rs-core/**'
               - 'cssh-rs-meta/**'
