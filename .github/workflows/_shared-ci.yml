@@ -310,6 +310,38 @@ jobs:
         working-directory: automation
         run: pytest
 
+  # Lint, format, type-check and test the Python demo package on
+  # windows-latest. Installs the automation library first so the demo's
+  # imports and type-checks resolve.
+  demo-checks:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - *e2e-read-python
+      - *e2e-setup-python
+      - *e2e-install
+      - name: Install demo package with dev tooling
+        working-directory: demo
+        run: pip install -e ".[dev]"
+      - name: Ruff lint
+        working-directory: demo
+        run: ruff check
+      - name: Ruff format check
+        working-directory: demo
+        run: ruff format --check
+      - name: Pyrefly type check
+        working-directory: demo
+        run: pyrefly check
+      - name: Pytest
+        working-directory: demo
+        run: pytest
+      # Validate the task suite resolves every keyword against the demo library
+      # without executing it (no real windows or binary needed).
+      - name: Robot dry-run
+        working-directory: demo
+        run: robot --dryrun --output NONE --log NONE --report NONE suites/record_demo.robot
+
   # Runs the E2E suite; lives in the reusable workflow so it is per-PR blocking.
   e2e-run:
     timeout-minutes: 10
