@@ -49,27 +49,27 @@ def fake_run(monkeypatch: pytest.MonkeyPatch) -> _FakeRun:
 
 
 @pytest.fixture
-def ssh_config(tmp_path: Path) -> str:
+def ssh_config_path(tmp_path: Path) -> str:
     path = tmp_path / "ssh_config"
     path.write_text("Host h1\n", encoding="utf-8")
     return str(path)
 
 
 def test_generate_config_builds_expected_argv(
-    fake_run: _FakeRun, tmp_path: Path, ssh_config: str
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
 ) -> None:
     ConfigGen().generate_config(
         "cssh-rs.exe",
         str(tmp_path),
-        ssh_config,
+        ssh_config_path,
         ["h1", "h2"],
     )
 
     assert fake_run.calls[0][0] == [
         "cssh-rs.exe",
         "generate-config",
-        "--ssh-config",
-        ssh_config,
+        "--ssh-config-path",
+        ssh_config_path,
         "--program",
         "ssh",
         "--cluster",
@@ -82,11 +82,11 @@ def test_generate_config_builds_expected_argv(
 
 
 @pytest.mark.usefixtures("fake_run")
-def test_generate_config_returns_written_config_path(tmp_path: Path, ssh_config: str) -> None:
+def test_generate_config_returns_written_config_path(tmp_path: Path, ssh_config_path: str) -> None:
     returned = ConfigGen().generate_config(
         "cssh-rs.exe",
         str(tmp_path),
-        ssh_config,
+        ssh_config_path,
         ["h1"],
     )
 
@@ -95,12 +95,12 @@ def test_generate_config_returns_written_config_path(tmp_path: Path, ssh_config:
 
 
 def test_generate_config_honors_program_and_cluster(
-    fake_run: _FakeRun, tmp_path: Path, ssh_config: str
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
 ) -> None:
     ConfigGen().generate_config(
         "cssh-rs.exe",
         str(tmp_path),
-        ssh_config,
+        ssh_config_path,
         ["h1"],
         cluster_name="prod",
         program="ssh.exe",
@@ -112,12 +112,12 @@ def test_generate_config_honors_program_and_cluster(
 
 
 def test_generate_config_captures_output(
-    fake_run: _FakeRun, tmp_path: Path, ssh_config: str
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
 ) -> None:
     ConfigGen().generate_config(
         "cssh-rs.exe",
         str(tmp_path),
-        ssh_config,
+        ssh_config_path,
         ["h1"],
     )
 
@@ -128,8 +128,8 @@ def test_generate_config_captures_output(
     ("kwargs", "message"),
     [
         ({"cssh_rs_binary": ""}, "cssh_rs_binary"),
-        ({"ssh_config": ""}, "ssh_config"),
-        ({"ssh_config": "does-not-exist"}, "existing file"),
+        ({"ssh_config_path": ""}, "ssh_config_path"),
+        ({"ssh_config_path": "does-not-exist"}, "existing file"),
         ({"cluster_name": ""}, "cluster_name"),
         ({"program": ""}, "program"),
         ({"aliases": []}, "non-empty"),
@@ -139,14 +139,14 @@ def test_generate_config_captures_output(
 def test_generate_config_rejects_invalid_arguments(
     fake_run: _FakeRun,
     tmp_path: Path,
-    ssh_config: str,
+    ssh_config_path: str,
     kwargs: dict[str, object],
     message: str,
 ) -> None:
     call = {
         "cssh_rs_binary": "cssh-rs.exe",
         "output_dir": str(tmp_path),
-        "ssh_config": ssh_config,
+        "ssh_config_path": ssh_config_path,
         "aliases": ["h1"],
         **kwargs,
     }
@@ -158,13 +158,13 @@ def test_generate_config_rejects_invalid_arguments(
 
 
 def test_generate_config_rejects_missing_output_dir(
-    fake_run: _FakeRun, tmp_path: Path, ssh_config: str
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
 ) -> None:
     with pytest.raises(ConfigGenError, match="existing directory"):
         ConfigGen().generate_config(
             "cssh-rs.exe",
             str(tmp_path / "does-not-exist"),
-            ssh_config,
+            ssh_config_path,
             ["h1"],
         )
 
@@ -172,7 +172,7 @@ def test_generate_config_rejects_missing_output_dir(
 
 
 def test_generate_config_raises_on_non_zero_exit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ssh_config: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ssh_config_path: str
 ) -> None:
     fake = _FakeRun(returncode=2, stderr="no hosts supplied", write_file=False)
     monkeypatch.setattr(config_gen.subprocess, "run", fake)
@@ -181,13 +181,13 @@ def test_generate_config_raises_on_non_zero_exit(
         ConfigGen().generate_config(
             "cssh-rs.exe",
             str(tmp_path),
-            ssh_config,
+            ssh_config_path,
             ["h1"],
         )
 
 
 def test_generate_config_raises_when_binary_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ssh_config: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ssh_config_path: str
 ) -> None:
     fake = _FakeRun(raises=FileNotFoundError("no such file"))
     monkeypatch.setattr(config_gen.subprocess, "run", fake)
@@ -196,13 +196,13 @@ def test_generate_config_raises_when_binary_missing(
         ConfigGen().generate_config(
             "missing-binary",
             str(tmp_path),
-            ssh_config,
+            ssh_config_path,
             ["h1"],
         )
 
 
 def test_generate_config_raises_when_file_not_written(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ssh_config: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ssh_config_path: str
 ) -> None:
     fake = _FakeRun(write_file=False)
     monkeypatch.setattr(config_gen.subprocess, "run", fake)
@@ -211,6 +211,6 @@ def test_generate_config_raises_when_file_not_written(
         ConfigGen().generate_config(
             "cssh-rs.exe",
             str(tmp_path),
-            ssh_config,
+            ssh_config_path,
             ["h1"],
         )

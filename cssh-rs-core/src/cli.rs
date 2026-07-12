@@ -84,8 +84,8 @@ enum Commands {
     GenerateConfig {
         /// Path to an SSH config file. When set, the launched program
         /// receives `-F <PATH>` as the first two argv entries.
-        #[clap(long = "ssh-config")]
-        ssh_config: Option<String>,
+        #[clap(long)]
+        ssh_config_path: Option<String>,
         /// Program launched to establish each SSH connection.
         /// Defaults to the `client.program` config default when unset.
         #[clap(long)]
@@ -497,13 +497,13 @@ async fn run_interactive_mode<
     }
 }
 
-/// Build the config emitted by `generate-config`. A set `ssh_config` both
+/// Build the config emitted by `generate-config`. A set `ssh_config_path` both
 /// prepends `-F <path>` to `client.arguments` and sets `client.ssh_config_path`.
 fn build_generate_config(
     hosts: Vec<String>,
     cluster: &str,
     program: Option<&str>,
-    ssh_config: Option<&str>,
+    ssh_config_path: Option<&str>,
 ) -> Config {
     let mut config = Config {
         clusters: vec![Cluster {
@@ -518,7 +518,7 @@ fn build_generate_config(
     }
 
     let mut arguments = Vec::new();
-    if let Some(path) = ssh_config {
+    if let Some(path) = ssh_config_path {
         arguments.push("-F".to_string());
         arguments.push(path.to_string());
         config.client.ssh_config_path = path.to_string();
@@ -539,14 +539,14 @@ fn run_generate_config<O: Output, C: ConfigManager>(
     hosts: Vec<String>,
     cluster: &str,
     program: Option<&str>,
-    ssh_config: Option<&str>,
+    ssh_config_path: Option<&str>,
     output_path: Option<&str>,
 ) -> Result<(), String> {
     if hosts.is_empty() {
         return Err("generate-config requires at least one host".to_string());
     }
 
-    let config = build_generate_config(hosts, cluster, program, ssh_config);
+    let config = build_generate_config(hosts, cluster, program, ssh_config_path);
     let target_path = std::path::PathBuf::from(output_path.unwrap_or(default_config_path));
     let target_str = target_path.to_string_lossy().into_owned();
 
@@ -620,7 +620,7 @@ pub async fn main<
 
     // Dispatch before load_config so a broken on-disk config cannot break generation.
     if let Some(Commands::GenerateConfig {
-        ssh_config,
+        ssh_config_path,
         program,
         cluster,
         output: output_path,
@@ -633,7 +633,7 @@ pub async fn main<
             args.hosts.to_owned(),
             cluster,
             program.as_deref(),
-            ssh_config.as_deref(),
+            ssh_config_path.as_deref(),
             output_path.as_deref(),
         ) {
             output.eprintln(&err);
