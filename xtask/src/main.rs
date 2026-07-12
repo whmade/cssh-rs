@@ -10,6 +10,7 @@ mod coverage;
 mod cross_build;
 mod inject_agent_token;
 mod readme;
+mod record_demo;
 mod release;
 mod social_preview;
 mod typography;
@@ -98,6 +99,10 @@ enum Command {
         #[arg(short, long)]
         release: bool,
     },
+    /// Record the cssh-rs demo GIF into `target/demo/cssh-rs.gif` by
+    /// building the binary, driving real console windows and capturing
+    /// the desktop. Windows only.
+    RecordDemo,
 }
 
 fn main() -> ExitCode {
@@ -152,6 +157,9 @@ fn run() -> Result<()> {
         }
         Command::CrossBuild { target, release } => {
             cross_build::run_cross_build(&cross_build::RealSystem, target, release)?;
+        }
+        Command::RecordDemo => {
+            record_demo::record_demo(&record_demo::RealSystem)?;
         }
     }
     Ok(())
