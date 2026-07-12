@@ -7,11 +7,13 @@ launching real screen capture.
 
 from __future__ import annotations
 
+import time
 import types
 
 import pytest
 
 from cssh_rs_automation import recording_listener
+from cssh_rs_automation.keystrokes import Keystrokes
 from cssh_rs_automation.recording_listener import (
     DEFAULT_BANNER_SECONDS,
     DEFAULT_OUTPUT_DIR,
@@ -24,9 +26,13 @@ class _FakeRecorder:
         self.started: list[tuple[str, str]] = []
         self.stopped = 0
         self.banners: list[tuple[str, float]] = []
+        self.overlays: list[object] = []
         self.start_error: Exception | None = None
         self.stop_error: Exception | None = None
         self.banner_error: Exception | None = None
+
+    def add_overlay(self, overlay: object) -> None:
+        self.overlays.append(overlay)
 
     def start_recording(self, name: str, output_dir: str) -> str:
         self.started.append((name, output_dir))
@@ -52,6 +58,16 @@ def _suite(name: str, *, has_tests: bool) -> types.SimpleNamespace:
 
 def _test(name: str) -> types.SimpleNamespace:
     return types.SimpleNamespace(name=name)
+
+
+def _keyword(instance: object) -> types.SimpleNamespace:
+    return types.SimpleNamespace(owner=types.SimpleNamespace(instance=instance))
+
+
+def _muted_keystrokes() -> Keystrokes:
+    keystrokes = Keystrokes()
+    keystrokes._pyautogui = lambda: types.SimpleNamespace(write=lambda *_args, **_kwargs: None)
+    return keystrokes
 
 
 @pytest.fixture
@@ -144,3 +160,56 @@ def test_banner_failure_is_swallowed(recorder: _FakeRecorder) -> None:
     listener.start_test(_test("suite"), object())
 
     assert recorder.banners == [("suite", DEFAULT_BANNER_SECONDS)]
+
+
+def test_keycast_overlay_registered_on_recorder(recorder: _FakeRecorder) -> None:
+    RecordingListener()
+
+    assert len(recorder.overlays) == 1
+
+
+@pytest.mark.usefixtures("recorder")
+def test_running_keyword_feeds_keystrokes_into_keycast() -> None:
+    listener = RecordingListener()
+    keystrokes = _muted_keystrokes()
+
+    listener.start_library_keyword(object(), _keyword(keystrokes), object())
+    keystrokes.type_text("echo hi")
+
+    assert listener._keycast.active(time.monotonic()) == ["echo hi"]
+
+
+@pytest.mark.usefixtures("recorder")
+def test_running_keyword_wires_each_keystrokes_instance_once() -> None:
+    listener = RecordingListener()
+    keystrokes = _muted_keystrokes()
+
+    listener.start_library_keyword(object(), _keyword(keystrokes), object())
+    listener.start_library_keyword(object(), _keyword(keystrokes), object())
+    keystrokes.type_text("hi")
+
+    # Wired once, so the keystroke is recorded once rather than duplicated.
+    assert listener._keycast.active(time.monotonic()) == ["hi"]
+
+
+@pytest.mark.usefixtures("recorder")
+def test_running_keyword_ignores_non_keystroke_libraries() -> None:
+    listener = RecordingListener()
+
+    listener.start_library_keyword(object(), _keyword(object()), object())
+
+    assert listener._keycast.active(time.monotonic()) == []
+
+
+@pytest.mark.usefixtures("recorder")
+def test_start_suite_resets_keycast_and_wiring() -> None:
+    listener = RecordingListener()
+    keystrokes = _muted_keystrokes()
+    listener.start_library_keyword(object(), _keyword(keystrokes), object())
+    keystrokes.type_text("stale")
+
+    listener.start_suite(_suite("next", has_tests=True), object())
+
+    # The new suite's recording starts with no leftover labels or wiring state.
+    assert listener._keycast.active(time.monotonic()) == []
+    assert listener._wired_keystrokes == set()

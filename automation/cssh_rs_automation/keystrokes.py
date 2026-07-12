@@ -9,7 +9,13 @@ readiness is polled at the Robot Framework layer with
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+LOGGER = logging.getLogger(__name__)
 
 
 class KeystrokesError(RuntimeError):
@@ -21,6 +27,29 @@ class Keystrokes:
 
     ROBOT_LIBRARY_SCOPE = "SUITE"
     ROBOT_LIBRARY_VERSION = "0.1.0"
+
+    def __init__(self) -> None:
+        self._listeners: list[Callable[[str], None]] = []
+
+    def add_key_listener(self, listener: Callable[[str], None]) -> None:
+        """Register a callback invoked with each delivered action's display label.
+
+        Labels are human-readable (``"echo hello"``, ``"Enter"``, ``"Ctrl+A"``),
+        intended for an on-screen keypress overlay.
+
+        Args:
+            listener: Callable invoked with the label of each delivered action.
+        """
+        self._listeners.append(listener)
+
+    def _notify(self, label: str) -> None:
+        """Send ``label`` to every listener; a listener error is logged, not raised."""
+        for listener in self._listeners:
+            try:
+                listener(label)
+            except Exception as exc:
+                # Broad by design: a listener must never break input delivery.
+                LOGGER.warning("key listener failed for %r: %s", label, exc)
 
     def type_text(self, text: str, interval: float = 0.0) -> None:
         """Type ``text`` as literal printable characters into the foreground window.
@@ -34,6 +63,8 @@ class Keystrokes:
         """
         if interval < 0:
             raise KeystrokesError(f"interval must be non-negative, got {interval}")
+        if text:
+            self._notify(text)
         self._pyautogui().write(text, interval=interval)
 
     def type_line(self, text: str, interval: float = 0.0) -> None:
@@ -54,6 +85,7 @@ class Keystrokes:
         """
         if not key:
             raise KeystrokesError("key must be a non-empty string")
+        self._notify(_key_label(key))
         self._pyautogui().press(key)
 
     def send_hotkey(self, *keys: str) -> None:
@@ -66,6 +98,7 @@ class Keystrokes:
             raise KeystrokesError("send_hotkey requires at least one key")
         if not all(keys):
             raise KeystrokesError("hotkey keys must be non-empty strings")
+        self._notify("+".join(_key_label(key) for key in keys))
         self._pyautogui().hotkey(*keys)
 
     @staticmethod
@@ -82,3 +115,50 @@ class Keystrokes:
 
         pyautogui.FAILSAFE = False
         return pyautogui
+
+
+_KEY_LABELS = {
+    "enter": "Enter",
+    "esc": "Esc",
+    "escape": "Esc",
+    "tab": "Tab",
+    "space": "Space",
+    "backspace": "Backspace",
+    "delete": "Del",
+    "up": "Up",
+    "down": "Down",
+    "left": "Left",
+    "right": "Right",
+    "ctrl": "Ctrl",
+    "ctrlleft": "Ctrl",
+    "ctrlright": "Ctrl",
+    "alt": "Alt",
+    "altleft": "Alt",
+    "altright": "Alt",
+    "shift": "Shift",
+    "shiftleft": "Shift",
+    "shiftright": "Shift",
+    "win": "Win",
+    "winleft": "Win",
+    "winright": "Win",
+}
+
+
+def _key_label(key: str) -> str:
+    """Return a human-readable overlay label for a pyautogui key name.
+
+    Args:
+        key: pyautogui key name, e.g. ``enter``, ``ctrl`` or ``f4``.
+
+    Returns:
+        A display label such as ``Enter``, ``F4`` or ``A``. Single characters
+        render uppercase; typed text is emitted verbatim and never routed here.
+    """
+    lowered = key.lower()
+    if lowered in _KEY_LABELS:
+        return _KEY_LABELS[lowered]
+    if lowered.startswith("f") and lowered[1:].isdigit():
+        return lowered.upper()
+    if len(key) == 1:
+        return key.upper()
+    return key.capitalize()

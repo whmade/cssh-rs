@@ -161,6 +161,75 @@ def test_recording_survives_capture_backend_error(
     assert fake_backends.writers == []
 
 
+def test_add_overlay_composited_into_captured_frames(
+    fake_backends: _Backends, tmp_path: Path
+) -> None:
+    recorder = ScreenRecorder()
+    seen_now: list[float] = []
+
+    def overlay(frame: object, now: float) -> object:
+        seen_now.append(now)
+        return np.full_like(np.asarray(frame), 7)
+
+    recorder.add_overlay(overlay)
+
+    recorder.start_recording("suite", str(tmp_path), fps=100)
+    try:
+        assert _await(lambda: bool(fake_backends.writers))
+        assert fake_backends.writers[0].first_frame.wait(3.0)
+    finally:
+        recorder.stop_recording()
+
+    writer = fake_backends.writers[0]
+    assert seen_now  # overlay ran with a monotonic timestamp
+    # The written frame is whatever the overlay returned, not the raw capture.
+    assert list(writer.frames[0][0, 0]) == [7, 7, 7]
+
+
+def test_failing_overlay_does_not_abort_recording(fake_backends: _Backends, tmp_path: Path) -> None:
+    recorder = ScreenRecorder()
+    survivors: list[float] = []
+
+    def boom(_frame: object, _now: float) -> object:
+        raise RuntimeError("overlay broke")
+
+    def survivor(frame: object, now: float) -> object:
+        survivors.append(now)
+        return np.full_like(np.asarray(frame), 9)
+
+    recorder.add_overlay(boom)
+    recorder.add_overlay(survivor)
+
+    recorder.start_recording("suite", str(tmp_path), fps=100)
+    try:
+        assert _await(lambda: bool(fake_backends.writers))
+        assert fake_backends.writers[0].first_frame.wait(3.0)
+    finally:
+        recorder.stop_recording()
+
+    writer = fake_backends.writers[0]
+    assert survivors  # the overlay after the failing one still ran
+    # Frames keep being written, carrying the surviving overlay's output.
+    assert list(writer.frames[0][0, 0]) == [9, 9, 9]
+
+
+def test_banner_overlay_passes_frame_through_without_banner() -> None:
+    frame = np.full((4, 4, 3), 5, dtype=np.uint8)
+
+    assert ScreenRecorder()._banner_overlay(frame, 0.0) is frame
+
+
+def test_banner_overlay_draws_active_banner() -> None:
+    recorder = ScreenRecorder()
+    recorder.show_banner("Hi", seconds=5.0)
+    frame = np.full((40, 80, 3), 120, dtype=np.uint8)
+
+    drawn = np.asarray(recorder._banner_overlay(frame, 0.0))
+
+    assert drawn.shape == frame.shape
+    assert not np.array_equal(drawn, frame)
+
+
 def test_draw_banner_preserves_shape_and_changes_pixels() -> None:
     frame = np.full((200, 400, 3), 120, dtype=np.uint8)
 
