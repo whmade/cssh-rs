@@ -31,10 +31,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 DAEMON_TITLE = "cssh-rs daemon"
+# cssh-rs titles clients "cssh-rs - <user>@<host>[:port]"; the daemon is
+# "cssh-rs daemon", so this substring matches every client and no daemon.
+CLIENT_TITLE_SUBSTRING = "cssh-rs -"
 DEFAULT_HOSTS = ("web01", "web02", "db01")
 DEFAULT_CLUSTER = "demo"
 DEFAULT_FPS = 10
 DEFAULT_CHAPTER_SECONDS = 2.5
+# The broadcast command label is stamped when typing starts and must stay
+# legible through the whole type-out (command length x typing interval) and
+# alongside the Enter that follows, so the fade window comfortably exceeds it.
+DEMO_KEYCAST_FADE_SECONDS = 6.0
 
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _WINDOW_TIMEOUT_SECONDS = 20.0
@@ -80,9 +87,11 @@ class DemoRecorder:
     ) -> None:
         """Bring up the cluster and start recording with the keycast overlay.
 
-        Starts the sshd fixture, generates the config into the binary's own
-        directory, wires the keystroke driver to the keycast overlay, launches
-        cssh-rs, and begins recording the desktop.
+        Starts the sshd fixture in shell mode (each session lands in a real
+        interactive shell on localhost, so the clip shows a live prompt),
+        generates the config into the binary's own directory, wires the
+        keystroke driver to the keycast overlay, then begins recording before
+        launching cssh-rs so the clip captures its windows arranging.
 
         Args:
             binary: Path to the cssh-rs executable to drive.
@@ -97,7 +106,7 @@ class DemoRecorder:
             raise DemoError(f"cssh-rs binary not found: {binary_path}")
         self._hosts = tuple(hosts)
 
-        info = self._sshd.start_sshd(self._hosts)
+        info = self._sshd.start_sshd(self._hosts, shell=True)
         self._config_path = self._config_gen.generate_config(
             str(binary_path),
             str(binary_path.resolve().parent),
@@ -106,25 +115,32 @@ class DemoRecorder:
             cluster_name=DEFAULT_CLUSTER,
         )
 
-        keycast = Keycast()
+        keycast = Keycast(fade_seconds=DEMO_KEYCAST_FADE_SECONDS)
         self._recorder.add_overlay(KeycastOverlay(keycast))
         self._keystrokes.add_key_listener(keycast.record)
 
+        # Record before launching so the clip captures cssh-rs opening and
+        # arranging its console windows.
+        self._recorder.start_recording("cssh-rs", output_dir, fps=int(fps))
         subprocess.Popen([str(binary_path), DEFAULT_CLUSTER])
         self._launched = True
-        self._recorder.start_recording("cssh-rs", output_dir, fps=int(fps))
 
     def wait_for_hosts(self) -> None:
-        """Wait until every demo host has an established ssh session, else raise ``DemoError``."""
+        """Wait until every demo host has an open client window, else raise ``DemoError``.
+
+        Shell-mode sessions write no markers, so readiness is the client
+        console windows coming up; the chapter hold that follows gives their
+        prompts time to render before the broadcast.
+        """
         expected = len(self._hosts)
         deadline = time.monotonic() + _CONNECT_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
-            if self._sshd.count_connected_markers() >= expected:
+            if self._focus.count_windows(CLIENT_TITLE_SUBSTRING) >= expected:
                 return
             time.sleep(_POLL_INTERVAL_SECONDS)
         raise DemoError(
             f"timed out after {_CONNECT_TIMEOUT_SECONDS}s waiting for "
-            f"{expected} ssh sessions to connect"
+            f"{expected} client windows to open"
         )
 
     def show_chapter(self, text: str, seconds: float = DEFAULT_CHAPTER_SECONDS) -> None:

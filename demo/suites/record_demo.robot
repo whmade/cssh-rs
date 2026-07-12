@@ -24,6 +24,7 @@ ${FPS}              ${10}
 Record The Broadcast Demo
     Start Demo    ${BINARY}    ${OUTPUT_DIR}    ${HOSTS}    fps=${FPS}
     Wait For Hosts
+    Hold    3
 
     Show Chapter    cssh-rs: type once, run everywhere
     Broadcast    echo hello from the cssh-rs cluster

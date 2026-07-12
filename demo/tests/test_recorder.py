@@ -61,10 +61,14 @@ def test_start_demo_wires_overlay_and_launches(
     recorder, mocks = _recorder()
     mocks["sshd"].start_sshd.return_value = {"ssh_config": "cfg"}
     mocks["config_gen"].generate_config.return_value = "config.toml"
+    order: list[str] = []
+    mocks["recorder"].start_recording.side_effect = lambda *_a, **_k: order.append("record")
+    popen.side_effect = lambda *_a, **_k: order.append("launch")
 
     recorder.start_demo(str(binary), "out", hosts=["h1", "h2"], fps="10")
 
-    mocks["sshd"].start_sshd.assert_called_once_with(("h1", "h2"))
+    # Shell mode: sessions land in a real interactive shell, not a marker writer.
+    mocks["sshd"].start_sshd.assert_called_once_with(("h1", "h2"), shell=True)
     mocks["config_gen"].generate_config.assert_called_once()
     assert mocks["config_gen"].generate_config.call_args.kwargs["cluster_name"] == DEFAULT_CLUSTER
     # The keycast overlay is registered and fed by the keystroke listener.
@@ -72,16 +76,18 @@ def test_start_demo_wires_overlay_and_launches(
     mocks["keystrokes"].add_key_listener.assert_called_once()
     popen.assert_called_once_with([str(binary), DEFAULT_CLUSTER])
     mocks["recorder"].start_recording.assert_called_once_with("cssh-rs", "out", fps=10)
+    # Recording starts before the launch so the clip captures the windows arranging.
+    assert order == ["record", "launch"]
 
 
-def test_wait_for_hosts_returns_once_all_connected() -> None:
+def test_wait_for_hosts_returns_once_all_windows_open() -> None:
     recorder, mocks = _recorder()
     recorder._hosts = ("h1", "h2")
-    mocks["sshd"].count_connected_markers.return_value = 2
+    mocks["focus"].count_windows.return_value = 2
 
     recorder.wait_for_hosts()
 
-    mocks["sshd"].count_connected_markers.assert_called()
+    mocks["focus"].count_windows.assert_called()
 
 
 def test_show_chapter_shows_banner_and_holds(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -26,6 +26,29 @@ def test_build_forced_command_invokes_marker_module() -> None:
     )
 
 
+def test_authorized_keys_line_marker_mode_pins_forced_command() -> None:
+    line = sshd_fixture._authorized_keys_line(
+        "ssh-ed25519 AAAA h1", Path("/tmp/markers/h1.log"), shell=False
+    )
+
+    assert line.startswith('command="')
+    assert "_marker_writer" in line
+    assert line.endswith(" ssh-ed25519 AAAA h1\n")
+    assert "no-port-forwarding" in line
+
+
+def test_authorized_keys_line_shell_mode_drops_forced_command() -> None:
+    line = sshd_fixture._authorized_keys_line(
+        "ssh-ed25519 AAAA h1", Path("/tmp/markers/h1.log"), shell=True
+    )
+
+    assert "command=" not in line
+    assert "_marker_writer" not in line
+    assert line == (
+        "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc ssh-ed25519 AAAA h1\n"
+    )
+
+
 def test_as_forward_slash_normalizes_separators() -> None:
     assert sshd_fixture._as_forward_slash(Path("a/b/c")) == "a/b/c"
     assert sshd_fixture._as_forward_slash(Path("plain")) == "plain"
