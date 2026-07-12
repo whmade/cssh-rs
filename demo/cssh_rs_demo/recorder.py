@@ -37,16 +37,18 @@ CLIENT_TITLE_SUBSTRING = "cssh-rs -"
 DEFAULT_HOSTS = ("web01", "web02", "db01")
 DEFAULT_CLUSTER = "demo"
 DEFAULT_FPS = 10
-DEFAULT_CHAPTER_SECONDS = 2.5
 # The broadcast command label is stamped when typing starts and must stay
-# legible through the whole type-out (command length x typing interval) and
-# alongside the Enter that follows, so the fade window comfortably exceeds it.
-DEMO_KEYCAST_FADE_SECONDS = 6.0
+# legible through the whole type-out (command length x _TYPING_INTERVAL_SECONDS,
+# ~9s for the demo command) and alongside the Enter that follows, so the fade
+# window comfortably exceeds it.
+DEMO_KEYCAST_FADE_SECONDS = 12.0
 
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _WINDOW_TIMEOUT_SECONDS = 20.0
 _POLL_INTERVAL_SECONDS = 0.5
-_TYPING_INTERVAL_SECONDS = 0.07
+# Simulate deliberate typing: pyautogui waits this long between keypresses so
+# the broadcast command reads as typed by a person rather than pasted at once.
+_TYPING_INTERVAL_SECONDS = 0.25
 
 
 class DemoError(RuntimeError):
@@ -129,8 +131,8 @@ class DemoRecorder:
         """Wait until every demo host has an open client window, else raise ``DemoError``.
 
         Shell-mode sessions write no markers, so readiness is the client
-        console windows coming up; the chapter hold that follows gives their
-        prompts time to render before the broadcast.
+        console windows coming up; the hold that follows gives their prompts
+        time to render before the broadcast.
         """
         expected = len(self._hosts)
         deadline = time.monotonic() + _CONNECT_TIMEOUT_SECONDS
@@ -142,17 +144,6 @@ class DemoRecorder:
             f"timed out after {_CONNECT_TIMEOUT_SECONDS}s waiting for "
             f"{expected} client windows to open"
         )
-
-    def show_chapter(self, text: str, seconds: float = DEFAULT_CHAPTER_SECONDS) -> None:
-        """Show a chapter title card and hold on it for its duration.
-
-        Args:
-            text: Caption drawn centered over the recording.
-            seconds: How long the card stays on screen, in seconds.
-        """
-        seconds = float(seconds)
-        self._recorder.show_banner(text, seconds)
-        time.sleep(seconds)
 
     def focus_daemon(self) -> None:
         """Bring the cssh-rs daemon window to the foreground."""

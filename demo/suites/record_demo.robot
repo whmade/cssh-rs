@@ -26,7 +26,6 @@ Record The Broadcast Demo
     Wait For Hosts
     Hold    3
 
-    Show Chapter    cssh-rs: type once, run everywhere
     Broadcast    echo hello from the cssh-rs cluster
     Hold    3
 

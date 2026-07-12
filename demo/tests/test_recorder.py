@@ -90,17 +90,6 @@ def test_wait_for_hosts_returns_once_all_windows_open() -> None:
     mocks["focus"].count_windows.assert_called()
 
 
-def test_show_chapter_shows_banner_and_holds(monkeypatch: pytest.MonkeyPatch) -> None:
-    slept: list[float] = []
-    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", slept.append)
-    recorder, mocks = _recorder()
-
-    recorder.show_chapter("Chapter", seconds=1.5)
-
-    mocks["recorder"].show_banner.assert_called_once_with("Chapter", 1.5)
-    assert slept == [1.5]
-
-
 def test_broadcast_focuses_daemon_then_types_line() -> None:
     recorder, mocks = _recorder()
 
