@@ -229,14 +229,13 @@ pub trait WindowsApi: Send + Sync {
 
     /// Interrupt every process attached to the caller's console.
     ///
-    /// Raises `CTRL_BREAK_EVENT` for process group 0, so a Ctrl+C or Ctrl+Break
-    /// relayed from the daemon interrupts the SSH child. `CTRL_BREAK_EVENT` is
-    /// used rather than `CTRL_C_EVENT` because a `CTRL_C_EVENT` sent via
-    /// `GenerateConsoleCtrlEvent` is silently dropped for any process with the
-    /// ignore-Ctrl+C attribute set (e.g. `ssh.exe` with no pty), whereas
-    /// `CTRL_BREAK_EVENT` always invokes the target's handler. The caller
-    /// shields itself with the handler from [`Self::install_console_ctrl_handler`].
-    /// <https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler>
+    /// Sends `CTRL_C_EVENT` to process group 0 so a Ctrl+C relayed from the
+    /// daemon reaches the child exactly as a focused Ctrl+C would.
+    /// `CTRL_BREAK_EVENT` is not interchangeable: many programs treat only
+    /// Ctrl+C as the interrupt (e.g. `ping` stops on Ctrl+C but merely prints
+    /// statistics on Ctrl+Break). The caller shields itself with the handler
+    /// from [`Self::install_console_ctrl_handler`], since group 0 signals it too.
+    /// <https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent>
     ///
     /// # Returns
     ///
@@ -741,34 +740,9 @@ impl WindowsApi for DefaultWindowsApi {
     }
 
     fn interrupt_console_process_group(&self) -> windows::core::Result<()> {
-        // TEMP diagnostic: dump the processes attached to this console so we can
-        // confirm the child shares it, and let CSSH_CTRLC_SIGNAL=ctrl_c switch the
-        // control event so CTRL_C_EVENT and CTRL_BREAK_EVENT can be A/B compared.
-        let mut pids = [0u32; 16];
-        let count = unsafe { GetConsoleProcessList(&mut pids) } as usize;
-        log::info!(
-            "[ctrlc-debug] self_pid={} console process list: count={} pids={:?}",
-            std::process::id(),
-            count,
-            &pids[..count.min(pids.len())]
-        );
-        let use_ctrl_c = matches!(std::env::var("CSSH_CTRLC_SIGNAL").as_deref(), Ok("ctrl_c"));
-        let event = if use_ctrl_c {
-            CTRL_C_EVENT
-        } else {
-            CTRL_BREAK_EVENT
+        return unsafe {
+            windows::Win32::System::Console::GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
         };
-        let result = unsafe { windows::Win32::System::Console::GenerateConsoleCtrlEvent(event, 0) };
-        log::info!(
-            "[ctrlc-debug] GenerateConsoleCtrlEvent(event={}, group=0) -> {:?}",
-            if use_ctrl_c {
-                "CTRL_C_EVENT"
-            } else {
-                "CTRL_BREAK_EVENT"
-            },
-            result
-        );
-        return result;
     }
 
     fn install_console_ctrl_handler(&self) -> windows::core::Result<()> {

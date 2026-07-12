@@ -4,7 +4,7 @@
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 #![warn(missing_docs)]
 
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
@@ -280,27 +280,11 @@ fn is_console_signal_key(key_event: &KEY_EVENT_RECORD) -> bool {
 fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
     let handle = match api.get_std_handle(STD_INPUT_HANDLE) {
         Ok(handle) => handle,
-        Err(err) => {
-            warn!(
-                "[ctrlc-debug] get_std_handle(STD_INPUT_HANDLE) failed: {}",
-                err
-            );
-            return false;
-        }
+        Err(_) => return false,
     };
     return match api.get_console_mode(handle) {
-        Ok(mode) => {
-            let enabled = mode.0 & ENABLE_PROCESSED_INPUT.0 != 0;
-            debug!(
-                "[ctrlc-debug] console input mode=0x{:x} ENABLE_PROCESSED_INPUT={}",
-                mode.0, enabled
-            );
-            enabled
-        }
-        Err(err) => {
-            warn!("[ctrlc-debug] get_console_mode failed: {}", err);
-            false
-        }
+        Ok(mode) => mode.0 & ENABLE_PROCESSED_INPUT.0 != 0,
+        Err(_) => false,
     };
 }
 
@@ -311,13 +295,8 @@ fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
 /// * `api` - The Windows API implementation to use.
 fn signal_console_ctrl_event(api: &dyn WindowsApi) {
     // Group-0 also signals this client, but the startup handler shields it.
-    match api.interrupt_console_process_group() {
-        Ok(()) => info!("[ctrlc-debug] interrupt_console_process_group returned ok"),
-        Err(err) => warn!(
-            "[ctrlc-debug] interrupt_console_process_group failed: {} (last_error=0x{:x})",
-            err,
-            api.get_last_error()
-        ),
+    if let Err(err) = api.interrupt_console_process_group() {
+        warn!("Failed to relay console control event: {}", err);
     }
 }
 
@@ -334,25 +313,13 @@ fn signal_console_ctrl_event(api: &dyn WindowsApi) {
 /// * `input_record` - The [INPUT_RECORD_0].`KeyEvent` record to replay.
 fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     let key_event = unsafe { input_record.KeyEvent };
-    let is_signal = is_console_signal_key(&key_event);
-    debug!(
-        "[ctrlc-debug] replay record vk=0x{:x} ctrl=0x{:x} down={} signal_key={}",
-        key_event.wVirtualKeyCode,
-        key_event.dwControlKeyState,
-        key_event.bKeyDown.as_bool(),
-        is_signal
-    );
-    if is_signal && processed_input_enabled(api) {
+    if is_console_signal_key(&key_event) && processed_input_enabled(api) {
         // Signal on key-down only; drop both records so no literal Ctrl+C reaches the child.
         if key_event.bKeyDown.as_bool() {
-            debug!("[ctrlc-debug] raising console control signal for key-down and dropping record");
             signal_console_ctrl_event(api);
-        } else {
-            debug!("[ctrlc-debug] dropping key-up record for signal key");
         }
         return;
     }
-    debug!("[ctrlc-debug] writing record verbatim to console input buffer");
     write_console_input(api, input_record);
 }
 
@@ -458,11 +425,6 @@ async fn launch_ssh_process(
                 config.program, args
             )
         });
-    info!(
-        "[ctrlc-debug] launched child pid={:?} program={}",
-        child.id(),
-        config.program
-    );
     return child;
 }
 
@@ -508,13 +470,8 @@ impl ChildProcess for Child {
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
     // Interrupt the whole group so even a child that ignores Ctrl+C exits; the
     // startup handler shields this client so it survives to force the kill.
-    debug!("[ctrlc-debug] shutdown_child interrupting console process group");
     if let Err(err) = api.interrupt_console_process_group() {
-        warn!(
-            "[ctrlc-debug] shutdown_child interrupt failed: {} (last_error=0x{:x})",
-            err,
-            api.get_last_error()
-        );
+        warn!("Failed to interrupt console process group: {}", err);
     }
     match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
         Ok(Ok(exit_status)) => {
@@ -987,14 +944,8 @@ pub async fn main(
     config: &ClientConfig,
 ) {
     // Shield this client from relayed CTRL+C/CTRL+Break so only the SSH child reacts.
-    match api.install_console_ctrl_handler() {
-        Ok(()) => {
-            info!("[ctrlc-debug] installed permanent console control handler (client shielded)")
-        }
-        Err(err) => warn!(
-            "[ctrlc-debug] failed to install console control handler: {}",
-            err
-        ),
+    if let Err(err) = api.install_console_ctrl_handler() {
+        warn!("Failed to install console control handler: {}", err);
     }
 
     let original_console_color = capture_original_console_color(api);

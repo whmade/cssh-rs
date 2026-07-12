@@ -119,6 +119,9 @@ pub struct ClientConfig {
     /// `'C:\Users\<username>\.ssh\config'`
     pub ssh_config_path: String,
     /// Name of the program used to establish the SSH connection.
+    ///
+    /// Note: a relayed Ctrl+C interrupts a running command but cannot reprint
+    /// an idle `cmd.exe` prompt (that needs a real focused keypress).
     /// # Example
     ///
     /// `'ssh'`
