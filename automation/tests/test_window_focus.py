@@ -169,6 +169,23 @@ def test_focus_window_times_out_without_a_match(monkeypatch: pytest.MonkeyPatch)
         WindowFocus().focus_window("cssh-rs daemon", timeout=0.0)
 
 
+def test_count_windows_returns_match_count_via_default_contains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_matches(
+        monkeypatch,
+        [_FakeWindow("cssh-rs - tester@h1"), _FakeWindow("cssh-rs - tester@h2")],
+    )
+
+    assert WindowFocus().count_windows("cssh-rs -") == 2
+    assert calls[0]["condition"] == pywinctl.Re.CONTAINS
+
+
+def test_count_windows_rejects_unknown_match_mode() -> None:
+    with pytest.raises(WindowFocusError, match="match_mode must be"):
+        WindowFocus().count_windows("cssh-rs -", match_mode="fuzzy")
+
+
 def test_get_active_window_title_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pywinctl, "getActiveWindowTitle", lambda: "cssh-rs daemon")
 

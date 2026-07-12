@@ -145,6 +145,30 @@ class WindowFocus:
                 raise WindowFocusError(f"window {title!r} still present {timeout}s after close")
             time.sleep(poll_interval)
 
+    def count_windows(self, title: str, match_mode: str = "substring") -> int:
+        """Return how many top-level windows match ``title``.
+
+        Unlike ``focus_window``, multiple matches are expected: callers poll this
+        until all N client windows of a cluster have come up.
+
+        Args:
+            title: Window title to match.
+            match_mode: ``"exact"`` (full title) or ``"substring"`` (contains).
+
+        Returns:
+            The number of matching top-level windows.
+        """
+        if match_mode not in _VALID_MATCH_MODES:
+            raise WindowFocusError(
+                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+            )
+
+        # Imported lazily for the same reason as focus_window; see its comment.
+        import pywinctl
+
+        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
+        return len(pywinctl.getWindowsWithTitle(title, condition=condition))
+
     def get_active_window_title(self) -> str:
         """Return the foreground window's title, or ``""`` when none is active."""
         import pywinctl
