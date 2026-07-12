@@ -31,7 +31,7 @@ class ConfigGen:
         self,
         cssh_rs_binary: str,
         output_dir: str,
-        ssh_config: str,
+        ssh_config_path: str,
         aliases: list[str] | tuple[str, ...],
         cluster_name: str = "e2e",
         program: str = "ssh",
@@ -43,10 +43,10 @@ class ConfigGen:
             output_dir: Existing directory the config is written into. Only used
                 to build the ``--output`` path; pass the directory holding the
                 executable when you want cssh-rs to load the config on startup.
-            ssh_config: OpenSSH client config the program runs against; becomes
-                ``ssh -F <ssh_config>``. Must be an existing file.
+            ssh_config_path: OpenSSH client config the program runs against; becomes
+                ``ssh -F <ssh_config_path>``. Must be an existing file.
             aliases: Host aliases that form the cluster's host list; each must
-                resolve to a ``Host`` block in ``ssh_config``.
+                resolve to a ``Host`` block in ``ssh_config_path``.
             cluster_name: Name of the generated cluster.
             program: SSH executable the config launches.
 
@@ -56,7 +56,7 @@ class ConfigGen:
         host_list = _validate(
             cssh_rs_binary=cssh_rs_binary,
             output_dir=output_dir,
-            ssh_config=ssh_config,
+            ssh_config_path=ssh_config_path,
             cluster_name=cluster_name,
             program=program,
             aliases=aliases,
@@ -65,8 +65,8 @@ class ConfigGen:
         argv = [
             cssh_rs_binary,
             GENERATE_CONFIG_SUBCOMMAND,
-            "--ssh-config",
-            ssh_config,
+            "--ssh-config-path",
+            ssh_config_path,
             "--program",
             program,
             "--cluster",
@@ -96,7 +96,7 @@ def _validate(
     *,
     cssh_rs_binary: str,
     output_dir: str,
-    ssh_config: str,
+    ssh_config_path: str,
     cluster_name: str,
     program: str,
     aliases: list[str] | tuple[str, ...],
@@ -104,10 +104,10 @@ def _validate(
     """Validate ``generate_config`` arguments; return the aliases as a list."""
     if not cssh_rs_binary:
         raise ConfigGenError("cssh_rs_binary must be a non-empty path")
-    if not ssh_config:
-        raise ConfigGenError("ssh_config must be a non-empty path")
-    if not Path(ssh_config).is_file():
-        raise ConfigGenError(f"ssh_config is not an existing file: {ssh_config}")
+    if not ssh_config_path:
+        raise ConfigGenError("ssh_config_path must be a non-empty path")
+    if not Path(ssh_config_path).is_file():
+        raise ConfigGenError(f"ssh_config_path is not an existing file: {ssh_config_path}")
     if not cluster_name:
         raise ConfigGenError("cluster_name must be a non-empty string")
     if not program:

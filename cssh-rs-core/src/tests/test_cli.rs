@@ -114,7 +114,7 @@ mod cli_args_test {
         let args = Args::parse_from(vec![
             "executable_name",
             "generate-config",
-            "--ssh-config",
+            "--ssh-config-path",
             "/tmp/c",
             "--cluster",
             "e2e",
@@ -128,7 +128,7 @@ mod cli_args_test {
         assert_eq!(
             args.command,
             Some(Commands::GenerateConfig {
-                ssh_config: Some("/tmp/c".to_string()),
+                ssh_config_path: Some("/tmp/c".to_string()),
                 program: Some("ssh.exe".to_string()),
                 cluster: "e2e".to_string(),
                 output: Some("/tmp/out.toml".to_string()),
@@ -143,7 +143,7 @@ mod cli_args_test {
         assert_eq!(
             args.command,
             Some(Commands::GenerateConfig {
-                ssh_config: None,
+                ssh_config_path: None,
                 program: None,
                 cluster: "default".to_string(),
                 output: None,
@@ -2046,7 +2046,7 @@ mod generate_config_test {
     const PLACEHOLDER: &str = "{{USERNAME_AT_HOST}}";
 
     #[test]
-    fn test_build_generate_config_without_ssh_config() {
+    fn test_build_generate_config_without_ssh_config_path() {
         let config = build_generate_config(
             vec!["host1".to_string(), "host2".to_string()],
             "default",
@@ -2063,7 +2063,7 @@ mod generate_config_test {
     }
 
     #[test]
-    fn test_build_generate_config_with_ssh_config() {
+    fn test_build_generate_config_with_ssh_config_path() {
         let config = build_generate_config(
             vec!["host1".to_string()],
             "e2e",
