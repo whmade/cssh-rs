@@ -26,6 +26,20 @@ def test_build_forced_command_invokes_marker_module() -> None:
     )
 
 
+def test_authorized_keys_line_toggles_forced_command_by_shell() -> None:
+    pubkey = "ssh-ed25519 AAAA h1"
+    marker = Path("/tmp/markers/h1.log")
+    options = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
+
+    marker_line = sshd_fixture._authorized_keys_line(pubkey, marker, shell=False)
+    shell_line = sshd_fixture._authorized_keys_line(pubkey, marker, shell=True)
+
+    assert marker_line.startswith('command="')
+    assert "_marker_writer" in marker_line
+    assert marker_line.endswith(f",{options} {pubkey}\n")
+    assert shell_line == f"{options} {pubkey}\n"
+
+
 def test_as_forward_slash_normalizes_separators() -> None:
     assert sshd_fixture._as_forward_slash(Path("a/b/c")) == "a/b/c"
     assert sshd_fixture._as_forward_slash(Path("plain")) == "plain"
