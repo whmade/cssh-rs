@@ -32,11 +32,10 @@ class Keystrokes:
         self._listeners: list[Callable[[str], None]] = []
 
     def add_key_listener(self, listener: Callable[[str], None]) -> None:
-        """Register a callback notified of each key action as a display label.
+        """Register a callback invoked with each delivered action's display label.
 
-        Labels are human-readable (``"echo hello"``, ``"Enter"``, ``"Ctrl+A"``)
-        and intended for an on-screen keypress overlay. Default is no
-        listeners, so callers that never register one see no change.
+        Labels are human-readable (``"echo hello"``, ``"Enter"``, ``"Ctrl+A"``),
+        intended for an on-screen keypress overlay.
 
         Args:
             listener: Callable invoked with the label of each delivered action.
@@ -152,14 +151,13 @@ def _key_label(key: str) -> str:
         key: pyautogui key name, e.g. ``enter``, ``ctrl`` or ``f4``.
 
     Returns:
-        A display label such as ``Enter``, ``Ctrl``, ``F4`` or ``A``. This
-        formats named keys and chord members only (typed text is emitted
-        verbatim), so single letters render uppercase as on a keyboard.
+        A display label such as ``Enter``, ``F4`` or ``A``. Single characters
+        render uppercase; typed text is emitted verbatim and never routed here.
     """
     lowered = key.lower()
     if lowered in _KEY_LABELS:
         return _KEY_LABELS[lowered]
-    if len(lowered) >= 2 and lowered[0] == "f" and lowered[1:].isdigit():
+    if lowered.startswith("f") and lowered[1:].isdigit():
         return lowered.upper()
     if len(key) == 1:
         return key.upper()

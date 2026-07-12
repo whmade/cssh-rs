@@ -20,8 +20,7 @@ if TYPE_CHECKING:
     from PIL.ImageDraw import ImageDraw
     from PIL.ImageFont import FreeTypeFont, ImageFont
 
-    # A per-frame overlay: takes the RGB frame and the monotonic capture time,
-    # returns the (possibly modified) frame.
+    # Per-frame overlay: (RGB frame, monotonic capture time) -> frame to write.
     Overlay = Callable[[object, float], object]
 
 LOGGER = logging.getLogger(__name__)
@@ -49,8 +48,7 @@ class ScreenRecorder:
         self._banner_lock = threading.Lock()
         self._banner_text: str | None = None
         self._banner_until = 0.0
-        # Overlays run in registration order on every captured frame; the
-        # built-in banner is first so consumer overlays composite on top of it.
+        # Applied in order per frame; banner first so overlays composite over it.
         self._overlays: list[Overlay] = [self._banner_overlay]
 
     def start_recording(self, name: str, output_dir: str, fps: int = DEFAULT_FPS) -> str:
@@ -134,13 +132,11 @@ class ScreenRecorder:
             self._banner_until = time.monotonic() + seconds
 
     def add_overlay(self, overlay: Overlay) -> None:
-        """Register a per-frame overlay applied to every captured frame.
+        """Register a per-frame overlay, run after the built-in banner.
 
         Args:
-            overlay: Callable ``(frame, now) -> frame`` invoked for each frame
-                with the RGB uint8 array and the monotonic capture time; it
-                returns the frame to write. Overlays run in registration order,
-                after the built-in banner.
+            overlay: Callable ``(frame, now) -> frame`` given the RGB uint8 frame
+                and its monotonic capture time; returns the frame to write.
         """
         self._overlays.append(overlay)
 

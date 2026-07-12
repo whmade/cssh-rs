@@ -1,10 +1,9 @@
 """On-screen keypress overlay for screen recordings.
 
-A :class:`Keycast` buffers the labels the keystroke driver emits (via its key
-listener); the paired :class:`KeycastOverlay` is registered as a screen-recorder
-per-frame overlay and renders the still-visible labels in a corner, carnac
-style. Both sides share ``time.monotonic``, the clock the recorder stamps
-frames with, so labels fade in step with the video.
+A :class:`Keycast` buffers the labels the keystroke driver emits; the paired
+:class:`KeycastOverlay` draws the still-visible ones in a corner as a
+screen-recorder per-frame overlay. Both use ``time.monotonic``, the clock the
+recorder stamps frames with, so labels fade in step with the video.
 """
 
 from __future__ import annotations
@@ -27,10 +26,9 @@ class Keycast:
     def __init__(
         self, fade_seconds: float = DEFAULT_FADE_SECONDS, max_labels: int = DEFAULT_MAX_LABELS
     ) -> None:
-        self._fade = float(fade_seconds)
-        self._max = int(max_labels)
+        self._fade_seconds = fade_seconds
         self._lock = threading.Lock()
-        self._events: deque[tuple[str, float]] = deque(maxlen=self._max)
+        self._events: deque[tuple[str, float]] = deque(maxlen=max_labels)
 
     def record(self, label: str) -> None:
         """Key-listener callback: stamp ``label`` with the current monotonic time.
@@ -51,7 +49,7 @@ class Keycast:
             The unexpired labels, oldest first.
         """
         with self._lock:
-            return [label for label, stamped in self._events if now - stamped <= self._fade]
+            return [label for label, stamped in self._events if now - stamped <= self._fade_seconds]
 
 
 class KeycastOverlay:
@@ -81,7 +79,7 @@ def _draw_keycast(frame: object, labels: list[str]) -> object:
     import numpy as np
     from PIL import Image, ImageDraw
 
-    image = Image.fromarray(np.asarray(frame)).convert("RGB")
+    image = Image.fromarray(np.asarray(frame))
     width, height = image.size
     font = _keycast_font(max(12, int(height / 28)))
     text = "   ".join(labels)
@@ -102,7 +100,7 @@ def _draw_keycast(frame: object, labels: list[str]) -> object:
     )
     # Offset by the bbox origin so glyphs with negative bearings sit inside the pill.
     draw.text((x0 + pad - left, y0 + pad - top), text, fill=(255, 255, 255, 255), font=font)
-    return np.asarray(image.convert("RGB"))
+    return np.asarray(image)
 
 
 def _keycast_font(size: int) -> FreeTypeFont | ImageFont:
