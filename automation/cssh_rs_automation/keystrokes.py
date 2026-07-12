@@ -64,11 +64,11 @@ class Keystrokes:
     def _notify_label(
         self, label: str | None | _Default, *, default: str, default_kind: str
     ) -> None:
-        """Route ``label`` to the overlay: ``DEFAULT_LABEL`` shows ``default`` (when
-        non-empty) as ``default_kind``, ``None`` suppresses it, any string shows that
-        token as a discrete key.
+        """Route ``label`` to the overlay: ``DEFAULT_LABEL`` shows ``default`` as
+        ``default_kind``, ``None`` suppresses it, any string shows that token as a
+        discrete key.
         """
-        if isinstance(label, _Default) and default:
+        if isinstance(label, _Default):
             self._notify(default, default_kind)
             return
         if isinstance(label, str):
@@ -92,6 +92,8 @@ class Keystrokes:
                 as typed characters; ``None`` suppresses the overlay; any string
                 shows that token as a discrete action instead (e.g. ``"PASTE"``).
         """
+        if not text:
+            raise KeystrokesError("text must be a non-empty string")
         if interval < 0:
             raise KeystrokesError(f"interval must be non-negative, got {interval}")
         self._notify_label(label, default=text, default_kind="text")

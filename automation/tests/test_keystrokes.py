@@ -172,16 +172,11 @@ def test_key_listener_reports_line_then_enter(fake_pyautogui: _FakePyAutoGui) ->
     assert events == [("cmd", "text"), ("Enter", "key")]
 
 
-def test_key_listener_skips_empty_text(fake_pyautogui: _FakePyAutoGui) -> None:
-    events: list[tuple[str, str]] = []
-    keys = Keystrokes()
-    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
+def test_type_text_rejects_empty_text(fake_pyautogui: _FakePyAutoGui) -> None:
+    with pytest.raises(KeystrokesError, match="non-empty"):
+        Keystrokes().type_text("")
 
-    keys.type_text("")
-
-    assert events == []
-    # The empty write is still forwarded; only the notification is skipped.
-    assert fake_pyautogui.calls == [("write", ("",), {"interval": 0.0})]
+    assert fake_pyautogui.calls == []
 
 
 def test_key_listener_formats_named_keys_and_hotkeys(
