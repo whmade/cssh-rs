@@ -118,9 +118,14 @@ impl DemoSystem for RealSystem {
             .join("demo")
             .join("suites")
             .join("record_demo.robot");
+        // Invoke robot via `python -m` so it resolves through the same
+        // interpreter that ran the installs above; a bare `robot` requires the
+        // Python Scripts dir on PATH, which is not guaranteed (e.g. PyManager
+        // installs place console scripts in a dir that is not added to PATH).
         // robot splits --variable on the first ':', so Windows drive-letter
         // paths (C:\...) survive intact as the value.
-        let status = std::process::Command::new("robot")
+        let status = std::process::Command::new("python")
+            .args(["-m", "robot"])
             .arg("--variable")
             .arg(format!("BINARY:{}", binary.display()))
             .arg("--variable")
@@ -131,7 +136,7 @@ impl DemoSystem for RealSystem {
             .arg(output_dir)
             .arg(&suite)
             .status()
-            .context("failed to spawn `robot`; is the demo package installed?")?;
+            .context("failed to spawn `python -m robot`; is Python on PATH and the demo package installed?")?;
         if !status.success() {
             bail!("demo recorder (robot) exited with status {status}");
         }
