@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+from cssh_rs_automation.sshd_fixture import ShellMode
 
 from cssh_rs_demo.recorder import DEFAULT_CLUSTER, DemoError, DemoRecorder
 
@@ -66,7 +67,7 @@ def test_start_demo_wires_overlay_and_launches(
     recorder.start_demo(str(binary), "out", hosts=["h1", "h2"], fps="10")
 
     # Shell mode: sessions land in a real interactive shell, not a marker writer.
-    mocks["sshd"].start_sshd.assert_called_once_with(("h1", "h2"), shell=True)
+    mocks["sshd"].start_sshd.assert_called_once_with(("h1", "h2"), mode=ShellMode())
     mocks["config_gen"].generate_config.assert_called_once()
     assert mocks["config_gen"].generate_config.call_args.kwargs["cluster_name"] == DEFAULT_CLUSTER
     mocks["recorder"].add_overlay.assert_called_once()
