@@ -120,6 +120,8 @@ mod cli_args_test {
             "e2e",
             "--program",
             "ssh.exe",
+            "--arguments=-o",
+            "--arguments=User=deploy",
             "--output",
             "/tmp/out.toml",
             "host1",
@@ -130,6 +132,7 @@ mod cli_args_test {
             Some(Commands::GenerateConfig {
                 ssh_config_path: Some("/tmp/c".to_string()),
                 program: Some("ssh.exe".to_string()),
+                arguments: vec!["-o".to_string(), "User=deploy".to_string()],
                 cluster: "e2e".to_string(),
                 output: Some("/tmp/out.toml".to_string()),
             })
@@ -145,6 +148,7 @@ mod cli_args_test {
             Some(Commands::GenerateConfig {
                 ssh_config_path: None,
                 program: None,
+                arguments: vec![],
                 cluster: "default".to_string(),
                 output: None,
             })
@@ -2052,6 +2056,7 @@ mod generate_config_test {
             "default",
             Some("ssh"),
             None,
+            vec![],
         );
 
         assert_eq!(config.client.arguments, vec![PLACEHOLDER.to_string()]);
@@ -2069,13 +2074,21 @@ mod generate_config_test {
             "e2e",
             Some("ssh.exe"),
             Some("/tmp/test_ssh_config"),
+            vec![
+                "-o".to_string(),
+                "User=deploy".to_string(),
+                PLACEHOLDER.to_string(),
+            ],
         );
 
+        // -F prefix, then the override written verbatim (placeholder not re-added).
         assert_eq!(
             config.client.arguments,
             vec![
                 "-F".to_string(),
                 "/tmp/test_ssh_config".to_string(),
+                "-o".to_string(),
+                "User=deploy".to_string(),
                 PLACEHOLDER.to_string(),
             ]
         );
@@ -2088,7 +2101,7 @@ mod generate_config_test {
     #[test]
     fn test_build_generate_config_preserves_default_colors() {
         let default_client = ClientConfig::default();
-        let config = build_generate_config(vec!["h".to_string()], "default", None, None);
+        let config = build_generate_config(vec!["h".to_string()], "default", None, None, vec![]);
 
         // An unset --program keeps the ClientConfig default.
         assert_eq!(config.client.program, default_client.program);
@@ -2109,6 +2122,7 @@ mod generate_config_test {
             "e2e",
             Some("ssh"),
             Some("/tmp/c"),
+            vec![],
         );
 
         let serialized = toml::to_string(&config).expect("serialize");
@@ -2138,6 +2152,7 @@ mod generate_config_test {
             "default",
             Some("ssh"),
             None,
+            Vec::new(),
             None,
         );
 
@@ -2175,6 +2190,7 @@ mod generate_config_test {
             "default",
             Some("ssh"),
             None,
+            Vec::new(),
             None,
         );
 
@@ -2201,6 +2217,7 @@ mod generate_config_test {
             "e2e",
             Some("ssh"),
             Some("/tmp/c"),
+            Vec::new(),
             Some("/tmp/out.toml"),
         );
 

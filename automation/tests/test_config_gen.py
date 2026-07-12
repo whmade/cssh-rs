@@ -111,6 +111,22 @@ def test_generate_config_honors_program_and_cluster(
     assert argv[argv.index("--cluster") + 1] == "prod"
 
 
+def test_generate_config_forwards_arguments_before_hosts(
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
+) -> None:
+    ConfigGen().generate_config(
+        "cssh-rs.exe",
+        str(tmp_path),
+        ssh_config_path,
+        ["h1"],
+        arguments=["-o", "User=deploy"],
+    )
+
+    argv = fake_run.calls[0][0]
+    assert "--arguments=-o" in argv
+    assert argv.index("--arguments=User=deploy") < argv.index("h1")
+
+
 def test_generate_config_captures_output(
     fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
 ) -> None:
@@ -134,6 +150,7 @@ def test_generate_config_captures_output(
         ({"program": ""}, "program"),
         ({"aliases": []}, "non-empty"),
         ({"aliases": ["h1", ""]}, "each alias"),
+        ({"arguments": ["-o", ""]}, "argument"),
     ],
 )
 def test_generate_config_rejects_invalid_arguments(

@@ -35,6 +35,7 @@ class ConfigGen:
         aliases: list[str] | tuple[str, ...],
         cluster_name: str = "e2e",
         program: str = "ssh",
+        arguments: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         """Write ``cssh-rs-config.toml`` into ``output_dir`` and return its path.
 
@@ -49,6 +50,9 @@ class ConfigGen:
                 resolve to a ``Host`` block in ``ssh_config_path``.
             cluster_name: Name of the generated cluster.
             program: SSH executable the config launches.
+            arguments: Full program arguments that replace the default
+                ``<user>@<host>`` placeholder; must include it, e.g.
+                ``["-o", "User=deploy", "{{USERNAME_AT_HOST}}"]``.
 
         Returns:
             Absolute path to the written ``cssh-rs-config.toml`` as a str.
@@ -61,6 +65,7 @@ class ConfigGen:
             program=program,
             aliases=aliases,
         )
+        arguments = _validate_arguments(arguments)
         config_path = Path(output_dir).resolve() / CONFIG_FILENAME
         argv = [
             cssh_rs_binary,
@@ -73,6 +78,8 @@ class ConfigGen:
             cluster_name,
             "--output",
             str(config_path),
+            # Attached form so values starting with `-` are not parsed as flags.
+            *(f"--arguments={value}" for value in arguments),
             *host_list,
         ]
         try:
@@ -120,3 +127,11 @@ def _validate(
     if not Path(output_dir).is_dir():
         raise ConfigGenError(f"output_dir is not an existing directory: {output_dir}")
     return host_list
+
+
+def _validate_arguments(arguments: list[str] | tuple[str, ...] | None) -> list[str]:
+    """Return ``arguments`` as a list; reject non-string or empty entries."""
+    argument_list = list(arguments or ())
+    if not all(isinstance(argument, str) and argument for argument in argument_list):
+        raise ConfigGenError("each argument must be a non-empty string")
+    return argument_list
