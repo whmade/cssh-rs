@@ -1,7 +1,7 @@
 """On-screen keypress overlay for screen recordings.
 
-A :class:`Keycast` buffers the labels the keystroke driver emits; the paired
-:class:`KeycastOverlay` draws the still-visible ones in a corner as a
+A ``Keycast`` buffers the labels the keystroke driver emits; the paired
+``KeycastOverlay`` draws the still-visible ones in a corner as a
 screen-recorder per-frame overlay. Both use ``time.monotonic``, the clock the
 recorder stamps frames with, so labels fade in step with the video.
 """
@@ -58,7 +58,7 @@ class Keycast:
 
 
 class KeycastOverlay:
-    """Screen-recorder overlay that draws a :class:`Keycast`'s active labels."""
+    """Screen-recorder overlay that draws a ``Keycast``'s active labels."""
 
     def __init__(self, keycast: Keycast) -> None:
         self._keycast = keycast
