@@ -9,7 +9,6 @@ readiness is polled at the Robot Framework layer with
 
 from __future__ import annotations
 
-import enum
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -19,12 +18,12 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class _Sentinel(enum.Enum):
-    DEFAULT_LABEL = enum.auto()
+class _Default:
+    """Type of the ``DEFAULT_LABEL`` sentinel."""
 
 
 # Default ``label``: show the overlay for whatever was typed or pressed.
-DEFAULT_LABEL = _Sentinel.DEFAULT_LABEL
+DEFAULT_LABEL = _Default()
 
 
 class KeystrokesError(RuntimeError):
@@ -63,7 +62,7 @@ class Keystrokes:
                 LOGGER.warning("key listener failed for %r: %s", label, exc)
 
     def _notify_label(
-        self, label: str | None | _Sentinel, *, default: str, default_kind: str
+        self, label: str | None | _Default, *, default: str, default_kind: str
     ) -> None:
         """Route ``label`` to the overlay: ``DEFAULT_LABEL`` shows ``default`` (when
         non-empty) as ``default_kind``, ``None`` suppresses it, any string shows that
@@ -71,7 +70,7 @@ class Keystrokes:
         """
         if label is None:
             return
-        if not isinstance(label, _Sentinel):
+        if not isinstance(label, _Default):
             self._notify(label, "key")
         elif default:
             self._notify(default, default_kind)
@@ -80,7 +79,7 @@ class Keystrokes:
         self,
         text: str,
         interval: float = 0.0,
-        label: str | None | _Sentinel = DEFAULT_LABEL,
+        label: str | None | _Default = DEFAULT_LABEL,
     ) -> None:
         """Type ``text`` as literal printable characters into the foreground window.
 
@@ -109,7 +108,7 @@ class Keystrokes:
         self.type_text(text, interval=interval)
         self.press_key("enter")
 
-    def press_key(self, key: str, label: str | None | _Sentinel = DEFAULT_LABEL) -> None:
+    def press_key(self, key: str, label: str | None | _Default = DEFAULT_LABEL) -> None:
         """Press a named key such as ``enter``, ``tab`` or ``esc``.
 
         Args:
