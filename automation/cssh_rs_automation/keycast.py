@@ -28,33 +28,52 @@ class Keycast:
     ) -> None:
         self._fade_seconds = fade_seconds
         self._lock = threading.Lock()
-        self._events: deque[tuple[str, float]] = deque(maxlen=max_labels)
+        self._events: deque[tuple[str, str, float]] = deque(maxlen=max_labels)
 
-    def record(self, label: str) -> None:
-        """Key-listener callback: stamp ``label`` with the current monotonic time.
+    def record(self, label: str, kind: str = "text") -> None:
+        """Key-listener callback: buffer ``label`` stamped with the monotonic time.
+
+        Consecutive ``"text"`` events merge into one growing token so typed
+        characters read as continuous text; a ``"key"`` event (a named key or
+        chord) always starts a new token so it stays distinct.
 
         Args:
-            label: Display label of a delivered keystroke (e.g. ``"Ctrl+A"``).
+            label: Display label of a delivered action (e.g. ``"e"`` or ``"Ctrl+A"``).
+            kind: ``"text"`` for a literal typed character, ``"key"`` for a named
+                key or chord.
         """
         with self._lock:
-            self._events.append((label, time.monotonic()))
+            now = time.monotonic()
+            if (
+                kind == "text"
+                and self._events
+                and self._events[-1][1] == "text"
+                and now - self._events[-1][2] <= self._fade_seconds
+            ):
+                self._events[-1] = (self._events[-1][0] + label, "text", now)
+            else:
+                self._events.append((label, kind, now))
 
     def clear(self) -> None:
         """Drop all buffered labels so a new recording starts clean."""
         with self._lock:
             self._events.clear()
 
-    def active(self, now: float) -> list[str]:
-        """Return the labels still within the fade window at ``now``, oldest first.
+    def active(self, now: float) -> list[tuple[str, str]]:
+        """Return the ``(label, kind)`` tokens still within the fade window, oldest first.
 
         Args:
             now: Monotonic timestamp of the frame being rendered.
 
         Returns:
-            The unexpired labels.
+            The unexpired tokens as ``(label, kind)`` pairs.
         """
         with self._lock:
-            return [label for label, stamped in self._events if now - stamped <= self._fade_seconds]
+            return [
+                (label, kind)
+                for label, kind, stamped in self._events
+                if now - stamped <= self._fade_seconds
+            ]
 
 
 class KeycastOverlay:
@@ -64,19 +83,35 @@ class KeycastOverlay:
         self._keycast = keycast
 
     def __call__(self, frame: object, now: float) -> object:
-        """Return ``frame`` with the active key labels drawn, or unchanged if none."""
-        labels = self._keycast.active(now)
-        if not labels:
+        """Return ``frame`` with the active key tokens drawn, or unchanged if none."""
+        events = self._keycast.active(now)
+        if not events:
             return frame
-        return _draw_keycast(frame, labels)
+        return _draw_keycast(frame, events)
 
 
-def _draw_keycast(frame: object, labels: list[str]) -> object:
-    """Return ``frame`` with ``labels`` drawn as a pill in the bottom-right corner.
+def _keycast_text(events: list[tuple[str, str]]) -> str:
+    """Return the overlay line for ``events``.
+
+    Text tokens render verbatim; key tokens are upper-cased so named keys stand
+    out. Tokens join with a single space, so a literal space inside a text token
+    is the only thing that ever separates typed characters.
+
+    Args:
+        events: ``(label, kind)`` tokens, oldest first.
+
+    Returns:
+        The single-line overlay string.
+    """
+    return " ".join(label.upper() if kind == "key" else label for label, kind in events)
+
+
+def _draw_keycast(frame: object, events: list[tuple[str, str]]) -> object:
+    """Return ``frame`` with ``events`` drawn as a pill in the bottom-right corner.
 
     Args:
         frame: RGB uint8 numpy array of shape ``(height, width, 3)``.
-        labels: Key labels to render, oldest first, joined on one line.
+        events: ``(label, kind)`` tokens to render, oldest first, on one line.
 
     Returns:
         A new RGB uint8 numpy array of the same shape.
@@ -87,7 +122,7 @@ def _draw_keycast(frame: object, labels: list[str]) -> object:
     image = Image.fromarray(np.asarray(frame))
     width, height = image.size
     font = _keycast_font(max(12, int(height / 28)))
-    text = "   ".join(labels)
+    text = _keycast_text(events)
 
     draw = ImageDraw.Draw(image, "RGBA")
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)

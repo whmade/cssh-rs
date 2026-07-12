@@ -29,4 +29,10 @@ Record The Broadcast Demo
     Broadcast    echo hello from the cssh-rs cluster
     Hold    1
 
+    # Ctrl+C closes every client (and then the daemon) so the clip shows the
+    # cluster tearing down; keep recording a beat longer to capture it.
+    Focus Daemon
+    Send Hotkey    ctrl    c
+    Hold    0.1
+
     Export Demo Gif    ${GIF}    fps=${FPS}

@@ -176,7 +176,7 @@ def test_running_keyword_feeds_keystrokes_into_keycast() -> None:
     listener.start_library_keyword(object(), _keyword(keystrokes), object())
     keystrokes.type_text("echo hi")
 
-    assert listener._keycast.active(time.monotonic()) == ["echo hi"]
+    assert listener._keycast.active(time.monotonic()) == [("echo hi", "text")]
 
 
 @pytest.mark.usefixtures("recorder")
@@ -189,7 +189,7 @@ def test_running_keyword_wires_each_keystrokes_instance_once() -> None:
     keystrokes.type_text("hi")
 
     # Wired once, so the keystroke is recorded once rather than duplicated.
-    assert listener._keycast.active(time.monotonic()) == ["hi"]
+    assert listener._keycast.active(time.monotonic()) == [("hi", "text")]
 
 
 @pytest.mark.usefixtures("recorder")

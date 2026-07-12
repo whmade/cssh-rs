@@ -104,33 +104,33 @@ def test_keywords_disable_failsafe(fake_pyautogui: _FakePyAutoGui) -> None:
 
 
 def test_key_listener_receives_typed_text(fake_pyautogui: _FakePyAutoGui) -> None:  # noqa: ARG001
-    labels: list[str] = []
+    events: list[tuple[str, str]] = []
     keys = Keystrokes()
-    keys.add_key_listener(labels.append)
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
 
     keys.type_text("echo hi")
 
-    assert labels == ["echo hi"]
+    assert events == [("echo hi", "text")]
 
 
 def test_key_listener_reports_line_then_enter(fake_pyautogui: _FakePyAutoGui) -> None:  # noqa: ARG001
-    labels: list[str] = []
+    events: list[tuple[str, str]] = []
     keys = Keystrokes()
-    keys.add_key_listener(labels.append)
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
 
     keys.type_line("cmd")
 
-    assert labels == ["cmd", "Enter"]
+    assert events == [("cmd", "text"), ("Enter", "key")]
 
 
 def test_key_listener_skips_empty_text(fake_pyautogui: _FakePyAutoGui) -> None:
-    labels: list[str] = []
+    events: list[tuple[str, str]] = []
     keys = Keystrokes()
-    keys.add_key_listener(labels.append)
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
 
     keys.type_text("")
 
-    assert labels == []
+    assert events == []
     # The empty write is still forwarded; only the notification is skipped.
     assert fake_pyautogui.calls == [("write", ("",), {"interval": 0.0})]
 
@@ -138,20 +138,20 @@ def test_key_listener_skips_empty_text(fake_pyautogui: _FakePyAutoGui) -> None:
 def test_key_listener_formats_named_keys_and_hotkeys(
     fake_pyautogui: _FakePyAutoGui,  # noqa: ARG001
 ) -> None:
-    labels: list[str] = []
+    events: list[tuple[str, str]] = []
     keys = Keystrokes()
-    keys.add_key_listener(labels.append)
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
 
     keys.press_key("esc")
     keys.press_key("f4")
     keys.send_hotkey("ctrl", "a")
     keys.send_hotkey("alt", "f4")
 
-    assert labels == ["Esc", "F4", "Ctrl+A", "Alt+F4"]
+    assert events == [("Esc", "key"), ("F4", "key"), ("Ctrl+A", "key"), ("Alt+F4", "key")]
 
 
 def test_key_listener_error_does_not_break_delivery(fake_pyautogui: _FakePyAutoGui) -> None:
-    def boom(_label: str) -> None:
+    def boom(_label: str, _kind: str) -> None:
         raise RuntimeError("listener down")
 
     keys = Keystrokes()

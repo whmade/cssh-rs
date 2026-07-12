@@ -91,7 +91,8 @@ def test_wait_for_hosts_returns_once_all_windows_open() -> None:
 
 
 def test_broadcast_types_each_key_then_enter(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _seconds: None)
+    slept: list[float] = []
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", slept.append)
     recorder, mocks = _recorder()
 
     recorder.broadcast("hi")
@@ -101,6 +102,8 @@ def test_broadcast_types_each_key_then_enter(monkeypatch: pytest.MonkeyPatch) ->
     typed = [call.args[0] for call in mocks["keystrokes"].type_text.call_args_list]
     assert typed == ["h", "i"]
     mocks["keystrokes"].press_key.assert_called_once_with("enter")
+    # 8ms between keypresses, converted from the millisecond constant.
+    assert slept == [0.008, 0.008]
 
 
 def test_enter_control_mode_sends_ctrl_a() -> None:

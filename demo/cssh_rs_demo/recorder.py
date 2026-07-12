@@ -41,9 +41,9 @@ DEFAULT_FPS = 10
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _WINDOW_TIMEOUT_SECONDS = 20.0
 _POLL_INTERVAL_SECONDS = 0.5
-# Simulate deliberate typing: the broadcast pauses this long between keypresses
-# so the keycast overlay reveals each key as it is pressed.
-_TYPING_INTERVAL_SECONDS = 0.07
+# Simulate typing: the broadcast pauses this long, in milliseconds, between
+# keypresses so the keycast overlay reveals each key as it is pressed.
+_TYPING_INTERVAL_MS = 8
 
 
 class DemoError(RuntimeError):
@@ -157,7 +157,7 @@ class DemoRecorder:
         self.focus_daemon()
         for char in command:
             self._keystrokes.type_text(char)
-            time.sleep(_TYPING_INTERVAL_SECONDS)
+            time.sleep(_TYPING_INTERVAL_MS / 1000)
         self._keystrokes.press_key("enter")
 
     def enter_control_mode(self) -> None:
