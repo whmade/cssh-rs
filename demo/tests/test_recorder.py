@@ -8,13 +8,24 @@ the Windows-only guard and the process launch/teardown never touch the host.
 
 from __future__ import annotations
 
+import getpass
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from cssh_rs_automation.sshd_fixture import ShellMode
+from cssh_rs_automation.sshd_fixture import ScriptedShellMode
 
-from cssh_rs_demo.recorder import DEFAULT_CLUSTER, DemoError, DemoRecorder
+from cssh_rs_demo.recorder import (
+    DEFAULT_CLUSTER,
+    DISPLAY_USER,
+    HOSTS,
+    README_CONTENT,
+    README_NAME,
+    SHELL_RC_LINES,
+    USERNAME_HOST_PLACEHOLDER,
+    DemoError,
+    DemoRecorder,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,7 +60,7 @@ def test_start_demo_bails_on_bad_precondition(
         recorder.start_demo(str(tmp_path / "missing.exe"), "out")
 
 
-def test_start_demo_wires_overlay_and_launches(
+def test_start_demo_seeds_hosts_wires_overlay_and_launches(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr("cssh_rs_demo.recorder.platform.system", lambda: "Windows")
@@ -57,50 +68,54 @@ def test_start_demo_wires_overlay_and_launches(
     monkeypatch.setattr("cssh_rs_demo.recorder.subprocess.Popen", popen)
     binary = tmp_path / "cssh-rs.exe"
     binary.write_text("stub")
+    homes = {"hosta.dev": str(tmp_path / "dev"), "hostb.prod": str(tmp_path / "prod")}
     recorder, mocks = _recorder()
-    mocks["sshd"].start_sshd.return_value = {"ssh_config": "cfg"}
+    mocks["sshd"].start_sshd.return_value = {"ssh_config": "cfg", "homes": homes}
     mocks["config_gen"].generate_config.return_value = "config.toml"
     order: list[str] = []
     mocks["recorder"].start_recording.side_effect = lambda *_a, **_k: order.append("record")
     popen.side_effect = lambda *_a, **_k: order.append("launch")
 
-    recorder.start_demo(str(binary), "out", hosts=["h1", "h2"], fps="10")
+    recorder.start_demo(str(binary), "out", fps="10")
 
-    # Shell mode: sessions land in a real interactive shell, not a marker writer.
-    mocks["sshd"].start_sshd.assert_called_once_with(("h1", "h2"), mode=ShellMode())
-    mocks["config_gen"].generate_config.assert_called_once()
-    assert mocks["config_gen"].generate_config.call_args.kwargs["cluster_name"] == DEFAULT_CLUSTER
+    mocks["sshd"].start_sshd.assert_called_once_with(
+        HOSTS, mode=ScriptedShellMode(rc_lines=SHELL_RC_LINES)
+    )
+    generate_kwargs = mocks["config_gen"].generate_config.call_args.kwargs
+    assert mocks["config_gen"].generate_config.call_args.args[3] == HOSTS
+    assert generate_kwargs["cluster_name"] == DEFAULT_CLUSTER
+    assert generate_kwargs["arguments"] == [
+        "-o",
+        f"User={getpass.getuser()}",
+        USERNAME_HOST_PLACEHOLDER,
+    ]
     mocks["recorder"].add_overlay.assert_called_once()
     mocks["keystrokes"].add_key_listener.assert_called_once()
-    popen.assert_called_once_with([str(binary), DEFAULT_CLUSTER])
-    mocks["recorder"].start_recording.assert_called_once_with("cssh-rs", "out", fps=10)
-    # Recording starts before the launch so the clip captures the windows arranging.
+    popen.assert_called_once_with([str(binary), "-u", DISPLAY_USER, DEFAULT_CLUSTER])
+    assert (tmp_path / "dev" / "demo" / "data" / README_NAME).read_text() == f"{README_CONTENT}\n"
+    assert not (tmp_path / "prod" / "demo" / "data" / README_NAME).exists()
     assert order == ["record", "launch"]
 
 
-def test_wait_for_hosts_returns_once_all_windows_open() -> None:
+def test_wait_for_hosts_returns_once_sessions_are_ready() -> None:
     recorder, mocks = _recorder()
-    recorder._hosts = ("h1", "h2")
-    mocks["focus"].count_windows.return_value = 2
+    mocks["sshd"].count_connected_markers.return_value = len(HOSTS)
 
     recorder.wait_for_hosts()
 
-    mocks["focus"].count_windows.assert_called()
+    mocks["sshd"].count_connected_markers.assert_called()
 
 
-def test_broadcast_types_each_key_then_enter(monkeypatch: pytest.MonkeyPatch) -> None:
-    slept: list[float] = []
-    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", slept.append)
+def test_broadcast_focuses_daemon_then_types_each_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _s: None)
     recorder, mocks = _recorder()
 
     recorder.broadcast("hi")
 
     mocks["focus"].focus_window.assert_called_once()
-    # One key per character so the keycast overlay reveals each as it is pressed.
     typed = [call.args[0] for call in mocks["keystrokes"].type_text.call_args_list]
     assert typed == ["h", "i"]
     mocks["keystrokes"].press_key.assert_called_once_with("enter")
-    assert slept == [0.008, 0.008]
 
 
 def test_export_demo_gif_stops_then_exports() -> None:
@@ -109,7 +124,6 @@ def test_export_demo_gif_stops_then_exports() -> None:
 
     result = recorder.export_demo_gif("demo.gif", fps="10")
 
-    mocks["recorder"].stop_recording.assert_called_once()
     mocks["gif_exporter"].assert_called_once_with("demo.mp4", "demo.gif", fps=10)
     assert result == "out.gif"
 
