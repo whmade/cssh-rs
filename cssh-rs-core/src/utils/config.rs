@@ -120,8 +120,8 @@ pub struct ClientConfig {
     pub ssh_config_path: String,
     /// Name of the program used to establish the SSH connection.
     ///
-    /// Note: a relayed Ctrl+C interrupts a running command but cannot reprint
-    /// an idle `cmd.exe` prompt (that needs a real focused keypress).
+    /// Note specific to `cmd.exe`: a relayed Ctrl+C interrupts a running command
+    /// but cannot reprint its idle prompt (which needs a real focused keypress).
     /// # Example
     ///
     /// `'ssh'`
