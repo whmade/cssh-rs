@@ -90,14 +90,17 @@ def test_wait_for_hosts_returns_once_all_windows_open() -> None:
     mocks["focus"].count_windows.assert_called()
 
 
-def test_broadcast_focuses_daemon_then_types_line() -> None:
+def test_broadcast_types_each_key_then_enter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _seconds: None)
     recorder, mocks = _recorder()
 
-    recorder.broadcast("echo hi")
+    recorder.broadcast("hi")
 
     mocks["focus"].focus_window.assert_called_once()
-    mocks["keystrokes"].type_line.assert_called_once()
-    assert mocks["keystrokes"].type_line.call_args.args[0] == "echo hi"
+    # One key per character so the keycast overlay reveals each as it is pressed.
+    typed = [call.args[0] for call in mocks["keystrokes"].type_text.call_args_list]
+    assert typed == ["h", "i"]
+    mocks["keystrokes"].press_key.assert_called_once_with("enter")
 
 
 def test_enter_control_mode_sends_ctrl_a() -> None:

@@ -37,18 +37,13 @@ CLIENT_TITLE_SUBSTRING = "cssh-rs -"
 DEFAULT_HOSTS = ("web01", "web02", "db01")
 DEFAULT_CLUSTER = "demo"
 DEFAULT_FPS = 10
-# The broadcast command label is stamped when typing starts and must stay
-# legible through the whole type-out (command length x _TYPING_INTERVAL_SECONDS,
-# ~9s for the demo command) and alongside the Enter that follows, so the fade
-# window comfortably exceeds it.
-DEMO_KEYCAST_FADE_SECONDS = 12.0
 
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _WINDOW_TIMEOUT_SECONDS = 20.0
 _POLL_INTERVAL_SECONDS = 0.5
-# Simulate deliberate typing: pyautogui waits this long between keypresses so
-# the broadcast command reads as typed by a person rather than pasted at once.
-_TYPING_INTERVAL_SECONDS = 0.25
+# Simulate deliberate typing: the broadcast pauses this long between keypresses
+# so the keycast overlay reveals each key as it is pressed.
+_TYPING_INTERVAL_SECONDS = 0.15
 
 
 class DemoError(RuntimeError):
@@ -117,7 +112,7 @@ class DemoRecorder:
             cluster_name=DEFAULT_CLUSTER,
         )
 
-        keycast = Keycast(fade_seconds=DEMO_KEYCAST_FADE_SECONDS)
+        keycast = Keycast()
         self._recorder.add_overlay(KeycastOverlay(keycast))
         self._keystrokes.add_key_listener(keycast.record)
 
@@ -152,11 +147,18 @@ class DemoRecorder:
     def broadcast(self, command: str) -> None:
         """Focus the daemon and broadcast ``command`` to every enabled client.
 
+        Types one character at a time with a pause between so the keycast
+        overlay reveals each key as it is pressed, rather than the whole command
+        at once (``type_line`` reports the line as a single label).
+
         Args:
             command: Command line typed into the daemon and run everywhere.
         """
         self.focus_daemon()
-        self._keystrokes.type_line(command, interval=_TYPING_INTERVAL_SECONDS)
+        for char in command:
+            self._keystrokes.type_text(char)
+            time.sleep(_TYPING_INTERVAL_SECONDS)
+        self._keystrokes.press_key("enter")
 
     def enter_control_mode(self) -> None:
         """Focus the daemon and enter control mode with Ctrl+A."""
