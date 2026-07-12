@@ -29,24 +29,26 @@ class Keystrokes:
     ROBOT_LIBRARY_VERSION = "0.1.0"
 
     def __init__(self) -> None:
-        self._listeners: list[Callable[[str], None]] = []
+        self._listeners: list[Callable[[str, str], None]] = []
 
-    def add_key_listener(self, listener: Callable[[str], None]) -> None:
-        """Register a callback invoked with each delivered action's display label.
+    def add_key_listener(self, listener: Callable[[str, str], None]) -> None:
+        """Register a callback invoked with each delivered action's label and kind.
 
         Labels are human-readable (``"echo hello"``, ``"Enter"``, ``"Ctrl+A"``),
-        intended for an on-screen keypress overlay.
+        intended for an on-screen keypress overlay. The kind is ``"text"`` for
+        literal typed characters or ``"key"`` for named keys and chords.
 
         Args:
-            listener: Callable invoked with the label of each delivered action.
+            listener: Callable invoked with the label and kind of each delivered
+                action.
         """
         self._listeners.append(listener)
 
-    def _notify(self, label: str) -> None:
-        """Send ``label`` to every listener; a listener error is logged, not raised."""
+    def _notify(self, label: str, kind: str) -> None:
+        """Send ``(label, kind)`` to every listener; a listener error is logged, not raised."""
         for listener in self._listeners:
             try:
-                listener(label)
+                listener(label, kind)
             except Exception as exc:
                 # Broad by design: a listener must never break input delivery.
                 LOGGER.warning("key listener failed for %r: %s", label, exc)
@@ -64,7 +66,7 @@ class Keystrokes:
         if interval < 0:
             raise KeystrokesError(f"interval must be non-negative, got {interval}")
         if text:
-            self._notify(text)
+            self._notify(text, "text")
         self._pyautogui().write(text, interval=interval)
 
     def type_line(self, text: str, interval: float = 0.0) -> None:
@@ -85,7 +87,7 @@ class Keystrokes:
         """
         if not key:
             raise KeystrokesError("key must be a non-empty string")
-        self._notify(_key_label(key))
+        self._notify(_key_label(key), "key")
         self._pyautogui().press(key)
 
     def send_hotkey(self, *keys: str) -> None:
@@ -98,7 +100,7 @@ class Keystrokes:
             raise KeystrokesError("send_hotkey requires at least one key")
         if not all(keys):
             raise KeystrokesError("hotkey keys must be non-empty strings")
-        self._notify("+".join(_key_label(key) for key in keys))
+        self._notify("+".join(_key_label(key) for key in keys), "key")
         self._pyautogui().hotkey(*keys)
 
     @staticmethod
