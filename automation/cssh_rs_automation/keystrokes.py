@@ -9,6 +9,7 @@ readiness is polled at the Robot Framework layer with
 
 from __future__ import annotations
 
+import enum
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,16 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _DefaultLabel(enum.Enum):
+    """Sentinel for the ``label`` argument (see ``DEFAULT_LABEL``)."""
+
+    TOKEN = enum.auto()
+
+
+# Default for ``label``: show the overlay for whatever was typed or pressed.
+DEFAULT_LABEL = _DefaultLabel.TOKEN
 
 
 class KeystrokesError(RuntimeError):
@@ -53,7 +64,33 @@ class Keystrokes:
                 # Broad by design: a listener must never break input delivery.
                 LOGGER.warning("key listener failed for %r: %s", label, exc)
 
-    def type_text(self, text: str, interval: float = 0.0) -> None:
+    def _notify_label(
+        self, label: str | None | _DefaultLabel, *, default: str, default_kind: str
+    ) -> None:
+        """Route ``label`` to the overlay.
+
+        ``DEFAULT_LABEL`` shows ``default`` (only if non-empty) as ``default_kind``;
+        ``None`` suppresses the overlay; any string shows that token as a discrete key.
+
+        Args:
+            label: The caller's overlay control value.
+            default: Overlay text used when ``label`` is ``DEFAULT_LABEL``.
+            default_kind: Kind reported for ``default`` (``"text"`` or ``"key"``).
+        """
+        if label is None:
+            return
+        if isinstance(label, _DefaultLabel):
+            if default:
+                self._notify(default, default_kind)
+        else:
+            self._notify(label, "key")
+
+    def type_text(
+        self,
+        text: str,
+        interval: float = 0.0,
+        label: str | None | _DefaultLabel = DEFAULT_LABEL,
+    ) -> None:
         """Type ``text`` as literal printable characters into the foreground window.
 
         Use ``press_key`` for named keys such as Enter or Tab.
@@ -62,11 +99,13 @@ class Keystrokes:
             text: Characters to type.
             interval: Seconds between characters; raise it if a terminal drops
                 fast input.
+            label: Overlay control. ``DEFAULT_LABEL`` (the default) shows ``text``
+                as typed characters; ``None`` suppresses the overlay; any string
+                shows that token as a discrete action instead (e.g. ``"PASTE"``).
         """
         if interval < 0:
             raise KeystrokesError(f"interval must be non-negative, got {interval}")
-        if text:
-            self._notify(text, "text")
+        self._notify_label(label, default=text, default_kind="text")
         self._pyautogui().write(text, interval=interval)
 
     def type_line(self, text: str, interval: float = 0.0) -> None:
@@ -79,15 +118,21 @@ class Keystrokes:
         self.type_text(text, interval=interval)
         self.press_key("enter")
 
-    def press_key(self, key: str) -> None:
+    def press_key(
+        self, key: str, label: str | None | _DefaultLabel = DEFAULT_LABEL
+    ) -> None:
         """Press a named key such as ``enter``, ``tab`` or ``esc``.
 
         Args:
             key: pyautogui key name to press.
+            label: Overlay control. ``DEFAULT_LABEL`` (the default) shows the
+                key's own label; ``None`` suppresses the overlay - for a key that
+                should not appear on screen, such as an input-absorbing no-op;
+                any string shows that token instead.
         """
         if not key:
             raise KeystrokesError("key must be a non-empty string")
-        self._notify(_key_label(key), "key")
+        self._notify_label(label, default=_key_label(key), default_kind="key")
         self._pyautogui().press(key)
 
     def send_hotkey(self, *keys: str) -> None:
