@@ -10,7 +10,7 @@ use std::io::{self, BufReader};
 use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
-use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
+use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_C, VK_CANCEL};
 
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::{get_console_title, set_console_color, WindowsApi};
@@ -20,8 +20,9 @@ use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use tokio::{io::Interest, net::windows::named_pipe::ClientOptions};
 use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
-    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, RIGHT_ALT_PRESSED, SHIFT_PRESSED,
+    CONSOLE_CHARACTER_ATTRIBUTES, ENABLE_PROCESSED_INPUT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
+    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
+    SHIFT_PRESSED, STD_INPUT_HANDLE,
 };
 
 use cssh_rs_protocol::{
@@ -65,7 +66,7 @@ enum ReadWriteResult {
 /// when the user toggles the state.
 const HIGHLIGHT_FLASH_DURATION: Duration = Duration::from_millis(250);
 
-/// Grace period for the SSH child to exit after CTRL_C_EVENT before
+/// Grace period for the SSH child to exit after the console interrupt before
 /// [`shutdown_child`] force-kills it.
 const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
@@ -249,6 +250,79 @@ fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     };
 }
 
+/// Report whether a forwarded key event is the Ctrl+C or Ctrl+Break combination.
+///
+/// These are the two keystrokes conhost turns into console control signals; the
+/// caller re-raises them as a signal instead of injecting them as input.
+///
+/// # Arguments
+///
+/// * `key_event` - The key event record forwarded by the daemon.
+///
+/// # Returns
+///
+/// `true` for a Ctrl-modified C or Break key, `false` otherwise.
+fn is_console_signal_key(key_event: &KEY_EVENT_RECORD) -> bool {
+    return key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0
+        && matches!(VIRTUAL_KEY(key_event.wVirtualKeyCode), VK_C | VK_CANCEL);
+}
+
+/// Report whether the console input buffer has processed input enabled.
+///
+/// # Arguments
+///
+/// * `api` - The Windows API implementation to use.
+///
+/// # Returns
+///
+/// `true` when `ENABLE_PROCESSED_INPUT` is set; `false` on that flag being
+/// cleared or any query failure (so the caller falls back to a raw write).
+fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
+    let handle = match api.get_std_handle(STD_INPUT_HANDLE) {
+        Ok(handle) => handle,
+        Err(_) => return false,
+    };
+    return match api.get_console_mode(handle) {
+        Ok(mode) => mode.0 & ENABLE_PROCESSED_INPUT.0 != 0,
+        Err(_) => false,
+    };
+}
+
+/// Interrupt the current console process group for a relayed Ctrl+C or Ctrl+Break.
+///
+/// # Arguments
+///
+/// * `api` - The Windows API implementation to use.
+fn signal_console_ctrl_event(api: &dyn WindowsApi) {
+    // Group-0 also signals this client, but the startup handler shields it.
+    if let Err(err) = api.interrupt_console_process_group() {
+        warn!("Failed to relay console control event: {}", err);
+    }
+}
+
+/// Replay one daemon-forwarded key event into the client console.
+///
+/// Ctrl+C and Ctrl+Break injected via `WriteConsoleInputW` never raise a
+/// console control signal, so when the input buffer has processed input
+/// enabled they are re-raised via `GenerateConsoleCtrlEvent`; all other
+/// records (and raw-mode consoles) are written verbatim.
+///
+/// # Arguments
+///
+/// * `api`          - The Windows API implementation to use.
+/// * `input_record` - The [INPUT_RECORD_0].`KeyEvent` record to replay.
+fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
+    let key_event = unsafe { input_record.KeyEvent };
+    if is_console_signal_key(&key_event) && processed_input_enabled(api) {
+        // Signal on key-down only; drop both records so no literal Ctrl+C reaches the child.
+        if key_event.bKeyDown.as_bool() {
+            signal_console_ctrl_event(api);
+        }
+        return;
+    }
+    write_console_input(api, input_record);
+}
+
 /// Resolve the username from the provided value or SSH config.
 ///
 /// # Arguments
@@ -385,8 +459,8 @@ impl ChildProcess for Child {
 
 /// Guarantee the SSH child terminates once the client's run loop has ended.
 ///
-/// Signals CTRL_C_EVENT for a graceful exit, then force-kills after
-/// [`CHILD_EXIT_GRACE_PERIOD`]; children that handle CTRL+C themselves
+/// Interrupts the console process group for a graceful exit, then force-kills
+/// after [`CHILD_EXIT_GRACE_PERIOD`]; children that handle the signal themselves
 /// (e.g. cmd.exe) would otherwise keep the client window open forever.
 ///
 /// # Arguments
@@ -394,41 +468,24 @@ impl ChildProcess for Child {
 /// * `api`   - The Windows API implementation to use.
 /// * `child` - Handle to the SSH child process.
 async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // Group-0 CTRL_C_EVENT also signals this client, so shield it first to
-    // survive long enough to enforce the kill; skip the signal if shielding
-    // fails. https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
-    let shielded = match api.set_console_ctrl_handler(true) {
-        Ok(()) => true,
-        Err(err) => {
-            warn!(
-                "Failed to shield client from its own CTRL_C_EVENT; \
-                 skipping graceful signal and force-killing the child: {}",
-                err
-            );
-            false
+    // Interrupt the whole group so even a child that ignores Ctrl+C exits; the
+    // startup handler shields this client so it survives to force the kill.
+    if let Err(err) = api.interrupt_console_process_group() {
+        warn!("Failed to interrupt console process group: {}", err);
+    }
+    match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
+        Ok(Ok(exit_status)) => {
+            info!("Child exited after console interrupt: {}", exit_status);
+            return;
         }
-    };
-    if shielded {
-        if let Err(err) = api.generate_console_ctrl_event(CTRL_C_EVENT, 0) {
-            warn!(
-                "Failed to send CTRL_C_EVENT to console process group: {}",
-                err
-            );
+        Ok(Err(err)) => {
+            warn!("Failed to wait for child exit: {}", err);
         }
-        match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
-            Ok(Ok(exit_status)) => {
-                info!("Child exited after CTRL_C_EVENT: {}", exit_status);
-                return;
-            }
-            Ok(Err(err)) => {
-                warn!("Failed to wait for child exit: {}", err);
-            }
-            Err(_) => {
-                warn!(
-                    "Child still running {}ms after CTRL_C_EVENT; force-killing it",
-                    CHILD_EXIT_GRACE_PERIOD.as_millis()
-                );
-            }
+        Err(_) => {
+            warn!(
+                "Child still running {}ms after console interrupt; force-killing it",
+                CHILD_EXIT_GRACE_PERIOD.as_millis()
+            );
         }
     }
     if let Err(err) = child.kill().await {
@@ -490,7 +547,7 @@ async fn read_write_loop(
             for message in messages {
                 match message {
                     DaemonToClientMessage::InputRecord(input_record) => {
-                        write_console_input(api, input_record);
+                        replay_input_record(api, input_record);
                         key_event_records.push(unsafe { input_record.KeyEvent });
                     }
                     DaemonToClientMessage::StateChange(state) => {
@@ -886,6 +943,11 @@ pub async fn main(
     cli_port: Option<u16>,
     config: &ClientConfig,
 ) {
+    // Shield this client from relayed CTRL+C/CTRL+Break so only the SSH child reacts.
+    if let Err(err) = api.install_console_ctrl_handler() {
+        warn!("Failed to install console control handler: {}", err);
+    }
+
     let original_console_color = capture_original_console_color(api);
 
     let (state_sender, state_receiver) = watch::channel(ClientState::Active);

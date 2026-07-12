@@ -60,8 +60,8 @@ def test_render_ssh_config_one_block_per_alias(tmp_path: Path) -> None:
     assert config.count("Port 2222\n") == 2
     assert config.count("User tester\n") == 2
     assert "IdentitiesOnly yes\n" in config
-    # Keeps 'PTY allocation request failed on channel 0' out of recordings.
-    assert config.count("RequestTTY no\n") == 2
+    # Force a PTY (as in real use) so a relayed Ctrl+C forwards to the remote.
+    assert config.count("RequestTTY force\n") == 2
 
 
 def test_pick_free_port_in_range() -> None:

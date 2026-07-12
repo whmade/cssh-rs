@@ -16,7 +16,8 @@ use windows::Win32::System::Console::{
     FillConsoleOutputAttribute, GetConsoleProcessList, GetConsoleScreenBufferInfo,
     GetConsoleWindow, GetStdHandle, ReadConsoleInputW, SetConsoleCtrlHandler,
     SetConsoleTextAttribute, CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD,
-    INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    CTRL_BREAK_EVENT, CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE,
 };
 use windows::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE};
 use windows::Win32::System::Console::{
@@ -226,33 +227,32 @@ pub trait WindowsApi: Send + Sync {
     /// The last error code from Windows API
     fn get_last_error(&self) -> u32;
 
-    /// Generates a console control event.
+    /// Interrupt every process attached to the caller's console.
     ///
-    /// # Arguments
-    ///
-    /// * `ctrl_event` - Control event type to generate
-    /// * `process_group_id` - Process group ID to send event to
+    /// Sends `CTRL_C_EVENT` to process group 0 so a Ctrl+C relayed from the
+    /// daemon reaches the child exactly as a focused Ctrl+C would.
+    /// `CTRL_BREAK_EVENT` is not interchangeable: many programs treat only
+    /// Ctrl+C as the interrupt (e.g. `ping` stops on Ctrl+C but merely prints
+    /// statistics on Ctrl+Break). The caller shields itself with the handler
+    /// from [`Self::install_console_ctrl_handler`], since group 0 signals it too.
+    /// <https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent>
     ///
     /// # Returns
     ///
     /// Result indicating success or failure of the operation
-    fn generate_console_ctrl_event(
-        &self,
-        ctrl_event: u32,
-        process_group_id: u32,
-    ) -> windows::core::Result<()>;
+    fn interrupt_console_process_group(&self) -> windows::core::Result<()>;
 
-    /// Sets whether the calling process ignores CTRL+C events.
+    /// Install a console control handler that shields this process from
+    /// CTRL+C and CTRL+Break.
     ///
-    /// # Arguments
-    ///
-    /// * `ignore` - `true` to make the process ignore CTRL+C, `false` to
-    ///              restore default handling.
+    /// The handler reports both `CTRL_C_EVENT` and `CTRL_BREAK_EVENT` as
+    /// handled, so neither user-typed nor group-relayed signals terminate the
+    /// calling process; other control events keep their default handling.
     ///
     /// # Returns
     ///
     /// Result indicating success or failure of the operation
-    fn set_console_ctrl_handler(&self, ignore: bool) -> windows::core::Result<()>;
+    fn install_console_ctrl_handler(&self) -> windows::core::Result<()>;
 
     /// Get standard output handle
     ///
@@ -588,6 +588,19 @@ impl Clone for MockWindowsApi {
     }
 }
 
+/// Console control handler that swallows CTRL+C and CTRL+Break.
+///
+/// Returning `TRUE` marks the event as handled so it does not terminate this
+/// process; other control events return `FALSE` to keep their default handling.
+/// <https://learn.microsoft.com/en-us/windows/console/handlerroutine>
+#[cfg_attr(coverage_nightly, coverage(off))]
+unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
+    return match ctrl_type {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT => TRUE,
+        _ => FALSE,
+    };
+}
+
 /// Default implementation of WindowsApi that calls actual Windows APIs.
 ///
 /// This implementation provides direct access to Windows system APIs and should
@@ -726,20 +739,14 @@ impl WindowsApi for DefaultWindowsApi {
         return unsafe { windows::Win32::Foundation::GetLastError().0 };
     }
 
-    fn generate_console_ctrl_event(
-        &self,
-        ctrl_event: u32,
-        process_group_id: u32,
-    ) -> windows::core::Result<()> {
+    fn interrupt_console_process_group(&self) -> windows::core::Result<()> {
         return unsafe {
-            windows::Win32::System::Console::GenerateConsoleCtrlEvent(ctrl_event, process_group_id)
+            windows::Win32::System::Console::GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
         };
     }
 
-    fn set_console_ctrl_handler(&self, ignore: bool) -> windows::core::Result<()> {
-        // A null HandlerRoutine toggles whether this process ignores CTRL+C:
-        // https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler
-        return unsafe { SetConsoleCtrlHandler(None, ignore) };
+    fn install_console_ctrl_handler(&self) -> windows::core::Result<()> {
+        return unsafe { SetConsoleCtrlHandler(Some(console_ctrl_handler), true) };
     }
 
     fn get_stdout_handle(&self) -> windows::core::Result<HANDLE> {

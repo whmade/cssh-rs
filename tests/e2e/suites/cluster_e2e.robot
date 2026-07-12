@@ -5,7 +5,8 @@ Documentation       Windows E2E cases for cssh-rs, each asserting one behaviour:
 ...                 - input typed with one client focused reaches only that host
 ...                 - a large paste broadcasts to every host without killing a client
 ...                 - closing the daemon closes every client window
-...                 - closing every client closes the daemon
+...                 - a daemon-relayed Ctrl+C interrupts every client's ssh child
+...                 - the daemon closes once every client is gone
 ...                 - teardown stops cssh-rs and sshd and removes the temp tree
 
 Resource            ../resources/cssh_rs_cluster.resource
@@ -56,10 +57,22 @@ Closing The Daemon Closes Every Client
         Wait Until Keyword Succeeds    15x    1s    Assert Client Window Gone    ${alias}
     END
 
-Closing Every Client Closes The Daemon
+Relayed Ctrl C Interrupts Every Client
+    [Documentation]    Relay Ctrl+C from the focused daemon and assert every client exits: ssh
+    ...                forwards the interrupt over its PTY to the remote, ending the session
+    ...                (issue #144 - a Ctrl+C that landed as a literal ^C would leave every session
+    ...                open). An interrupted client either exits outright or drops into the
+    ...                "SSH connection lost" state that a relayed Shift+Alt+C then closes.
     [Setup]    Restart Cssh Cluster
     Assert All Ssh Connections Established
-    Close All Client Windows
+    Relay Ctrl C From Daemon
+    FOR    ${alias}    IN    @{ALIASES}
+        Wait Until Keyword Succeeds    20x    0.5s    Nudge Then Assert Client Gone    ${alias}
+    END
+
+Daemon Closes Once Every Client Is Gone
+    [Documentation]    With every client interrupted and closed by the previous case, the daemon
+    ...                has no clients left and exits on its own.
     Wait Until Keyword Succeeds    15x    1s    Assert Daemon Window Gone
 
 
@@ -87,3 +100,22 @@ Assert All Client Windows Present
     FOR    ${alias}    IN    @{ALIASES}
         Focus Window    @${alias}    substring
     END
+
+Relay Ctrl C From Daemon
+    [Documentation]    Focus the daemon and press Ctrl+C so cssh-rs broadcasts it to every
+    ...                client's ssh session, just like any other keystroke.
+    Focus Window    ${DAEMON_TITLE}
+    Send Hotkey    ctrl    c
+
+Nudge Then Assert Client Gone
+    [Documentation]    Relay a Shift+Alt+C exit nudge (best effort - the daemon window is gone
+    ...                once the last client exits), then assert ${alias}'s window is gone.
+    [Arguments]    ${alias}
+    Run Keyword And Ignore Error    Relay Shift Alt C From Daemon
+    Assert Client Window Gone    ${alias}
+
+Relay Shift Alt C From Daemon
+    [Documentation]    Focus the daemon and press Shift+Alt+C so cssh-rs broadcasts the client
+    ...                exit combination to every client.
+    Focus Window    ${DAEMON_TITLE}
+    Send Hotkey    shift    alt    c

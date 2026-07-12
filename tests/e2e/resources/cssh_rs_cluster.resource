@@ -209,13 +209,6 @@ Assert Client Window Gone
     [Arguments]    ${alias}
     Assert Window Gone    @${alias}    substring
 
-Close All Client Windows
-    [Documentation]    Close each client console window with Alt+F4, as a user would.
-    FOR    ${alias}    IN    @{ALIASES}
-        Focus Window    @${alias}    substring
-        Send Hotkey    alt    f4
-    END
-
 Assert All Client Windows Raised Above
     [Documentation]    Assert every client window sits above ${other_title} in the z-order,
     ...                proving the daemon's focus sync raised them all rather than leaving
