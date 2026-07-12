@@ -68,11 +68,12 @@ class Keystrokes:
         ``default_kind``, ``None`` suppresses it, any string shows that token as a
         discrete key.
         """
-        if isinstance(label, _Default):
-            self._notify(default, default_kind)
+        if label is None:
             return
         if isinstance(label, str):
             self._notify(label, "key")
+            return
+        self._notify(default, default_kind)
 
     def type_text(
         self,
