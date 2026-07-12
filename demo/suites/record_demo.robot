@@ -27,6 +27,6 @@ Record The Broadcast Demo
     Hold    3
 
     Broadcast    echo hello from the cssh-rs cluster
-    Hold    3
+    Hold    1
 
     Export Demo Gif    ${GIF}    fps=${FPS}

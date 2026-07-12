@@ -43,7 +43,7 @@ _WINDOW_TIMEOUT_SECONDS = 20.0
 _POLL_INTERVAL_SECONDS = 0.5
 # Simulate deliberate typing: the broadcast pauses this long between keypresses
 # so the keycast overlay reveals each key as it is pressed.
-_TYPING_INTERVAL_SECONDS = 0.15
+_TYPING_INTERVAL_SECONDS = 0.07
 
 
 class DemoError(RuntimeError):
