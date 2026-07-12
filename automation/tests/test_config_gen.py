@@ -68,7 +68,7 @@ def test_generate_config_builds_expected_argv(
     assert fake_run.calls[0][0] == [
         "cssh-rs.exe",
         "generate-config",
-        "--ssh-config",
+        "--ssh-config-path",
         ssh_config,
         "--program",
         "ssh",
@@ -111,6 +111,23 @@ def test_generate_config_honors_program_and_cluster(
     assert argv[argv.index("--cluster") + 1] == "prod"
 
 
+def test_generate_config_passes_extra_ssh_args_before_hosts(
+    fake_run: _FakeRun, tmp_path: Path, ssh_config: str
+) -> None:
+    ConfigGen().generate_config(
+        "cssh-rs.exe",
+        str(tmp_path),
+        ssh_config,
+        ["h1"],
+        extra_ssh_args=["-o", "User=deploy"],
+    )
+
+    argv = fake_run.calls[0][0]
+    # Attached form so the leading `-o` is not parsed as a flag, and before hosts.
+    assert "--arguments=-o" in argv
+    assert argv.index("--arguments=User=deploy") < argv.index("h1")
+
+
 def test_generate_config_captures_output(
     fake_run: _FakeRun, tmp_path: Path, ssh_config: str
 ) -> None:
@@ -134,6 +151,7 @@ def test_generate_config_captures_output(
         ({"program": ""}, "program"),
         ({"aliases": []}, "non-empty"),
         ({"aliases": ["h1", ""]}, "each alias"),
+        ({"extra_ssh_args": ["-o", ""]}, "extra ssh arg"),
     ],
 )
 def test_generate_config_rejects_invalid_arguments(

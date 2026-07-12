@@ -26,18 +26,60 @@ def test_build_forced_command_invokes_marker_module() -> None:
     )
 
 
-def test_authorized_keys_line_toggles_forced_command_by_shell() -> None:
+_OPTIONS = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
+
+
+def test_authorized_keys_line_selects_command_by_mode() -> None:
     pubkey = "ssh-ed25519 AAAA h1"
     marker = Path("/tmp/markers/h1.log")
-    options = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
+    rc = Path("/tmp/homes/h1/.bashrc")
 
-    marker_line = sshd_fixture._authorized_keys_line(pubkey, marker, shell=False)
+    marker_line = sshd_fixture._authorized_keys_line(pubkey, marker)
     shell_line = sshd_fixture._authorized_keys_line(pubkey, marker, shell=True)
+    bash_line = sshd_fixture._authorized_keys_line(pubkey, marker, bash_rc=rc)
 
-    assert marker_line.startswith('command="')
-    assert "_marker_writer" in marker_line
-    assert marker_line.endswith(f",{options} {pubkey}\n")
-    assert shell_line == f"{options} {pubkey}\n"
+    assert marker_line.startswith('command="') and "_marker_writer" in marker_line
+    assert marker_line.endswith(f",{_OPTIONS} {pubkey}\n")
+    assert shell_line == f"{_OPTIONS} {pubkey}\n"
+    assert bash_line.startswith('command="bash --rcfile ') and bash_line.endswith(
+        f",{_OPTIONS} {pubkey}\n"
+    )
+
+
+def test_build_bash_command_runs_interactive_bash_with_forward_slash_rc() -> None:
+    command = sshd_fixture._build_bash_command(Path(r"C:\tmp\h1\.bashrc"))
+
+    assert command == r"bash --rcfile \"C:/tmp/h1/.bashrc\" -i"
+
+
+def test_write_bash_rc_sets_prompt_home_marker_and_extra_lines(tmp_path: Path) -> None:
+    rc = tmp_path / ".bashrc"
+    home = tmp_path / "home"
+    marker = tmp_path / "markers" / "hosta.dev.log"
+
+    sshd_fixture._write_bash_rc(
+        rc, prompt_host="hosta.dev", home=home, marker_path=marker, rc_lines="alias ll='ls -alF'"
+    )
+
+    content = rc.read_text(encoding="utf-8")
+    assert f'cd "{sshd_fixture._as_forward_slash(home)}"' in content
+    assert 'export HOME="$PWD"' in content
+    assert r"export PS1='root@hosta.dev:\w\$ '" in content
+    assert "alias ll='ls -alF'" in content
+    marker_path = sshd_fixture._as_forward_slash(marker)
+    assert f"""PROMPT_COMMAND='echo ready > "{marker_path}"; unset PROMPT_COMMAND'""" in content
+
+
+def test_require_bash_raises_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sshd_fixture.shutil, "which", lambda _: None)
+
+    with pytest.raises(SshdFixtureError, match="bash on PATH"):
+        sshd_fixture._require_bash()
+
+
+def test_start_sshd_rejects_shell_and_interactive_together() -> None:
+    with pytest.raises(SshdFixtureError, match="mutually exclusive"):
+        SshdFixture().start_sshd(["h1"], shell=True, interactive=True)
 
 
 def test_as_forward_slash_normalizes_separators() -> None:

@@ -53,7 +53,7 @@ class Keystrokes:
                 # Broad by design: a listener must never break input delivery.
                 LOGGER.warning("key listener failed for %r: %s", label, exc)
 
-    def type_text(self, text: str, interval: float = 0.0) -> None:
+    def type_text(self, text: str, interval: float = 0.0, label: str | None = None) -> None:
         """Type ``text`` as literal printable characters into the foreground window.
 
         Use ``press_key`` for named keys such as Enter or Tab.
@@ -62,10 +62,14 @@ class Keystrokes:
             text: Characters to type.
             interval: Seconds between characters; raise it if a terminal drops
                 fast input.
+            label: Overlay token to show instead of ``text``, as a discrete
+                action rather than typed characters (e.g. ``"PASTE"``).
         """
         if interval < 0:
             raise KeystrokesError(f"interval must be non-negative, got {interval}")
-        if text:
+        if label is not None:
+            self._notify(label, "key")
+        elif text:
             self._notify(text, "text")
         self._pyautogui().write(text, interval=interval)
 
@@ -79,15 +83,18 @@ class Keystrokes:
         self.type_text(text, interval=interval)
         self.press_key("enter")
 
-    def press_key(self, key: str) -> None:
+    def press_key(self, key: str, notify: bool = True) -> None:
         """Press a named key such as ``enter``, ``tab`` or ``esc``.
 
         Args:
             key: pyautogui key name to press.
+            notify: When ``False``, skip the overlay listener - for a key that
+                should not appear on screen, such as an input-absorbing no-op.
         """
         if not key:
             raise KeystrokesError("key must be a non-empty string")
-        self._notify(_key_label(key), "key")
+        if notify:
+            self._notify(_key_label(key), "key")
         self._pyautogui().press(key)
 
     def send_hotkey(self, *keys: str) -> None:

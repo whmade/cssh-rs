@@ -35,6 +35,7 @@ class ConfigGen:
         aliases: list[str] | tuple[str, ...],
         cluster_name: str = "e2e",
         program: str = "ssh",
+        extra_ssh_args: list[str] | tuple[str, ...] | None = None,
     ) -> str:
         """Write ``cssh-rs-config.toml`` into ``output_dir`` and return its path.
 
@@ -49,6 +50,8 @@ class ConfigGen:
                 resolve to a ``Host`` block in ``ssh_config``.
             cluster_name: Name of the generated cluster.
             program: SSH executable the config launches.
+            extra_ssh_args: Extra program arguments inserted before the
+                ``<user>@<host>`` entry, e.g. ``["-o", "User=deploy"]``.
 
         Returns:
             Absolute path to the written ``cssh-rs-config.toml`` as a str.
@@ -61,11 +64,12 @@ class ConfigGen:
             program=program,
             aliases=aliases,
         )
+        extra = _validate_extra_ssh_args(extra_ssh_args)
         config_path = Path(output_dir).resolve() / CONFIG_FILENAME
         argv = [
             cssh_rs_binary,
             GENERATE_CONFIG_SUBCOMMAND,
-            "--ssh-config",
+            "--ssh-config-path",
             ssh_config,
             "--program",
             program,
@@ -73,6 +77,9 @@ class ConfigGen:
             cluster_name,
             "--output",
             str(config_path),
+            # `--arguments=` (attached) so values starting with `-`, e.g. `-o`,
+            # are not parsed as flags.
+            *(f"--arguments={value}" for value in extra),
             *host_list,
         ]
         try:
@@ -120,3 +127,11 @@ def _validate(
     if not Path(output_dir).is_dir():
         raise ConfigGenError(f"output_dir is not an existing directory: {output_dir}")
     return host_list
+
+
+def _validate_extra_ssh_args(extra_ssh_args: list[str] | tuple[str, ...] | None) -> list[str]:
+    """Return ``extra_ssh_args`` as a list; reject non-string or empty entries."""
+    extra = list(extra_ssh_args or ())
+    if not all(isinstance(arg, str) and arg for arg in extra):
+        raise ConfigGenError("each extra ssh arg must be a non-empty string")
+    return extra

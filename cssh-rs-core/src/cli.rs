@@ -84,12 +84,17 @@ enum Commands {
     GenerateConfig {
         /// Path to an SSH config file. When set, the launched program
         /// receives `-F <PATH>` as the first two argv entries.
-        #[clap(long = "ssh-config")]
+        #[clap(long = "ssh-config-path")]
         ssh_config: Option<String>,
         /// Program launched to establish each SSH connection.
         /// Defaults to the `client.program` config default when unset.
         #[clap(long)]
         program: Option<String>,
+        /// Extra program argument inserted before the `<user>@<host>` entry.
+        /// Repeatable; use the `--arguments=VALUE` form for values starting with
+        /// `-`, e.g. `--arguments=-o --arguments=User=deploy` to force the login.
+        #[clap(long = "arguments")]
+        extra_args: Vec<String>,
         /// Name of the single cluster written to the config.
         #[clap(long, default_value = "default")]
         cluster: String,
@@ -498,12 +503,14 @@ async fn run_interactive_mode<
 }
 
 /// Build the config emitted by `generate-config`. A set `ssh_config` both
-/// prepends `-F <path>` to `client.arguments` and sets `client.ssh_config_path`.
+/// prepends `-F <path>` to `client.arguments` and sets `client.ssh_config_path`;
+/// `extra_args` are inserted just before the `<user>@<host>` placeholder.
 fn build_generate_config(
     hosts: Vec<String>,
     cluster: &str,
     program: Option<&str>,
     ssh_config: Option<&str>,
+    extra_args: Vec<String>,
 ) -> Config {
     let mut config = Config {
         clusters: vec![Cluster {
@@ -523,6 +530,7 @@ fn build_generate_config(
         arguments.push(path.to_string());
         config.client.ssh_config_path = path.to_string();
     }
+    arguments.extend(extra_args);
     arguments.push(config.client.username_host_placeholder.clone());
     config.client.arguments = arguments;
 
@@ -540,13 +548,14 @@ fn run_generate_config<O: Output, C: ConfigManager>(
     cluster: &str,
     program: Option<&str>,
     ssh_config: Option<&str>,
+    extra_args: Vec<String>,
     output_path: Option<&str>,
 ) -> Result<(), String> {
     if hosts.is_empty() {
         return Err("generate-config requires at least one host".to_string());
     }
 
-    let config = build_generate_config(hosts, cluster, program, ssh_config);
+    let config = build_generate_config(hosts, cluster, program, ssh_config, extra_args);
     let target_path = std::path::PathBuf::from(output_path.unwrap_or(default_config_path));
     let target_str = target_path.to_string_lossy().into_owned();
 
@@ -622,6 +631,7 @@ pub async fn main<
     if let Some(Commands::GenerateConfig {
         ssh_config,
         program,
+        extra_args,
         cluster,
         output: output_path,
     }) = &args.command
@@ -634,6 +644,7 @@ pub async fn main<
             cluster,
             program.as_deref(),
             ssh_config.as_deref(),
+            extra_args.to_owned(),
             output_path.as_deref(),
         ) {
             output.eprintln(&err);
