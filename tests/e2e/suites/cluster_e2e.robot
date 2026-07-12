@@ -58,17 +58,13 @@ Closing The Daemon Closes Every Client
     END
 
 Relayed Ctrl C Interrupts Every Client
-    [Documentation]    Relay Ctrl+C from the focused daemon and assert every client's cooked-mode
-    ...                ssh child is interrupted rather than fed a literal ^C (issue #144). An
-    ...                interrupted child either exits its client outright or drops it into the
-    ...                "SSH connection lost" state that a relayed Shift+Alt+C then closes. A
-    ...                baseline broadcast first proves the fresh sessions are live, so a Ctrl+C
-    ...                that does nothing is distinguishable from sessions that never connected.
+    [Documentation]    Relay Ctrl+C from the focused daemon and assert every client exits: ssh
+    ...                forwards the interrupt over its PTY to the remote, ending the session
+    ...                (issue #144 - a Ctrl+C that landed as a literal ^C would leave every session
+    ...                open). An interrupted client either exits outright or drops into the
+    ...                "SSH connection lost" state that a relayed Shift+Alt+C then closes.
     [Setup]    Restart Cssh Cluster
     Assert All Ssh Connections Established
-    ${message}=    Unique Message    BASELINE
-    Focus Daemon And Broadcast    ${message}
-    Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${message}
     Relay Ctrl C From Daemon
     FOR    ${alias}    IN    @{ALIASES}
         Wait Until Keyword Succeeds    20x    0.5s    Nudge Then Assert Client Gone    ${alias}

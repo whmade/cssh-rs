@@ -121,9 +121,11 @@ class SshdFixture:
                     pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
                     marker_path = markers_dir / f"{alias}.log"
                     forced = _build_forced_command(sys.executable, str(marker_path))
+                    # No no-pty: the session gets a PTY so a relayed Ctrl+C
+                    # forwards to the remote as a real interrupt.
                     handle.write(
                         f'command="{forced}",no-port-forwarding,no-x11-forwarding,'
-                        f"no-pty,no-agent-forwarding,no-user-rc {pubkey}\n"
+                        f"no-agent-forwarding,no-user-rc {pubkey}\n"
                     )
 
             chosen_port = port if port is not None else _pick_free_port()
@@ -389,9 +391,10 @@ def _render_ssh_config(
             "    StrictHostKeyChecking no\n"
             f"    UserKnownHostsFile {_as_forward_slash(known_hosts)}\n"
             "    BatchMode yes\n"
-            # cssh runs an interactive ssh (no remote command), which requests a
-            # PTY by default; the e2e sshd grants none, so opt out here.
-            "    RequestTTY no\n"
+            # Force a PTY (the server grants one) so a relayed Ctrl+C forwards
+            # to the remote as a real interrupt. The server granting it avoids
+            # the "PTY allocation request failed" noise a refusal prints (PR #232).
+            "    RequestTTY force\n"
             "    LogLevel ERROR\n"
         )
     return "\n".join(blocks)
