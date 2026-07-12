@@ -70,10 +70,11 @@ class Keystrokes:
         """
         if label is None:
             return
-        if not isinstance(label, _Default):
+        if isinstance(label, _Default):
+            if default:
+                self._notify(default, default_kind)
+        else:
             self._notify(label, "key")
-        elif default:
-            self._notify(default, default_kind)
 
     def type_text(
         self,
