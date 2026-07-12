@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
@@ -54,6 +55,30 @@ class SshdFixtureError(RuntimeError):
     """Raised when the fixture cannot start or shut down sshd cleanly."""
 
 
+@dataclass(frozen=True)
+class MarkerMode:
+    """Force a command piping each session's stdin into its marker file (default)."""
+
+
+@dataclass(frozen=True)
+class ShellMode:
+    """Drop the forced command so sessions land in the user's real login shell."""
+
+
+@dataclass(frozen=True)
+class ScriptedShellMode:
+    """Run interactive bash from a generated rc that signals readiness once set up.
+
+    Args:
+        rc_lines: Extra bash appended to each session's rc, e.g. shell aliases.
+    """
+
+    rc_lines: str = ""
+
+
+SshdMode = MarkerMode | ShellMode | ScriptedShellMode
+
+
 class SshdFixture:
     """Robot Framework library that owns a per-run user-mode sshd."""
 
@@ -68,7 +93,7 @@ class SshdFixture:
         self,
         host_aliases: list[str] | tuple[str, ...],
         port: int | None = None,
-        shell: bool = False,
+        mode: SshdMode | None = None,
     ) -> dict[str, object]:
         """Bring up sshd for ``host_aliases`` and return runtime paths.
 
@@ -78,18 +103,23 @@ class SshdFixture:
                 own ``markers/<alias>.log`` marker file.
             port: Specific TCP port to bind. ``None`` picks a free
                 ephemeral high port.
-            shell: When ``True``, drop the forced marker-writer command so
-                sessions land in the user's real interactive shell and no
-                markers are written. Defaults to marker mode.
+            mode: Session mode: ``MarkerMode`` (default) pipes each session's
+                stdin into its marker file, ``ShellMode`` yields the user's
+                real login shell, ``ScriptedShellMode`` runs a scripted bash
+                that signals readiness. Defaults to ``MarkerMode``.
 
         Returns:
             A dict with keys ``port`` (int), ``ssh_config`` (str),
-            ``markers_dir`` (str), ``aliases`` (list of str) and
-            ``tempdir`` (str), all populated after sshd is accepting
-            connections.
+            ``markers_dir`` (str), ``aliases`` (list of str), ``tempdir``
+            (str) and ``homes`` (alias -> home directory, empty unless
+            ``ScriptedShellMode``), populated after sshd is accepting connections.
         """
         if self._process is not None:
             raise SshdFixtureError("sshd fixture already running")
+        if mode is None:
+            mode = MarkerMode()
+        if isinstance(mode, ScriptedShellMode):
+            _require_bash()
         aliases = list(host_aliases)
         if not aliases:
             raise SshdFixtureError("host_aliases must be non-empty")
@@ -118,13 +148,14 @@ class SshdFixture:
             _write_openssh_keypair(host_key_path)
 
             authorized_keys_path = tempdir / "authorized_keys"
-            with authorized_keys_path.open("w", encoding="utf-8", newline="\n") as handle:
-                for alias in aliases:
-                    alias_key_path = keys_dir / f"{alias}_ed25519"
-                    _write_openssh_keypair(alias_key_path)
-                    pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
-                    marker_path = markers_dir / f"{alias}.log"
-                    handle.write(_authorized_keys_line(pubkey, marker_path, shell=shell))
+            homes = _write_authorized_keys(
+                authorized_keys_path,
+                aliases,
+                keys_dir=keys_dir,
+                markers_dir=markers_dir,
+                homes_dir=tempdir / "homes",
+                mode=mode,
+            )
 
             chosen_port = port if port is not None else _pick_free_port()
             sshd_config_path = tempdir / "sshd_config"
@@ -182,6 +213,7 @@ class SshdFixture:
             "markers_dir": str(markers_dir),
             "aliases": aliases,
             "tempdir": str(tempdir),
+            "homes": homes,
         }
 
     def stop_sshd(self) -> None:
@@ -194,7 +226,8 @@ class SshdFixture:
     def count_connected_markers(self) -> int:
         """Return how many host markers exist, one per connected ssh session.
 
-        A marker exists once its forced-command writer starts, so its presence
+        A marker exists once the session's forced command runs (the marker
+        writer, or the interactive shell's readiness line), so its presence
         proves the session authenticated; this globs marker files only, never
         the read-share-locked sshd.log.
 
@@ -327,19 +360,56 @@ def _harden_private_key_permissions(private_path: Path) -> None:
         )
 
 
-def _authorized_keys_line(pubkey: str, marker_path: Path, *, shell: bool) -> str:
-    """Return the ``authorized_keys`` line for one key.
+def _write_authorized_keys(
+    path: Path,
+    aliases: list[str],
+    *,
+    keys_dir: Path,
+    markers_dir: Path,
+    homes_dir: Path,
+    mode: SshdMode,
+) -> dict[str, str]:
+    """Write one authorized_keys line per alias; return scripted-shell home dirs by alias."""
+    homes: dict[str, str] = {}
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        for alias in aliases:
+            alias_key_path = keys_dir / f"{alias}_ed25519"
+            _write_openssh_keypair(alias_key_path)
+            pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
+            marker_path = markers_dir / f"{alias}.log"
+            match mode:
+                case ScriptedShellMode(rc_lines=rc_lines):
+                    home = homes_dir / alias
+                    home.mkdir(parents=True)
+                    bash_rc = home / ".bashrc"
+                    _write_bash_rc(
+                        bash_rc,
+                        prompt_host=alias,
+                        home=home,
+                        marker_path=marker_path,
+                        rc_lines=rc_lines,
+                    )
+                    homes[alias] = str(home)
+                    forced_command = _build_bash_command(bash_rc)
+                case ShellMode():
+                    forced_command = None
+                case MarkerMode():
+                    forced_command = _build_forced_command(sys.executable, str(marker_path))
+            handle.write(_authorized_keys_line(pubkey, forced_command))
+    return homes
 
-    In marker mode a forced ``command="..."`` pipes the session into
-    ``marker_path``; in ``shell`` mode it is dropped so the session gets a
-    real interactive shell.
+
+def _authorized_keys_line(pubkey: str, forced_command: str | None) -> str:
+    """Return the ``authorized_keys`` line, prefixing ``command="..."`` when forced.
+
+    ``forced_command`` is ``None`` for a real login shell; otherwise it is the
+    marker-writer or interactive-bash command to force.
     """
     # No no-pty: keeping the PTY lets a relayed Ctrl+C interrupt the remote.
     options = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
-    if shell:
+    if forced_command is None:
         return f"{options} {pubkey}\n"
-    forced = _build_forced_command(sys.executable, str(marker_path))
-    return f'command="{forced}",{options} {pubkey}\n'
+    return f'command="{forced_command}",{options} {pubkey}\n'
 
 
 def _build_forced_command(executable: str, marker: str) -> str:
@@ -350,6 +420,37 @@ def _build_forced_command(executable: str, marker: str) -> str:
         f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_automation._marker_writer "
         f"{_quote_authorized_keys_arg(marker)}"
     )
+
+
+def _build_bash_command(rc_path: Path) -> str:
+    """Return the command= payload running interactive bash with ``rc_path``."""
+    return f"bash --rcfile {_quote_authorized_keys_arg(_as_forward_slash(rc_path))} -i"
+
+
+def _write_bash_rc(
+    rc_path: Path, *, prompt_host: str, home: Path, marker_path: Path, rc_lines: str
+) -> None:
+    """Write a per-host bash rc: root@<host> prompt, host home as ~, extra lines, ready marker."""
+    # Set HOME to $PWD after cd so \w abbreviates the canonicalized home to ~.
+    body = [
+        f'cd "{_as_forward_slash(home)}"',
+        'export HOME="$PWD"',
+        f"export PS1='root@{prompt_host}:\\w\\$ '",
+    ]
+    if rc_lines:
+        body.append(rc_lines)
+    # Mark ready from the first prompt, not mid-rc, so early keystrokes are not lost.
+    marker = _as_forward_slash(marker_path)
+    body.append(f"""PROMPT_COMMAND='echo ready > "{marker}"; unset PROMPT_COMMAND'""")
+    rc_path.write_text("\n".join(body) + "\n", encoding="utf-8", newline="\n")
+
+
+def _require_bash() -> None:
+    """Fail loudly if ScriptedShellMode's bash is not on PATH."""
+    if shutil.which("bash") is None:
+        raise SshdFixtureError(
+            "ScriptedShellMode needs bash on PATH; install Git for Windows or add bash"
+        )
 
 
 def _quote_authorized_keys_arg(value: str) -> str:

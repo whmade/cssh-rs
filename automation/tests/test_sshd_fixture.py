@@ -26,18 +26,68 @@ def test_build_forced_command_invokes_marker_module() -> None:
     )
 
 
-def test_authorized_keys_line_toggles_forced_command_by_shell() -> None:
-    pubkey = "ssh-ed25519 AAAA h1"
-    marker = Path("/tmp/markers/h1.log")
-    options = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
+_OPTIONS = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
 
-    marker_line = sshd_fixture._authorized_keys_line(pubkey, marker, shell=False)
-    shell_line = sshd_fixture._authorized_keys_line(pubkey, marker, shell=True)
 
-    assert marker_line.startswith('command="')
-    assert "_marker_writer" in marker_line
-    assert marker_line.endswith(f",{options} {pubkey}\n")
-    assert shell_line == f"{options} {pubkey}\n"
+def test_write_authorized_keys_dispatches_by_mode(tmp_path: Path) -> None:
+    keys_dir = tmp_path / "keys"
+    markers_dir = tmp_path / "markers"
+    keys_dir.mkdir()
+    markers_dir.mkdir()
+
+    def write(mode: sshd_fixture.SshdMode, tag: str) -> tuple[str, dict[str, str]]:
+        path = tmp_path / f"authorized_keys_{tag}"
+        homes = sshd_fixture._write_authorized_keys(
+            path,
+            ["h1"],
+            keys_dir=keys_dir,
+            markers_dir=markers_dir,
+            homes_dir=tmp_path / f"homes_{tag}",
+            mode=mode,
+        )
+        return path.read_text(encoding="utf-8").rstrip("\n"), homes
+
+    marker_line, marker_homes = write(sshd_fixture.MarkerMode(), "marker")
+    shell_line, shell_homes = write(sshd_fixture.ShellMode(), "shell")
+    scripted_line, scripted_homes = write(sshd_fixture.ScriptedShellMode(), "scripted")
+
+    assert marker_line.startswith('command="') and "_marker_writer" in marker_line
+    assert marker_homes == {}
+    assert shell_line.startswith(f"{_OPTIONS} ") and "command=" not in shell_line
+    assert shell_homes == {}
+    assert scripted_line.startswith('command="bash --rcfile ')
+    assert scripted_homes == {"h1": str(tmp_path / "homes_scripted" / "h1")}
+
+
+def test_build_bash_command_runs_interactive_bash_with_forward_slash_rc() -> None:
+    command = sshd_fixture._build_bash_command(Path(r"C:\tmp\h1\.bashrc"))
+
+    assert command == r"bash --rcfile \"C:/tmp/h1/.bashrc\" -i"
+
+
+def test_write_bash_rc_sets_prompt_home_marker_and_extra_lines(tmp_path: Path) -> None:
+    rc = tmp_path / ".bashrc"
+    home = tmp_path / "home"
+    marker = tmp_path / "markers" / "hosta.dev.log"
+
+    sshd_fixture._write_bash_rc(
+        rc, prompt_host="hosta.dev", home=home, marker_path=marker, rc_lines="alias ll='ls -alF'"
+    )
+
+    content = rc.read_text(encoding="utf-8")
+    assert f'cd "{sshd_fixture._as_forward_slash(home)}"' in content
+    assert 'export HOME="$PWD"' in content
+    assert r"export PS1='root@hosta.dev:\w\$ '" in content
+    assert "alias ll='ls -alF'" in content
+    marker_path = sshd_fixture._as_forward_slash(marker)
+    assert f"""PROMPT_COMMAND='echo ready > "{marker_path}"; unset PROMPT_COMMAND'""" in content
+
+
+def test_require_bash_raises_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sshd_fixture.shutil, "which", lambda _: None)
+
+    with pytest.raises(SshdFixtureError, match="bash on PATH"):
+        sshd_fixture._require_bash()
 
 
 def test_as_forward_slash_normalizes_separators() -> None:

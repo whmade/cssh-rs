@@ -17,7 +17,7 @@ from cssh_rs_automation.config_gen import ConfigGen
 from cssh_rs_automation.keycast import Keycast, KeycastOverlay
 from cssh_rs_automation.keystrokes import Keystrokes
 from cssh_rs_automation.screen_recorder import ScreenRecorder
-from cssh_rs_automation.sshd_fixture import SshdFixture
+from cssh_rs_automation.sshd_fixture import ShellMode, SshdFixture
 from cssh_rs_automation.window_focus import WindowFocus
 
 from cssh_rs_demo.gif_export import export_gif
@@ -89,7 +89,7 @@ class DemoRecorder:
             raise DemoError(f"cssh-rs binary not found: {binary_path}")
         self._hosts = tuple(hosts)
 
-        info = self._sshd.start_sshd(self._hosts, shell=True)
+        info = self._sshd.start_sshd(self._hosts, mode=ShellMode())
         self._config_path = self._config_gen.generate_config(
             str(binary_path),
             str(binary_path.resolve().parent),
