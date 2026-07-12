@@ -68,7 +68,6 @@ class SshdFixture:
         self,
         host_aliases: list[str] | tuple[str, ...],
         port: int | None = None,
-        grant_pty: bool = False,
     ) -> dict[str, object]:
         """Bring up sshd for ``host_aliases`` and return runtime paths.
 
@@ -78,10 +77,6 @@ class SshdFixture:
                 own ``markers/<alias>.log`` marker file.
             port: Specific TCP port to bind. ``None`` picks a free
                 ephemeral high port.
-            grant_pty: When ``True``, allow and request a PTY so a relayed
-                Ctrl+C forwards to the remote as a real interrupt. The
-                default keeps the no-pty raw-stdin marker capture the
-                broadcast assertions rely on (see PR #232).
 
         Returns:
             A dict with keys ``port`` (int), ``ssh_config`` (str),
@@ -126,13 +121,11 @@ class SshdFixture:
                     pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
                     marker_path = markers_dir / f"{alias}.log"
                     forced = _build_forced_command(sys.executable, str(marker_path))
-                    # Drop no-pty only when a PTY is wanted, so a relayed Ctrl+C
-                    # forwards to the remote as a real interrupt; otherwise keep
-                    # it for raw-stdin marker capture (PR #232).
-                    pty_restriction = "" if grant_pty else "no-pty,"
+                    # No no-pty: the session gets a PTY (as in real use) so a
+                    # relayed Ctrl+C forwards to the remote as a real interrupt.
                     handle.write(
                         f'command="{forced}",no-port-forwarding,no-x11-forwarding,'
-                        f"{pty_restriction}no-agent-forwarding,no-user-rc {pubkey}\n"
+                        f"no-agent-forwarding,no-user-rc {pubkey}\n"
                     )
 
             chosen_port = port if port is not None else _pick_free_port()
@@ -157,7 +150,6 @@ class SshdFixture:
                     keys_dir=keys_dir,
                     known_hosts=known_hosts_path,
                     user=getpass.getuser(),
-                    grant_pty=grant_pty,
                 ),
                 encoding="utf-8",
             )
@@ -385,12 +377,7 @@ def _render_ssh_config(
     keys_dir: Path,
     known_hosts: Path,
     user: str,
-    grant_pty: bool = False,
 ) -> str:
-    # Force a PTY when the server grants one so a relayed Ctrl+C forwards to the
-    # remote; otherwise opt out to silence the "PTY allocation request failed"
-    # noise a refusal would print into every client console (PR #232).
-    request_tty = "force" if grant_pty else "no"
     blocks = []
     for alias in aliases:
         identity = keys_dir / f"{alias}_ed25519"
@@ -404,7 +391,11 @@ def _render_ssh_config(
             "    StrictHostKeyChecking no\n"
             f"    UserKnownHostsFile {_as_forward_slash(known_hosts)}\n"
             "    BatchMode yes\n"
-            f"    RequestTTY {request_tty}\n"
+            # Force a PTY (the server grants one, as in real use) so a relayed
+            # Ctrl+C forwards to the remote as a real interrupt. The server
+            # granting it avoids the "PTY allocation request failed" noise a
+            # refusal would print (PR #232).
+            "    RequestTTY force\n"
             "    LogLevel ERROR\n"
         )
     return "\n".join(blocks)

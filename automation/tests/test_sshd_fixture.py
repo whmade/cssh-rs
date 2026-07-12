@@ -60,23 +60,8 @@ def test_render_ssh_config_one_block_per_alias(tmp_path: Path) -> None:
     assert config.count("Port 2222\n") == 2
     assert config.count("User tester\n") == 2
     assert "IdentitiesOnly yes\n" in config
-    # Keeps 'PTY allocation request failed on channel 0' out of recordings.
-    assert config.count("RequestTTY no\n") == 2
-
-
-def test_render_ssh_config_requests_pty_when_granted(tmp_path: Path) -> None:
-    config = sshd_fixture._render_ssh_config(
-        aliases=["h1", "h2"],
-        port=2222,
-        keys_dir=tmp_path / "keys",
-        known_hosts=tmp_path / "known_hosts",
-        user="tester",
-        grant_pty=True,
-    )
-
-    # A granted PTY is requested so a relayed Ctrl+C forwards to the remote.
+    # Force a PTY (as in real use) so a relayed Ctrl+C forwards to the remote.
     assert config.count("RequestTTY force\n") == 2
-    assert "RequestTTY no\n" not in config
 
 
 def test_pick_free_port_in_range() -> None:

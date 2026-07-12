@@ -29,13 +29,12 @@ Start Cssh Cluster
     ...                Cluster. ${cluster_aliases} are the hosts the cluster launches;
     ...                ${sshd_aliases} are the aliases sshd serves and defaults to
     ...                ${cluster_aliases}. Pass a superset as ${sshd_aliases} to leave
-    ...                spare hosts a test can add at runtime. ${grant_pty} opts into a
-    ...                PTY-granting session so a relayed Ctrl+C reaches the remote.
-    [Arguments]    ${cluster_aliases}=${ALIASES}    ${sshd_aliases}=${NONE}    ${grant_pty}=${FALSE}
+    ...                spare hosts a test can add at runtime.
+    [Arguments]    ${cluster_aliases}=${ALIASES}    ${sshd_aliases}=${NONE}
     IF    $sshd_aliases is None
         ${sshd_aliases}=    Set Variable    ${cluster_aliases}
     END
-    ${sshd}=    Start Sshd    ${sshd_aliases}    grant_pty=${grant_pty}
+    ${sshd}=    Start Sshd    ${sshd_aliases}
     Set Suite Variable    ${SSHD}    ${sshd}
     ${binary_dir}=    Evaluate    os.path.dirname(os.path.abspath(r"${CSSH_RS_BINARY}"))    modules=os
     ${config_path}=    Generate Config    ${CSSH_RS_BINARY}    ${binary_dir}
@@ -64,12 +63,6 @@ Restart Cssh Cluster
     ...                single-instance sshd fixture refuses to start while one runs.
     Tear Down Cssh Cluster
     Start Cssh Cluster
-
-Restart Cssh Cluster With Pty
-    [Documentation]    Restart into a PTY-granting cluster so a relayed Ctrl+C forwards to the
-    ...                remote as a real interrupt instead of being swallowed by the local ssh.
-    Tear Down Cssh Cluster
-    Start Cssh Cluster    grant_pty=${TRUE}
 
 Stop Cssh Process
     [Documentation]    Kill the daemon, every client and their ssh children by image name.

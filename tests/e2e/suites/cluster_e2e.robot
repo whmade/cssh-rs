@@ -63,7 +63,7 @@ Relayed Ctrl C Interrupts Every Client
     ...                (issue #144 - a Ctrl+C that landed as a literal ^C would leave every session
     ...                open). An interrupted client either exits outright or drops into the
     ...                "SSH connection lost" state that a relayed Shift+Alt+C then closes.
-    [Setup]    Restart Cssh Cluster With Pty
+    [Setup]    Restart Cssh Cluster
     Assert All Ssh Connections Established
     Relay Ctrl C From Daemon
     FOR    ${alias}    IN    @{ALIASES}

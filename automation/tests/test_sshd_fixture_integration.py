@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -31,22 +32,43 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _await_marker(fixture: SshdFixture, alias: str, needle: str) -> str:
+    """Poll ``alias``'s marker until it contains ``needle`` or a deadline passes."""
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if needle in fixture.read_marker(alias):
+            break
+        time.sleep(0.1)
+    return fixture.read_marker(alias)
+
+
 def test_daemon_input_fans_out_to_every_marker() -> None:
     ssh = shutil.which("ssh")
     assert ssh is not None
     fixture = SshdFixture()
     info = fixture.start_sshd(["h1", "h2"])
+    # The session gets a PTY, which stays interactive rather than exiting on
+    # stdin EOF, so write into a live session and poll the marker instead of
+    # running ssh to completion. Send a real Enter (CR): a PTY completes a
+    # cooked line on CR, and its newline translation differs by OS, so assert
+    # on the payload text rather than exact bytes.
+    sessions = []
     try:
         for alias in info["aliases"]:
-            result = subprocess.run(
+            session = subprocess.Popen(
                 [ssh, "-F", info["ssh_config"], alias],
-                input=f"payload-{alias}\n".encode(),
-                capture_output=True,
-                timeout=15,
-                check=False,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
-            assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
-        assert fixture.read_marker("h1") == "payload-h1\n"
-        assert fixture.read_marker("h2") == "payload-h2\n"
+            sessions.append(session)
+            assert session.stdin is not None
+            session.stdin.write(f"payload-{alias}\r".encode())
+            session.stdin.flush()
+        assert "payload-h1" in _await_marker(fixture, "h1", "payload-h1")
+        assert "payload-h2" in _await_marker(fixture, "h2", "payload-h2")
     finally:
+        for session in sessions:
+            session.kill()
+            session.wait()
         fixture.stop_sshd()
