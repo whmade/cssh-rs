@@ -19,14 +19,12 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class _DefaultLabel(enum.Enum):
-    """Sentinel for the ``label`` argument (see ``DEFAULT_LABEL``)."""
-
-    TOKEN = enum.auto()
+class _Sentinel(enum.Enum):
+    DEFAULT_LABEL = enum.auto()
 
 
-# Default for ``label``: show the overlay for whatever was typed or pressed.
-DEFAULT_LABEL = _DefaultLabel.TOKEN
+# Default ``label``: show the overlay for whatever was typed or pressed.
+DEFAULT_LABEL = _Sentinel.DEFAULT_LABEL
 
 
 class KeystrokesError(RuntimeError):
@@ -65,31 +63,24 @@ class Keystrokes:
                 LOGGER.warning("key listener failed for %r: %s", label, exc)
 
     def _notify_label(
-        self, label: str | None | _DefaultLabel, *, default: str, default_kind: str
+        self, label: str | None | _Sentinel, *, default: str, default_kind: str
     ) -> None:
-        """Route ``label`` to the overlay.
-
-        ``DEFAULT_LABEL`` shows ``default`` (only if non-empty) as ``default_kind``;
-        ``None`` suppresses the overlay; any string shows that token as a discrete key.
-
-        Args:
-            label: The caller's overlay control value.
-            default: Overlay text used when ``label`` is ``DEFAULT_LABEL``.
-            default_kind: Kind reported for ``default`` (``"text"`` or ``"key"``).
+        """Route ``label`` to the overlay: ``DEFAULT_LABEL`` shows ``default`` (when
+        non-empty) as ``default_kind``, ``None`` suppresses it, any string shows that
+        token as a discrete key.
         """
         if label is None:
             return
-        if isinstance(label, _DefaultLabel):
-            if default:
-                self._notify(default, default_kind)
-        else:
+        if not isinstance(label, _Sentinel):
             self._notify(label, "key")
+        elif default:
+            self._notify(default, default_kind)
 
     def type_text(
         self,
         text: str,
         interval: float = 0.0,
-        label: str | None | _DefaultLabel = DEFAULT_LABEL,
+        label: str | None | _Sentinel = DEFAULT_LABEL,
     ) -> None:
         """Type ``text`` as literal printable characters into the foreground window.
 
@@ -118,17 +109,14 @@ class Keystrokes:
         self.type_text(text, interval=interval)
         self.press_key("enter")
 
-    def press_key(
-        self, key: str, label: str | None | _DefaultLabel = DEFAULT_LABEL
-    ) -> None:
+    def press_key(self, key: str, label: str | None | _Sentinel = DEFAULT_LABEL) -> None:
         """Press a named key such as ``enter``, ``tab`` or ``esc``.
 
         Args:
             key: pyautogui key name to press.
             label: Overlay control. ``DEFAULT_LABEL`` (the default) shows the
-                key's own label; ``None`` suppresses the overlay - for a key that
-                should not appear on screen, such as an input-absorbing no-op;
-                any string shows that token instead.
+                key's own label; ``None`` suppresses the overlay; any string
+                shows that token instead.
         """
         if not key:
             raise KeystrokesError("key must be a non-empty string")

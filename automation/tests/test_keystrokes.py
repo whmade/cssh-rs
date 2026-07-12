@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import sys
 import types
+from typing import TYPE_CHECKING
 
 import pytest
 
 from cssh_rs_automation.keystrokes import Keystrokes, KeystrokesError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class _FakePyAutoGui(types.SimpleNamespace):
@@ -113,49 +117,49 @@ def test_key_listener_receives_typed_text(fake_pyautogui: _FakePyAutoGui) -> Non
     assert events == [("echo hi", "text")]
 
 
-def test_type_text_label_string_reports_a_discrete_key(fake_pyautogui: _FakePyAutoGui) -> None:
+@pytest.mark.parametrize(
+    ("deliver", "expected_events", "expected_call"),
+    [
+        pytest.param(
+            lambda keys: keys.type_text("secret", label="PASTE"),
+            [("PASTE", "key")],
+            ("write", ("secret",), {"interval": 0.0}),
+            id="type_text-string-overrides",
+        ),
+        pytest.param(
+            lambda keys: keys.type_text("secret", label=None),
+            [],
+            ("write", ("secret",), {"interval": 0.0}),
+            id="type_text-none-suppresses",
+        ),
+        pytest.param(
+            lambda keys: keys.press_key("f5", label="REFRESH"),
+            [("REFRESH", "key")],
+            ("press", ("f5",), {}),
+            id="press_key-string-overrides",
+        ),
+        pytest.param(
+            lambda keys: keys.press_key("backspace", label=None),
+            [],
+            ("press", ("backspace",), {}),
+            id="press_key-none-suppresses",
+        ),
+    ],
+)
+def test_label_overrides_or_suppresses_the_overlay(
+    deliver: Callable[[Keystrokes], None],
+    expected_events: list[tuple[str, str]],
+    expected_call: tuple[str, tuple[object, ...], dict[str, object]],
+    fake_pyautogui: _FakePyAutoGui,
+) -> None:
     events: list[tuple[str, str]] = []
     keys = Keystrokes()
     keys.add_key_listener(lambda label, kind: events.append((label, kind)))
 
-    keys.type_text("secret text", label="PASTE")
+    deliver(keys)
 
-    # The token is shown as a discrete action, not the typed characters.
-    assert events == [("PASTE", "key")]
-    assert fake_pyautogui.calls == [("write", ("secret text",), {"interval": 0.0})]
-
-
-def test_type_text_label_none_suppresses_the_overlay(fake_pyautogui: _FakePyAutoGui) -> None:
-    events: list[tuple[str, str]] = []
-    keys = Keystrokes()
-    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
-
-    keys.type_text("secret text", label=None)
-
-    assert events == []
-    assert fake_pyautogui.calls == [("write", ("secret text",), {"interval": 0.0})]
-
-
-def test_press_key_label_none_suppresses_the_overlay(fake_pyautogui: _FakePyAutoGui) -> None:
-    events: list[tuple[str, str]] = []
-    keys = Keystrokes()
-    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
-
-    keys.press_key("backspace", label=None)
-
-    assert events == []
-    assert fake_pyautogui.calls == [("press", ("backspace",), {})]
-
-
-def test_press_key_label_string_overrides_the_overlay(fake_pyautogui: _FakePyAutoGui) -> None:
-    events: list[tuple[str, str]] = []
-    keys = Keystrokes()
-    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
-
-    keys.press_key("f5", label="REFRESH")
-
-    assert events == [("REFRESH", "key")]
-    assert fake_pyautogui.calls == [("press", ("f5",), {})]
+    assert events == expected_events
+    assert fake_pyautogui.calls == [expected_call]
 
 
 def test_key_listener_reports_line_then_enter(fake_pyautogui: _FakePyAutoGui) -> None:  # noqa: ARG001
