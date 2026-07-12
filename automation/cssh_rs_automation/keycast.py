@@ -46,7 +46,7 @@ class Keycast:
             now: Monotonic timestamp of the frame being rendered.
 
         Returns:
-            The unexpired labels, oldest first.
+            The unexpired labels.
         """
         with self._lock:
             return [label for label, stamped in self._events if now - stamped <= self._fade_seconds]
@@ -91,9 +91,8 @@ def _draw_keycast(frame: object, labels: list[str]) -> object:
     pad = max(8, text_height // 2)
     box_width = text_width + 2 * pad
     box_height = text_height + 2 * pad
-    margin = pad
-    x0 = width - box_width - margin
-    y0 = height - box_height - margin
+    x0 = width - box_width - pad
+    y0 = height - box_height - pad
 
     draw.rounded_rectangle(
         (x0, y0, x0 + box_width, y0 + box_height), radius=pad, fill=(0, 0, 0, 165)
