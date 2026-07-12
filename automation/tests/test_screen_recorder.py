@@ -120,6 +120,18 @@ def test_start_recording_writes_converted_frames(fake_backends: _Backends, tmp_p
     assert list(writer.frames[0][0, 0]) == [3, 2, 1]
 
 
+@pytest.mark.usefixtures("fake_backends")
+def test_wait_until_recording_signals_once_capture_is_live(tmp_path: Path) -> None:
+    recorder = ScreenRecorder()
+    assert recorder.wait_until_recording(timeout=0) is False
+
+    recorder.start_recording("suite", str(tmp_path), fps=100)
+    try:
+        assert recorder.wait_until_recording(timeout=3.0) is True
+    finally:
+        recorder.stop_recording()
+
+
 def test_stop_recording_without_start_returns_none() -> None:
     assert ScreenRecorder().stop_recording() is None
 

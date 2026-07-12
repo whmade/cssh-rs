@@ -29,6 +29,7 @@ DEFAULT_FPS = 8
 # mss monitor 0 is the virtual bounding box spanning every physical monitor.
 DESKTOP_MONITOR = 0
 _STOP_JOIN_TIMEOUT_SECONDS = 10.0
+_START_WAIT_TIMEOUT_SECONDS = 10.0
 
 
 class ScreenRecorderError(RuntimeError):
@@ -44,6 +45,7 @@ class ScreenRecorder:
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
         self._stop_event: threading.Event | None = None
+        self._started_event: threading.Event | None = None
         self._output_path: Path | None = None
         self._banner_lock = threading.Lock()
         self._banner_text: str | None = None
@@ -76,17 +78,36 @@ class ScreenRecorder:
         output_path = (directory / f"{_safe_filename(name)}.mp4").resolve()
 
         stop_event = threading.Event()
+        started_event = threading.Event()
         thread = threading.Thread(
             target=self._record,
-            args=(output_path, fps, stop_event),
+            args=(output_path, fps, stop_event, started_event),
             name="cssh-rs-automation-screen-recorder",
             daemon=True,
         )
         self._output_path = output_path
         self._stop_event = stop_event
+        self._started_event = started_event
         self._thread = thread
         thread.start()
         return str(output_path)
+
+    def wait_until_recording(self, timeout: float = _START_WAIT_TIMEOUT_SECONDS) -> bool:
+        """Block until the capture thread is live; return whether it started in time.
+
+        The backend (mss, ffmpeg writer) is created on the worker thread, so
+        start_recording returns before capture begins; callers wait on this to
+        avoid launching what they want recorded during that warm-up.
+
+        Args:
+            timeout: Seconds to wait for capture to start.
+
+        Returns:
+            ``True`` once capture is live, ``False`` on timeout or if not started.
+        """
+        if self._started_event is None:
+            return False
+        return self._started_event.wait(timeout)
 
     def stop_recording(self) -> str | None:
         """Stop the in-progress recording and return its MP4 path.
@@ -114,6 +135,7 @@ class ScreenRecorder:
             return None
         self._thread = None
         self._stop_event = None
+        self._started_event = None
         self._output_path = None
         return str(output_path)
 
@@ -154,24 +176,31 @@ class ScreenRecorder:
             return _draw_banner(frame, banner)
         return frame
 
-    def _record(self, output_path: Path, fps: int, stop_event: threading.Event) -> None:
+    def _record(
+        self,
+        output_path: Path,
+        fps: int,
+        stop_event: threading.Event,
+        started_event: threading.Event,
+    ) -> None:
         """Capture frames until ``stop_event`` is set; best-effort.
 
         mss and the imageio writer are created here, in the worker thread: mss
         binds its device context to the creating thread, and owning the ffmpeg
         writer on the same thread avoids a cross-thread teardown race. Imports
         are local so the headless marker writer that imports the package does
-        not pull in mss/imageio/numpy.
+        not pull in mss/imageio/numpy. ``started_event`` fires once capture is
+        live (or on any exit) so waiters never hang.
         """
         try:
-            import imageio.v2 as imageio
-            import mss
-            import numpy as np
-        except ImportError as exc:
-            LOGGER.warning("screen recording disabled, backend import failed: %s", exc)
-            return
+            try:
+                import imageio.v2 as imageio
+                import mss
+                import numpy as np
+            except ImportError as exc:
+                LOGGER.warning("screen recording disabled, backend import failed: %s", exc)
+                return
 
-        try:
             with (
                 mss.mss() as sct,
                 imageio.get_writer(str(output_path), fps=fps, codec="libx264") as writer,
@@ -179,6 +208,7 @@ class ScreenRecorder:
                 region = sct.monitors[DESKTOP_MONITOR]
                 frame_interval = 1.0 / fps
                 next_capture = time.monotonic()
+                started_event.set()
                 while not stop_event.is_set():
                     # mss grabs BGRA; reorder to the RGB imageio wants, dropping alpha.
                     frame = np.asarray(sct.grab(region))[..., [2, 1, 0]]
@@ -196,6 +226,9 @@ class ScreenRecorder:
         except Exception as exc:
             # Broad by design: recording is best-effort and must never fail a suite.
             LOGGER.warning("screen recording failed for %s: %s", output_path, exc)
+        finally:
+            # Never leave a start waiter hanging if capture never reached its loop.
+            started_event.set()
 
 
 def _safe_filename(name: str) -> str:
