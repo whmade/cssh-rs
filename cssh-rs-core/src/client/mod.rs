@@ -250,54 +250,30 @@ fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     };
 }
 
-/// Report whether a forwarded key event is the Ctrl+C or Ctrl+Break combination.
-///
-/// These are the two keystrokes conhost turns into console control signals; the
-/// caller re-raises them as a signal instead of injecting them as input.
+/// Report whether a forwarded key event is Ctrl+C or Ctrl+Break.
 ///
 /// # Arguments
 ///
 /// * `key_event` - The key event record forwarded by the daemon.
-///
-/// # Returns
-///
-/// `true` for a Ctrl-modified C or Break key, `false` otherwise.
 fn is_console_signal_key(key_event: &KEY_EVENT_RECORD) -> bool {
     return key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0
         && matches!(VIRTUAL_KEY(key_event.wVirtualKeyCode), VK_C | VK_CANCEL);
 }
 
-/// Report whether the console input buffer has processed input enabled.
+/// Report whether the console input buffer has `ENABLE_PROCESSED_INPUT` set,
+/// treating any query failure as not set.
 ///
 /// # Arguments
 ///
 /// * `api` - The Windows API implementation to use.
-///
-/// # Returns
-///
-/// `true` when `ENABLE_PROCESSED_INPUT` is set; `false` on that flag being
-/// cleared or any query failure (so the caller falls back to a raw write).
 fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
-    let handle = match api.get_std_handle(STD_INPUT_HANDLE) {
-        Ok(handle) => handle,
-        Err(_) => return false,
+    let Ok(handle) = api.get_std_handle(STD_INPUT_HANDLE) else {
+        return false;
     };
     return match api.get_console_mode(handle) {
         Ok(mode) => mode.0 & ENABLE_PROCESSED_INPUT.0 != 0,
         Err(_) => false,
     };
-}
-
-/// Interrupt the current console process group for a relayed Ctrl+C or Ctrl+Break.
-///
-/// # Arguments
-///
-/// * `api` - The Windows API implementation to use.
-fn signal_console_ctrl_event(api: &dyn WindowsApi) {
-    // Group-0 also signals this client, but the startup handler shields it.
-    if let Err(err) = api.interrupt_console_process_group() {
-        warn!("Failed to relay console control event: {}", err);
-    }
 }
 
 /// Replay one daemon-forwarded key event into the client console.
@@ -314,9 +290,13 @@ fn signal_console_ctrl_event(api: &dyn WindowsApi) {
 fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
     let key_event = unsafe { input_record.KeyEvent };
     if is_console_signal_key(&key_event) && processed_input_enabled(api) {
-        // Signal on key-down only; drop both records so no literal Ctrl+C reaches the child.
+        // Re-raise on key-down only, dropping both records so no literal Ctrl+C
+        // reaches the child. Group 0 signals this client too, but the startup
+        // handler shields it.
         if key_event.bKeyDown.as_bool() {
-            signal_console_ctrl_event(api);
+            if let Err(err) = api.interrupt_console_process_group() {
+                warn!("Failed to relay console control event: {}", err);
+            }
         }
         return;
     }
