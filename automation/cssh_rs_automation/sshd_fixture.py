@@ -68,6 +68,7 @@ class SshdFixture:
         self,
         host_aliases: list[str] | tuple[str, ...],
         port: int | None = None,
+        shell: bool = False,
     ) -> dict[str, object]:
         """Bring up sshd for ``host_aliases`` and return runtime paths.
 
@@ -77,6 +78,9 @@ class SshdFixture:
                 own ``markers/<alias>.log`` marker file.
             port: Specific TCP port to bind. ``None`` picks a free
                 ephemeral high port.
+            shell: When ``True``, drop the forced marker-writer command so
+                sessions land in the user's real interactive shell and no
+                markers are written. Defaults to marker mode.
 
         Returns:
             A dict with keys ``port`` (int), ``ssh_config`` (str),
@@ -120,13 +124,7 @@ class SshdFixture:
                     _write_openssh_keypair(alias_key_path)
                     pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
                     marker_path = markers_dir / f"{alias}.log"
-                    forced = _build_forced_command(sys.executable, str(marker_path))
-                    # No no-pty: the session gets a PTY (as in real use) so a
-                    # relayed Ctrl+C forwards to the remote as a real interrupt.
-                    handle.write(
-                        f'command="{forced}",no-port-forwarding,no-x11-forwarding,'
-                        f"no-agent-forwarding,no-user-rc {pubkey}\n"
-                    )
+                    handle.write(_authorized_keys_line(pubkey, marker_path, shell=shell))
 
             chosen_port = port if port is not None else _pick_free_port()
             sshd_config_path = tempdir / "sshd_config"
@@ -327,6 +325,21 @@ def _harden_private_key_permissions(private_path: Path) -> None:
         raise SshdFixtureError(
             f"OWNER RIGHTS ACE still present on {target} after hardening:\n{acl}"
         )
+
+
+def _authorized_keys_line(pubkey: str, marker_path: Path, *, shell: bool) -> str:
+    """Return the ``authorized_keys`` line for one key.
+
+    In marker mode a forced ``command="..."`` pipes the session into
+    ``marker_path``; in ``shell`` mode it is dropped so the session gets a
+    real interactive shell.
+    """
+    # No no-pty: keeping the PTY lets a relayed Ctrl+C interrupt the remote.
+    options = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
+    if shell:
+        return f"{options} {pubkey}\n"
+    forced = _build_forced_command(sys.executable, str(marker_path))
+    return f'command="{forced}",{options} {pubkey}\n'
 
 
 def _build_forced_command(executable: str, marker: str) -> str:
