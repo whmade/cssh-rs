@@ -48,7 +48,7 @@ pub trait DemoSystem {
     /// Returns an error if the install fails.
     fn pip_install(&self, package_dir: &Path) -> Result<()>;
 
-    /// Run the demo recorder CLI to produce the GIF.
+    /// Run the demo recorder robot suite to produce the GIF.
     ///
     /// # Arguments
     /// * `binary` - Path to the cssh-rs executable to drive.

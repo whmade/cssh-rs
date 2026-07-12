@@ -24,9 +24,8 @@ ${FPS}              ${10}
 Record The Broadcast Demo
     Start Demo    ${BINARY}    ${OUTPUT_DIR}    ${HOSTS}    fps=${FPS}
     Wait For Hosts
-    Hold    3
 
     Broadcast    echo hello from the cssh-rs cluster
-    Hold    1
+    Sleep    1s
 
     Export Demo Gif    ${GIF}    fps=${FPS}

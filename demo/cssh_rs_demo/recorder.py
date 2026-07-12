@@ -107,7 +107,7 @@ class DemoRecorder:
         self._config_path = self._config_gen.generate_config(
             str(binary_path),
             str(binary_path.resolve().parent),
-            info["ssh_config"],
+            str(info["ssh_config"]),
             self._hosts,
             cluster_name=DEFAULT_CLUSTER,
         )
@@ -126,8 +126,7 @@ class DemoRecorder:
         """Wait until every demo host has an open client window, else raise ``DemoError``.
 
         Shell-mode sessions write no markers, so readiness is the client
-        console windows coming up; the hold that follows gives their prompts
-        time to render before the broadcast.
+        console windows coming up.
         """
         expected = len(self._hosts)
         deadline = time.monotonic() + _CONNECT_TIMEOUT_SECONDS
@@ -140,10 +139,6 @@ class DemoRecorder:
             f"{expected} client windows to open"
         )
 
-    def focus_daemon(self) -> None:
-        """Bring the cssh-rs daemon window to the foreground."""
-        self._focus.focus_window(DAEMON_TITLE, timeout=_WINDOW_TIMEOUT_SECONDS)
-
     def broadcast(self, command: str) -> None:
         """Focus the daemon and broadcast ``command`` to every enabled client.
 
@@ -154,40 +149,11 @@ class DemoRecorder:
         Args:
             command: Command line typed into the daemon and run everywhere.
         """
-        self.focus_daemon()
+        self._focus.focus_window(DAEMON_TITLE, timeout=_WINDOW_TIMEOUT_SECONDS)
         for char in command:
             self._keystrokes.type_text(char)
             time.sleep(_TYPING_INTERVAL_MS / 1000)
         self._keystrokes.press_key("enter")
-
-    def enter_control_mode(self) -> None:
-        """Focus the daemon and enter control mode with Ctrl+A."""
-        self.focus_daemon()
-        self._keystrokes.send_hotkey("ctrl", "a")
-
-    def press_key(self, key: str) -> None:
-        """Press a named key such as ``t`` or ``n`` in the foreground window.
-
-        Args:
-            key: pyautogui key name to press.
-        """
-        self._keystrokes.press_key(key)
-
-    def send_hotkey(self, *keys: str) -> None:
-        """Press ``keys`` together as a chord, e.g. ``alt`` ``f4``.
-
-        Args:
-            keys: pyautogui key names to hold down in order and release.
-        """
-        self._keystrokes.send_hotkey(*keys)
-
-    def hold(self, seconds: float) -> None:
-        """Hold the current frame on screen for ``seconds``.
-
-        Args:
-            seconds: How long to pause, in seconds.
-        """
-        time.sleep(float(seconds))
 
     def export_demo_gif(self, gif: str, fps: int = DEFAULT_FPS) -> str:
         """Stop recording and export the captured MP4 to ``gif``.

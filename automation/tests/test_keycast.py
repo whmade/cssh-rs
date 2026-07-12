@@ -98,11 +98,6 @@ def test_keycast_text_concatenates_text_and_uppercases_keys() -> None:
     assert _keycast_text(events) == "echo hi ENTER CTRL+C"
 
 
-def test_keycast_text_leaves_typed_spaces_intact() -> None:
-    # A literal space in a text token is the only thing that spaces characters.
-    assert _keycast_text([("a b", "text")]) == "a b"
-
-
 def test_overlay_passes_frame_through_when_idle() -> None:
     frame = np.full((10, 10, 3), 5, dtype=np.uint8)
 

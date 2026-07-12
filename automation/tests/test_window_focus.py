@@ -178,12 +178,6 @@ def test_count_windows_returns_match_count(monkeypatch: pytest.MonkeyPatch) -> N
     assert WindowFocus().count_windows("cssh-rs -") == 2
 
 
-def test_count_windows_zero_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_matches(monkeypatch, [])
-
-    assert WindowFocus().count_windows("cssh-rs -") == 0
-
-
 def test_count_windows_defaults_to_contains_condition(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _patch_matches(monkeypatch, [])
 

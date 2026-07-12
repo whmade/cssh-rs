@@ -106,15 +106,6 @@ def test_broadcast_types_each_key_then_enter(monkeypatch: pytest.MonkeyPatch) ->
     assert slept == [0.008, 0.008]
 
 
-def test_enter_control_mode_sends_ctrl_a() -> None:
-    recorder, mocks = _recorder()
-
-    recorder.enter_control_mode()
-
-    mocks["focus"].focus_window.assert_called_once()
-    mocks["keystrokes"].send_hotkey.assert_called_once_with("ctrl", "a")
-
-
 def test_export_demo_gif_stops_then_exports() -> None:
     recorder, mocks = _recorder()
     mocks["recorder"].stop_recording.return_value = "demo.mp4"
