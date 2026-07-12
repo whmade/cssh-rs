@@ -42,6 +42,17 @@ def test_active_keeps_only_the_last_max_labels(monkeypatch: pytest.MonkeyPatch) 
     assert keycast.active(0.0) == ["B", "C"]
 
 
+def test_clear_drops_buffered_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cssh_rs_automation.keycast.time.monotonic", lambda: 0.0)
+    keycast = Keycast(fade_seconds=100.0)
+    keycast.record("A")
+    keycast.record("B")
+
+    keycast.clear()
+
+    assert keycast.active(0.0) == []
+
+
 def test_overlay_passes_frame_through_when_idle() -> None:
     frame = np.full((10, 10, 3), 5, dtype=np.uint8)
 

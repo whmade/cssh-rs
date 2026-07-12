@@ -39,6 +39,11 @@ class Keycast:
         with self._lock:
             self._events.append((label, time.monotonic()))
 
+    def clear(self) -> None:
+        """Drop all buffered labels so a new recording starts clean."""
+        with self._lock:
+            self._events.clear()
+
     def active(self, now: float) -> list[str]:
         """Return the labels still within the fade window at ``now``, oldest first.
 

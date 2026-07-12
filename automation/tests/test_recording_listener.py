@@ -199,3 +199,17 @@ def test_running_keyword_ignores_non_keystroke_libraries() -> None:
     listener.start_library_keyword(object(), _keyword(object()), object())
 
     assert listener._keycast.active(time.monotonic()) == []
+
+
+@pytest.mark.usefixtures("recorder")
+def test_start_suite_resets_keycast_and_wiring() -> None:
+    listener = RecordingListener()
+    keystrokes = _muted_keystrokes()
+    listener.start_library_keyword(object(), _keyword(keystrokes), object())
+    keystrokes.type_text("stale")
+
+    listener.start_suite(_suite("next", has_tests=True), object())
+
+    # The new suite's recording starts with no leftover labels or wiring state.
+    assert listener._keycast.active(time.monotonic()) == []
+    assert listener._wired_keystrokes == set()

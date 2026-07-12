@@ -75,10 +75,13 @@ class RecordingListener:
         """Start recording when the suite holds tests.
 
         Only leaf suites do; skipping the parent directory suite avoids one
-        recording spanning every child suite.
+        recording spanning every child suite. Per-suite keycast state is reset
+        first so labels and instance wiring never carry over between suites.
         """
         if not data.tests:
             return
+        self._keycast.clear()
+        self._wired_keystrokes.clear()
         try:
             self._recorder.start_recording(data.name, self._output_dir)
         except Exception as exc:

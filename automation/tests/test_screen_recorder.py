@@ -186,6 +186,33 @@ def test_add_overlay_composited_into_captured_frames(
     assert list(writer.frames[0][0, 0]) == [7, 7, 7]
 
 
+def test_failing_overlay_does_not_abort_recording(fake_backends: _Backends, tmp_path: Path) -> None:
+    recorder = ScreenRecorder()
+    survivors: list[float] = []
+
+    def boom(_frame: object, _now: float) -> object:
+        raise RuntimeError("overlay broke")
+
+    def survivor(frame: object, now: float) -> object:
+        survivors.append(now)
+        return np.full_like(np.asarray(frame), 9)
+
+    recorder.add_overlay(boom)
+    recorder.add_overlay(survivor)
+
+    recorder.start_recording("suite", str(tmp_path), fps=100)
+    try:
+        assert _await(lambda: bool(fake_backends.writers))
+        assert fake_backends.writers[0].first_frame.wait(3.0)
+    finally:
+        recorder.stop_recording()
+
+    writer = fake_backends.writers[0]
+    assert survivors  # the overlay after the failing one still ran
+    # Frames keep being written, carrying the surviving overlay's output.
+    assert list(writer.frames[0][0, 0]) == [9, 9, 9]
+
+
 def test_banner_overlay_passes_frame_through_without_banner() -> None:
     frame = np.full((4, 4, 3), 5, dtype=np.uint8)
 

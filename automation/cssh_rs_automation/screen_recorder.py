@@ -184,7 +184,11 @@ class ScreenRecorder:
                     frame = np.asarray(sct.grab(region))[..., [2, 1, 0]]
                     now = time.monotonic()
                     for overlay in self._overlays:
-                        frame = overlay(frame, now)
+                        try:
+                            frame = overlay(frame, now)
+                        except Exception as exc:
+                            # Broad by design: one overlay must not abort recording.
+                            LOGGER.warning("overlay failed, skipped this frame: %s", exc)
                     # get_writer's declared return type omits append_data.
                     writer.append_data(frame)  # pyrefly: ignore[missing-attribute]
                     next_capture += frame_interval
