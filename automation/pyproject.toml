@@ -14,14 +14,14 @@ dependencies = [
     "pyperclip==1.11.0",
     "cryptography==49.0.0",
     "mss==10.2.0",
-    "imageio==2.37.3",
+    "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",
     "pillow==12.3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.15.21",
+    "ruff==0.15.22",
     "pyrefly==1.1.1",
     "pytest==9.1.1",
 ]
