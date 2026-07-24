@@ -38,7 +38,7 @@ jobs:
   build-stable:
     runs-on: &runner-version windows-latest
     steps:
-      - uses: &checkout-action actions/checkout@v7.0.0
+      - uses: &checkout-action actions/checkout@v7.0.1
         with: &checkout-with
           ref: ${{ inputs.ref }}
 
