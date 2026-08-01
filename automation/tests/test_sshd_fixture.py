@@ -29,11 +29,16 @@ def test_build_forced_command_invokes_marker_module() -> None:
 _OPTIONS = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
 
 
-def test_write_authorized_keys_dispatches_by_mode(tmp_path: Path) -> None:
+def test_write_authorized_keys_dispatches_by_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     keys_dir = tmp_path / "keys"
     markers_dir = tmp_path / "markers"
     keys_dir.mkdir()
     markers_dir.mkdir()
+    bash = tmp_path / "bash.exe"
+    bash.write_text("", encoding="utf-8")
+    monkeypatch.setenv("CSSH_E2E_BASH", str(bash))
 
     def write(mode: sshd_fixture.SshdMode, tag: str) -> tuple[str, dict[str, str]]:
         path = tmp_path / f"authorized_keys_{tag}"
@@ -55,14 +60,16 @@ def test_write_authorized_keys_dispatches_by_mode(tmp_path: Path) -> None:
     assert marker_homes == {}
     assert shell_line.startswith(f"{_OPTIONS} ") and "command=" not in shell_line
     assert shell_homes == {}
-    assert scripted_line.startswith('command="bash --rcfile ')
+    assert scripted_line.startswith('command="') and " --rcfile " in scripted_line
     assert scripted_homes == {"h1": str(tmp_path / "homes_scripted" / "h1")}
 
 
-def test_build_bash_command_runs_interactive_bash_with_forward_slash_rc() -> None:
-    command = sshd_fixture._build_bash_command(Path(r"C:\tmp\h1\.bashrc"))
+def test_build_bash_command_runs_interactive_bash_with_forward_slash_paths() -> None:
+    command = sshd_fixture._build_bash_command(
+        r"C:\Program Files\Git\bin\bash.exe", Path(r"C:\tmp\h1\.bashrc")
+    )
 
-    assert command == r"bash --rcfile \"C:/tmp/h1/.bashrc\" -i"
+    assert command == (r"\"C:/Program Files/Git/bin/bash.exe\" --rcfile \"C:/tmp/h1/.bashrc\" -i")
 
 
 def test_write_bash_rc_sets_prompt_home_marker_and_extra_lines(tmp_path: Path) -> None:
@@ -83,11 +90,60 @@ def test_write_bash_rc_sets_prompt_home_marker_and_extra_lines(tmp_path: Path) -
     assert f"""PROMPT_COMMAND='echo ready > "{marker_path}"; unset PROMPT_COMMAND'""" in content
 
 
-def test_require_bash_raises_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sshd_fixture.shutil, "which", lambda _: None)
+def test_resolve_bash_path_honors_existing_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_bash = tmp_path / "bash"
+    fake_bash.write_text("", encoding="utf-8")
+    monkeypatch.setenv("CSSH_E2E_BASH", str(fake_bash))
 
-    with pytest.raises(SshdFixtureError, match="bash on PATH"):
-        sshd_fixture._require_bash()
+    assert sshd_fixture._resolve_bash_path() == str(fake_bash.resolve())
+
+
+def test_resolve_bash_path_rejects_missing_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CSSH_E2E_BASH", "/nonexistent/bash")
+
+    with pytest.raises(SshdFixtureError, match="non-existent path"):
+        sshd_fixture._resolve_bash_path()
+
+
+def test_resolve_bash_path_on_windows_ignores_wsl_bash_and_uses_git(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    git_root = tmp_path / "Git"
+    git_bash = git_root / "bin" / "bash.exe"
+    git_bash.parent.mkdir(parents=True)
+    git_bash.write_text("", encoding="utf-8")
+    monkeypatch.delenv("CSSH_E2E_BASH", raising=False)
+    monkeypatch.setattr(sshd_fixture.os, "name", "nt")
+
+    def fake_which(name: str) -> str | None:
+        if name == "git":
+            return str(git_root / "cmd" / "git.exe")
+        if name == "bash":
+            return r"C:\Windows\System32\bash.exe"
+        return None
+
+    monkeypatch.setattr(sshd_fixture.shutil, "which", fake_which)
+
+    assert sshd_fixture._resolve_bash_path() == str(git_bash)
+
+
+def test_resolve_bash_path_on_windows_raises_when_only_wsl_bash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CSSH_E2E_BASH", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(sshd_fixture.os, "name", "nt")
+    monkeypatch.setattr(
+        sshd_fixture.shutil,
+        "which",
+        lambda name: r"C:\Windows\System32\bash.exe" if name == "bash" else None,
+    )
+    monkeypatch.setattr(sshd_fixture, "DEFAULT_BASH_LOCATIONS", ())
+
+    with pytest.raises(SshdFixtureError, match="Git for Windows bash"):
+        sshd_fixture._resolve_bash_path()
 
 
 def test_as_forward_slash_normalizes_separators() -> None:

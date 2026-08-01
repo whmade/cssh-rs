@@ -34,6 +34,12 @@ DEFAULT_SSHD_LOCATIONS = (
     r"C:\Program Files\OpenSSH\sshd.exe",
 )
 
+# Fallback Git-for-Windows bash locations on Windows, tried as a last resort.
+DEFAULT_BASH_LOCATIONS = (
+    r"C:\Program Files\Git\bin\bash.exe",
+    r"C:\Program Files (x86)\Git\bin\bash.exe",
+)
+
 READINESS_TIMEOUT_SECONDS = 10.0
 READINESS_POLL_INTERVAL_SECONDS = 0.1
 STOP_GRACE_SECONDS = 3.0
@@ -118,8 +124,6 @@ class SshdFixture:
             raise SshdFixtureError("sshd fixture already running")
         if mode is None:
             mode = MarkerMode()
-        if isinstance(mode, ScriptedShellMode):
-            _require_bash()
         aliases = list(host_aliases)
         if not aliases:
             raise SshdFixtureError("host_aliases must be non-empty")
@@ -390,7 +394,7 @@ def _write_authorized_keys(
                         rc_lines=rc_lines,
                     )
                     homes[alias] = str(home)
-                    forced_command = _build_bash_command(bash_rc)
+                    forced_command = _build_bash_command(_resolve_bash_path(), bash_rc)
                 case ShellMode():
                     forced_command = None
                 case MarkerMode():
@@ -422,9 +426,10 @@ def _build_forced_command(executable: str, marker: str) -> str:
     )
 
 
-def _build_bash_command(rc_path: Path) -> str:
-    """Return the command= payload running interactive bash with ``rc_path``."""
-    return f"bash --rcfile {_quote_authorized_keys_arg(_as_forward_slash(rc_path))} -i"
+def _build_bash_command(bash_path: str, rc_path: Path) -> str:
+    """Return the command= payload running ``bash_path`` interactively with ``rc_path``."""
+    quoted_bash = _quote_authorized_keys_arg(bash_path.replace("\\", "/"))
+    return f"{quoted_bash} --rcfile {_quote_authorized_keys_arg(_as_forward_slash(rc_path))} -i"
 
 
 def _write_bash_rc(
@@ -445,12 +450,39 @@ def _write_bash_rc(
     rc_path.write_text("\n".join(body) + "\n", encoding="utf-8", newline="\n")
 
 
-def _require_bash() -> None:
-    """Fail loudly if ScriptedShellMode's bash is not on PATH."""
-    if shutil.which("bash") is None:
-        raise SshdFixtureError(
-            "ScriptedShellMode needs bash on PATH; install Git for Windows or add bash"
-        )
+def _resolve_bash_path() -> str:
+    """Return an absolute bash path for ScriptedShellMode, honoring ``CSSH_E2E_BASH``.
+
+    On Windows a bare ``bash`` resolves via PATH to WSL's ``System32\\bash.exe``,
+    which ignores the Windows-path ``--rcfile`` and never writes the readiness
+    marker, so PATH ``bash`` is never trusted there.
+    """
+    override = os.environ.get("CSSH_E2E_BASH")
+    if override:
+        if not Path(override).is_file():
+            raise SshdFixtureError(f"CSSH_E2E_BASH points at non-existent path: {override}")
+        return str(Path(override).resolve())
+    if os.name != "nt":
+        resolved = shutil.which("bash")
+        if resolved:
+            return resolved
+        raise SshdFixtureError("could not locate bash; set CSSH_E2E_BASH or install bash")
+    candidates: list[str] = []
+    git = shutil.which("git")
+    if git:
+        # <Git>\cmd\git.exe or <Git>\bin\git.exe -> <Git>\bin\bash.exe
+        candidates.append(str(Path(git).resolve().parent.parent / "bin" / "bash.exe"))
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(str(Path(local_app_data) / "Programs" / "Git" / "bin" / "bash.exe"))
+    candidates.extend(DEFAULT_BASH_LOCATIONS)
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+    raise SshdFixtureError(
+        "could not locate Git for Windows bash (WSL bash is unsuitable for "
+        "ScriptedShellMode); set CSSH_E2E_BASH or install Git for Windows"
+    )
 
 
 def _quote_authorized_keys_arg(value: str) -> str:
