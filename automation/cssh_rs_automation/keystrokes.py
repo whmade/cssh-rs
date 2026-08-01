@@ -62,7 +62,7 @@ class Keystrokes:
                 LOGGER.warning("key listener failed for %r: %s", label, exc)
 
     def _notify_label(
-        self, label: str | None | _Default, *, default: str, default_kind: str
+        self, label: str | _Default | None, *, default: str, default_kind: str
     ) -> None:
         """Route ``label`` to the overlay: ``DEFAULT_LABEL`` shows ``default`` as
         ``default_kind``, ``None`` suppresses it, any string shows that token as a
@@ -79,7 +79,7 @@ class Keystrokes:
         self,
         text: str,
         interval: float = 0.0,
-        label: str | None | _Default = DEFAULT_LABEL,
+        label: str | _Default | None = DEFAULT_LABEL,
     ) -> None:
         """Type ``text`` as literal printable characters into the foreground window.
 
@@ -110,7 +110,7 @@ class Keystrokes:
         self.type_text(text, interval=interval)
         self.press_key("enter")
 
-    def press_key(self, key: str, label: str | None | _Default = DEFAULT_LABEL) -> None:
+    def press_key(self, key: str, label: str | _Default | None = DEFAULT_LABEL) -> None:
         """Press a named key such as ``enter``, ``tab`` or ``esc``.
 
         Args:
