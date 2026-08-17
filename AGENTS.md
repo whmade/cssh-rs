@@ -53,7 +53,15 @@ cargo xtask check-typography # ASCII-punctuation lint
 
 Always run `cargo fmt`, `cargo lint`, and both test commands before considering any task complete.
 
-## Code Standards
+## Workflow skills
+
+The `/workflows:commit`, `/workflows:github-pr`, and `/workflows:scrutinize`
+skills come from the `workflows@whmade` marketplace plugin, enabled in
+`.claude/settings.json`. They are generic and read the repo-specific
+conventions documented below (`## Code style`, `## Testing`,
+`## Commit conventions`, `## Pull requests`).
+
+## Code style
 
 Do NOT use decorative or "smart" Unicode punctuation anywhere in the
 repo - not in code, comments, docstrings, commit messages, PR
@@ -177,19 +185,29 @@ set_console_title(handle, &title)?;
 - Use `unsafe` blocks sparingly with proper validation
 - Use `mockall` for testing Windows API calls without system side-effects
 
-## Testing Standards
+## Testing
 
 - **Naming**: `test_*.rs` files in `cssh-rs-core/src/tests/`, descriptive test function names
 - **Pattern**: Arrange-Act-Assert for all tests
 - **Mocking**: Use `mockall` for all Windows API interactions - tests must have zero side-effects on the system
 - **No external state**: tests must not modify registry, filesystem, or process state
 
-## Commit Messages
+## Commit conventions
 
-Follow the conventions in
-[`.claude/skills/commit/SKILL.md`](.claude/skills/commit/SKILL.md).
-AI-generated commits MUST include a `Co-authored-by:` trailer
-naming the model.
+Use the `/workflows:commit` skill to draft messages. Repo specifics:
+
+- **Subject**: imperative mood, first word capitalized; optional lowercase
+  `scope:` prefix mirroring the scopes already in `git log` (e.g. `client:`,
+  `control mode:`) - do not invent new ones. No trailing period; keep under
+  ~72 characters.
+- Do NOT pre-append a PR number in parentheses (`(#123)`) - GitHub's
+  squash-merge adds it automatically when the PR lands.
+- **Issue/PR references**: use a `GitHub: #<number>` trailer in the footer,
+  one per line, never in the subject or body prose. Do not use `Fixes:`.
+- **AI co-authorship (MANDATORY for AI-generated commits)**: include exactly
+  one `Co-authored-by: <Model Name> <noreply@anthropic.com>` trailer (e.g.
+  `Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>`), using the
+  git-canonical casing `Co-authored-by:`.
 
 ## User Interaction
 
@@ -197,18 +215,26 @@ naming the model.
 - Identify and resolve all ambiguities and assumptions up front
 - Evaluate trade-offs before choosing an approach
 
-## GitHub Pull Requests
+## Pull requests
 
-Both PR creation and addressing review feedback are covered in
-[`.claude/skills/github-pr/SKILL.md`](.claude/skills/github-pr/SKILL.md).
-When addressing feedback: reply to every unresolved review comment,
-mark each thread resolved once addressed, and push to update the PR.
+Use the `/workflows:github-pr` skill for both creating PRs and addressing
+review feedback. Repo specifics:
+
+- Create PRs from the commit with `gh pr create --fill`; add
+  `--label no-news-fragment-needed` when the change has no user-facing
+  effect.
+- **News fragments**: user-facing changes need a fragment at
+  `news/<name>.<type>.md`, where `<type>` is one of `feature`, `bugfix`,
+  `security`, `deprecation`, or `removal`. This is enforced by
+  `.github/workflows/news-fragment-check.yml` and can be waived with the
+  `no-news-fragment-needed` label.
+- When addressing feedback: reply to every unresolved review thread, resolve
+  each one only after its fix is pushed, and push to update the PR.
 
 ## Completion Checklist
 
 Before considering any task complete, first self-review your changes by
-running [`/scrutinize`](.claude/skills/scrutinize/SKILL.md) on them. Then
-confirm:
+running `/workflows:scrutinize` on them. Then confirm:
 
 1. Documentation is complete and accurate
 2. All tests pass (`cargo doc-tests && cargo test`)
