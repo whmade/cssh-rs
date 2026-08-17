@@ -10,24 +10,28 @@ from __future__ import annotations
 
 import getpass
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock, call
 
 import pytest
 from cssh_rs_automation.sshd_fixture import ScriptedShellMode
 
 from cssh_rs_demo.recorder import (
+    DAEMON_TITLE,
     DEFAULT_CLUSTER,
     DISPLAY_USER,
     HOSTS,
+    INITIAL_HOSTS,
     README_CONTENT,
     README_NAME,
     SHELL_RC_LINES,
     USERNAME_HOST_PLACEHOLDER,
     DemoError,
     DemoRecorder,
+    _require_vim,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -38,6 +42,7 @@ def _recorder(**overrides: object) -> tuple[DemoRecorder, dict[str, MagicMock]]:
         "keystrokes": MagicMock(name="keystrokes"),
         "focus": MagicMock(name="focus"),
         "config_gen": MagicMock(name="config_gen"),
+        "clipboard": MagicMock(name="clipboard"),
         "gif_exporter": MagicMock(name="gif_exporter", return_value="out.gif"),
     }
     mocks.update(overrides)  # type: ignore[arg-type]
@@ -64,6 +69,7 @@ def test_start_demo_seeds_hosts_wires_overlay_and_launches(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr("cssh_rs_demo.recorder.platform.system", lambda: "Windows")
+    monkeypatch.setattr("cssh_rs_demo.recorder._require_vim", lambda: None)
     popen = MagicMock(name="Popen")
     monkeypatch.setattr("cssh_rs_demo.recorder.subprocess.Popen", popen)
     binary = tmp_path / "cssh-rs.exe"
@@ -82,7 +88,7 @@ def test_start_demo_seeds_hosts_wires_overlay_and_launches(
         HOSTS, mode=ScriptedShellMode(rc_lines=SHELL_RC_LINES)
     )
     generate_kwargs = mocks["config_gen"].generate_config.call_args.kwargs
-    assert mocks["config_gen"].generate_config.call_args.args[3] == HOSTS
+    assert mocks["config_gen"].generate_config.call_args.args[3] == INITIAL_HOSTS
     assert generate_kwargs["cluster_name"] == DEFAULT_CLUSTER
     assert generate_kwargs["arguments"] == [
         "-o",
@@ -99,7 +105,7 @@ def test_start_demo_seeds_hosts_wires_overlay_and_launches(
 
 def test_wait_for_hosts_returns_once_sessions_are_ready() -> None:
     recorder, mocks = _recorder()
-    mocks["sshd"].count_connected_markers.return_value = len(HOSTS)
+    mocks["sshd"].count_connected_markers.return_value = len(INITIAL_HOSTS)
 
     recorder.wait_for_hosts()
 
@@ -116,6 +122,105 @@ def test_broadcast_focuses_daemon_then_types_each_key(monkeypatch: pytest.Monkey
     typed = [call.args[0] for call in mocks["keystrokes"].type_text.call_args_list]
     assert typed == ["h", "i"]
     mocks["keystrokes"].press_key.assert_called_once_with("enter")
+
+
+def test_type_command_types_into_focused_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _s: None)
+    recorder, mocks = _recorder()
+
+    recorder.type_command("ls")
+
+    mocks["focus"].focus_window.assert_not_called()
+    mocks["keystrokes"].press_key.assert_called_once_with("enter")
+
+
+def test_focus_client_targets_alias_window() -> None:
+    recorder, mocks = _recorder()
+
+    recorder.focus_client("hosta.dev")
+
+    mocks["focus"].focus_window.assert_called_once_with(
+        "@hosta.dev", match_mode="substring", timeout=ANY
+    )
+
+
+def test_copy_readme_puts_the_readme_on_the_clipboard() -> None:
+    recorder, mocks = _recorder()
+
+    recorder.copy_readme()
+
+    mocks["clipboard"].set_clipboard.assert_called_once_with(README_CONTENT)
+
+
+def test_edit_readme_opens_vim_then_pastes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _s: None)
+    recorder, mocks = _recorder()
+    mocks["clipboard"].get_clipboard.return_value = "PASTED"
+
+    recorder.edit_readme()
+
+    mocks["focus"].focus_window.assert_called_with(DAEMON_TITLE, timeout=ANY)
+    expected = (
+        [call.type_text(char) for char in "vim README"]
+        + [call.press_key("enter"), call.press_key("i")]
+        + [call.type_text("PASTED", label="PASTE")]  # the paste, typed at once
+        + [call.press_key("esc")]
+        + [call.type_text(char) for char in ":wq"]
+        + [call.press_key("enter")]
+    )
+    assert mocks["keystrokes"].method_calls == expected
+
+
+@pytest.mark.parametrize(
+    ("drive", "expected_keys"),
+    [
+        (
+            lambda r: r.disable_client("down"),
+            [
+                call.send_hotkey("ctrl", "a"),
+                call.press_key("e"),
+                call.press_key("down"),
+                call.press_key("d"),
+                call.press_key("esc"),
+            ],
+        ),
+        (lambda r: r.enable_all(), [call.send_hotkey("ctrl", "a"), call.press_key("n")]),
+        (lambda r: r.interrupt(), [call.send_hotkey("ctrl", "c")]),
+    ],
+)
+def test_control_mode_key_sequences(
+    monkeypatch: pytest.MonkeyPatch,
+    drive: Callable[[DemoRecorder], None],
+    expected_keys: list[object],
+) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _s: None)
+    recorder, mocks = _recorder()
+
+    drive(recorder)
+
+    mocks["focus"].focus_window.assert_called_with(DAEMON_TITLE, timeout=ANY)
+    assert mocks["keystrokes"].method_calls == expected_keys
+
+
+def test_add_host_types_the_alias_then_waits_for_its_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _s: None)
+    recorder, mocks = _recorder()
+    # One more session appears after the host is added.
+    mocks["sshd"].count_connected_markers.side_effect = [3, 4]
+
+    recorder.add_host("hostb.dev")
+
+    expected = (
+        [call.send_hotkey("ctrl", "a"), call.press_key("c")]
+        + [call.type_text(char) for char in "hostb.dev"]
+        + [call.press_key("enter")]
+        # A one-byte Backspace, kept off the overlay, absorbs conhost's post-resize swallow.
+        + [call.press_key("backspace", label=None)]
+    )
+    assert mocks["keystrokes"].method_calls == expected
+    assert mocks["sshd"].count_connected_markers.call_count == 2
 
 
 def test_export_demo_gif_stops_then_exports() -> None:
@@ -151,3 +256,21 @@ def test_tear_down_demo_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path
     killed.assert_called_once()
     mocks["sshd"].stop_sshd.assert_called_once()
     assert not config.exists()
+
+
+@pytest.mark.parametrize(
+    ("run_result", "match"),
+    [(OSError("no bash"), "bash on PATH"), (MagicMock(returncode=1), "vim")],
+)
+def test_require_vim_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch, run_result: object, match: str
+) -> None:
+    def fake_run(*_a: object, **_k: object) -> object:
+        if isinstance(run_result, BaseException):
+            raise run_result
+        return run_result
+
+    monkeypatch.setattr("cssh_rs_demo.recorder.subprocess.run", fake_run)
+
+    with pytest.raises(DemoError, match=match):
+        _require_vim()
