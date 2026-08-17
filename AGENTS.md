@@ -223,6 +223,15 @@ review feedback. Repo specifics:
 - Create PRs from the commit with `gh pr create --fill`; add
   `--label no-news-fragment-needed` when the change has no user-facing
   effect.
+- **The PR title and body ARE the commit message.** `--fill` copies the
+  commit subject into the title and the commit body into the description;
+  they must stay byte-for-byte identical to it and meet the same
+  `## Commit conventions` bar. Do NOT hand-edit the PR to add an intro, a
+  stacking note, a `> [!WARNING]`, a summary of the diff, or a
+  generated-by footer - none of that is in the commit message. Anything
+  worth saying on the PR belongs in the commit message (subject, body,
+  trailers) so both carry it. If the PR text drifts from the commit, fix
+  the commit and re-run `--fill`; never patch the PR description on its own.
 - **News fragments**: user-facing changes need a fragment at
   `news/<name>.<type>.md`, where `<type>` is one of `feature`, `bugfix`,
   `security`, `deprecation`, or `removal`. This is enforced by
