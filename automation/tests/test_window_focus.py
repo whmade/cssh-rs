@@ -186,6 +186,27 @@ def test_count_windows_rejects_unknown_match_mode() -> None:
         WindowFocus().count_windows("cssh-rs -", match_mode="fuzzy")
 
 
+def test_window_boxes_returns_a_tuple_per_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    first = _FakeWindow("cssh-rs - tester@h1")
+    first.box = types.SimpleNamespace(left=0, top=0, width=100, height=80)
+    second = _FakeWindow("cssh-rs - tester@h2")
+    second.box = types.SimpleNamespace(left=100, top=0, width=100, height=80)
+    calls = _patch_matches(monkeypatch, [first, second])
+
+    boxes = WindowFocus().window_boxes("cssh-rs -")
+
+    assert boxes == [
+        ("cssh-rs - tester@h1", 0, 0, 100, 80),
+        ("cssh-rs - tester@h2", 100, 0, 100, 80),
+    ]
+    assert calls[0]["condition"] == pywinctl.Re.CONTAINS
+
+
+def test_window_boxes_rejects_unknown_match_mode() -> None:
+    with pytest.raises(WindowFocusError, match="match_mode must be"):
+        WindowFocus().window_boxes("cssh-rs -", match_mode="fuzzy")
+
+
 def test_get_active_window_title_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pywinctl, "getActiveWindowTitle", lambda: "cssh-rs daemon")
 

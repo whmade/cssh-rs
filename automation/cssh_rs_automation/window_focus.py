@@ -169,6 +169,36 @@ class WindowFocus:
         condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
         return len(pywinctl.getWindowsWithTitle(title, condition=condition))
 
+    def window_boxes(
+        self, title: str, match_mode: str = "substring"
+    ) -> list[tuple[str, int, int, int, int]]:
+        """Return the on-screen box of every top-level window matching ``title``.
+
+        Like ``count_windows``, multiple matches are expected: one entry per
+        client window of a cluster.
+
+        Args:
+            title: Window title to match.
+            match_mode: ``"exact"`` (full title) or ``"substring"`` (contains).
+
+        Returns:
+            One ``(title, left, top, width, height)`` tuple per matching window.
+        """
+        if match_mode not in _VALID_MATCH_MODES:
+            raise WindowFocusError(
+                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+            )
+
+        # Imported lazily for the same reason as focus_window; see its comment.
+        import pywinctl
+
+        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
+        matches = pywinctl.getWindowsWithTitle(title, condition=condition)
+        return [
+            (window.title, window.box.left, window.box.top, window.box.width, window.box.height)
+            for window in matches
+        ]
+
     def get_active_window_title(self) -> str:
         """Return the foreground window's title, or ``""`` when none is active."""
         import pywinctl

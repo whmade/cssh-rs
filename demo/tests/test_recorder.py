@@ -16,6 +16,7 @@ import pytest
 from cssh_rs_automation.sshd_fixture import ScriptedShellMode
 
 from cssh_rs_demo.recorder import (
+    CLIENT_TITLE_MATCH,
     DAEMON_TITLE,
     DEFAULT_CLUSTER,
     DISPLAY_USER,
@@ -27,6 +28,7 @@ from cssh_rs_demo.recorder import (
     USERNAME_HOST_PLACEHOLDER,
     DemoError,
     DemoRecorder,
+    _disable_moves,
     _require_vim,
 )
 
@@ -174,16 +176,6 @@ def test_edit_readme_opens_vim_then_pastes(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.parametrize(
     ("drive", "expected_keys"),
     [
-        (
-            lambda r: r.disable_client("down"),
-            [
-                call.send_hotkey("ctrl", "a"),
-                call.press_key("e"),
-                call.press_key("down"),
-                call.press_key("d"),
-                call.press_key("esc"),
-            ],
-        ),
         (lambda r: r.enable_all(), [call.send_hotkey("ctrl", "a"), call.press_key("n")]),
         (lambda r: r.interrupt(), [call.send_hotkey("ctrl", "c")]),
     ],
@@ -200,6 +192,106 @@ def test_control_mode_key_sequences(
 
     mocks["focus"].focus_window.assert_called_with(DAEMON_TITLE, timeout=ANY)
     assert mocks["keystrokes"].method_calls == expected_keys
+
+
+def _client_box(alias: str, left: int, top: int) -> tuple[str, int, int, int, int]:
+    """Build a client window box tuple for ``alias`` at ``(left, top)``."""
+    return (f"cssh-rs - root@{alias}", left, top, 100, 100)
+
+
+def test_disable_client_finds_the_alias_cell_and_navigates_to_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("cssh_rs_demo.recorder.time.sleep", lambda _s: None)
+    recorder, mocks = _recorder()
+    # 2x2 grid with hosta.dev bottom-left: one Down reaches it from the top-left.
+    mocks["focus"].window_boxes.return_value = [
+        _client_box("hosta.prod", 0, 0),
+        _client_box("hostb.prod", 100, 0),
+        _client_box("hosta.dev", 0, 100),
+        _client_box("hostb.dev", 100, 100),
+    ]
+
+    recorder.disable_client("hosta.dev")
+
+    mocks["focus"].window_boxes.assert_called_once_with(CLIENT_TITLE_MATCH, match_mode="substring")
+    assert mocks["keystrokes"].method_calls == [
+        call.send_hotkey("ctrl", "a"),
+        call.press_key("e"),
+        call.press_key("down"),
+        call.press_key("d"),
+        call.press_key("esc"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("boxes", "expected"),
+    [
+        (
+            # 2x2 grid: hosta.dev bottom-left.
+            [
+                _client_box("hosta.prod", 0, 0),
+                _client_box("hostb.prod", 100, 0),
+                _client_box("hosta.dev", 0, 100),
+                _client_box("hostb.dev", 100, 100),
+            ],
+            ["down"],
+        ),
+        (
+            # Single column: hosta.dev is the third row down.
+            [
+                _client_box("hosta.prod", 0, 0),
+                _client_box("hostb.prod", 0, 100),
+                _client_box("hosta.dev", 0, 200),
+                _client_box("hostb.dev", 0, 300),
+            ],
+            ["down", "down"],
+        ),
+        (
+            # Single row: hosta.dev is the third column across.
+            [
+                _client_box("hosta.prod", 0, 0),
+                _client_box("hostb.prod", 100, 0),
+                _client_box("hosta.dev", 200, 0),
+                _client_box("hostb.dev", 300, 0),
+            ],
+            ["right", "right"],
+        ),
+        (
+            # 3 columns: hosta.dev top-right, hostb.dev the stretched last row.
+            [
+                _client_box("hosta.prod", 0, 0),
+                _client_box("hostb.prod", 100, 0),
+                _client_box("hosta.dev", 200, 0),
+                _client_box("hostb.dev", 0, 100),
+            ],
+            ["right", "right"],
+        ),
+    ],
+)
+def test_disable_moves_derives_the_path_from_the_layout(
+    boxes: list[tuple[str, int, int, int, int]], expected: list[str]
+) -> None:
+    assert _disable_moves(boxes, "hosta.dev") == expected
+
+
+def test_disable_moves_tolerates_a_pixel_nudge_in_the_row() -> None:
+    boxes = [
+        _client_box("hosta.prod", 0, 0),
+        _client_box("hostb.prod", 100, 0),
+        # The tiler's 1px repaint nudge must not split hosta.dev into its own row.
+        _client_box("hosta.dev", 1, 101),
+        _client_box("hostb.dev", 100, 100),
+    ]
+
+    assert _disable_moves(boxes, "hosta.dev") == ["down"]
+
+
+def test_disable_moves_raises_for_an_unknown_alias() -> None:
+    boxes = [_client_box("hosta.prod", 0, 0)]
+
+    with pytest.raises(DemoError, match="no client window found"):
+        _disable_moves(boxes, "hostc.dev")
 
 
 def test_add_host_types_the_alias_then_waits_for_its_session(
