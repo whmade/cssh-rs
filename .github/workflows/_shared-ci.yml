@@ -75,9 +75,9 @@ jobs:
       - uses: *target-cache
         with: &target-cache-nightly
           path: target
-          key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
+          key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-
+            ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-
             ${{ runner.os }}-target-nightly-
 
       - &read-nightly
