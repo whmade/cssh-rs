@@ -13,7 +13,7 @@ name: Post PR Comment
 
 on:
   workflow_run:
-    workflows: ["News Fragment Check", "Pre-Submit CI"]
+    workflows: ["News Fragment Check", "Pre-Submit CI", "Record Demo Command"]
     types: [completed]
 
 permissions:
@@ -26,9 +26,13 @@ jobs:
     # Run for each possible comment artifact
     strategy:
       matrix:
-        artifact: [comment, coverage-comment, diff-cover-comment]
+        artifact: [comment, coverage-comment, diff-cover-comment, demo-comment]
       fail-fast: false
-    if: github.event.workflow_run.event == 'pull_request'
+    # Pre-Submit CI runs are `pull_request`; the on-demand demo preview is an
+    # `issue_comment` (`/record-demo`) run.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'issue_comment'
     steps:
       - name: Download artifact
         id: download
