@@ -19,7 +19,7 @@
   <!--TODO: Add link to coverage once coverage data looks better: https://github.com/insightsengineering/coverage-action/issues/28#issuecomment-1743910648 -->
 </p>
 
-![cssh-rs demo](https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/main/demo/cssh-rs.gif)[^1][^2][^3]
+![cssh-rs demo](https://raw.githubusercontent.com/whmade/cssh-rs/refs/heads/demo-assets/cssh-rs.gif)[^1]
 
 ## Overview
 cssh-rs will launch 1 daemon and N client windows (with N being the number of hosts to SSH onto).<br>
@@ -253,6 +253,4 @@ Step by step guide to create a new release:
 - `cargo xtask create-release-tag` and follow the instructions
 - Revise the automatically created Release Draft and publish it
 
-[^1]: The searchbar used to launch cssh-rs in the demo clip is [keypirinha](https://keypirinha.com/).
-[^2]: The tool to show key presses in the demo clip is [carnac the magnificent](https://github.com/Code52/carnac).
-[^3]: The tool used to record the screen as GIF is [ScreenToGif](https://github.com/NickeManarin/ScreenToGif).
+[^1]: The demo clip is generated reproducibly by `cargo xtask record-demo` and published to the `demo-assets` branch.

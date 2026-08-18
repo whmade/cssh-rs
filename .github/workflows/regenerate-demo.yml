@@ -1,0 +1,111 @@
+# Regenerate the demo clip on demand and open a PR to review it before it goes
+# live. Runs manually against a chosen branch, so a release maintenance branch
+# can keep its own demo. The GIF is published to the orphan `demo-assets` branch
+# the README links - never committed to a code branch - so clones stay lean, and
+# GitHub renders the old and new GIF side by side in the review PR.
+#
+# Requires "Allow GitHub Actions to create and approve pull requests" under
+# Settings > Actions > General.
+
+name: Regenerate demo GIF
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Branch whose demo to regenerate (main or an X.Y-maintenance branch)"
+        type: string
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate-demo:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      # Reject free-form refs before checkout: an arbitrary branch would run
+      # `cargo xtask` with a `contents: write` token, and passing the input
+      # through `env` keeps it out of the shell-injection path.
+      - name: Validate the target branch
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [[ "$TARGET" != "main" && ! "$TARGET" =~ ^[0-9]+\.[0-9]+-maintenance$ ]]; then
+            echo "Unsupported target: '$TARGET' (expected main or X.Y-maintenance)" >&2
+            exit 1
+          fi
+
+      - name: Check out the target branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.target }}
+
+      - name: Read python version
+        id: python
+        shell: bash
+        run: echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+
+      # The runner ships the OpenSSH client but not the server the demo needs.
+      - name: Enable OpenSSH server
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+
+      - name: Record the demo GIF
+        run: cargo xtask record-demo
+
+      - name: Validate the GIF before publishing
+        shell: pwsh
+        run: |
+          $gif = "target/demo/cssh-rs.gif"
+          if (-not (Test-Path $gif)) { throw "GIF was not produced at $gif" }
+          if ((Get-Item $gif).Length -eq 0) { throw "GIF at $gif is empty" }
+          # verify() only parses the header; load every frame so a truncated or
+          # corrupt GIF never reaches the branch.
+          python -c "from PIL import Image, ImageSequence; im = Image.open('target/demo/cssh-rs.gif'); assert im.format == 'GIF', im.format; [frame.load() for frame in ImageSequence.Iterator(im)]"
+
+      # main -> cssh-rs.gif; X.Y-maintenance -> cssh-rs-X.Y.gif, so every branch
+      # keeps its own clip on the shared asset branch.
+      - name: Resolve the asset name for this branch
+        id: asset
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [ "$TARGET" = "main" ]; then
+            echo "name=cssh-rs.gif" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=cssh-rs-${TARGET%-maintenance}.gif" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the demo-assets branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: demo-assets
+          path: demo-assets
+
+      - name: Place the regenerated GIF
+        shell: pwsh
+        run: Copy-Item target/demo/cssh-rs.gif "demo-assets/${{ steps.asset.outputs.name }}" -Force
+
+      - name: Open a review PR on demo-assets
+        uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          path: demo-assets
+          base: demo-assets
+          branch: regen-demo/${{ inputs.target }}
+          delete-branch: true
+          commit-message: "demo: regenerate the ${{ inputs.target }} demo clip"
+          title: "demo: regenerate the ${{ inputs.target }} demo clip"
+          body: |
+            Regenerated `${{ steps.asset.outputs.name }}` from `${{ inputs.target }}` via `cargo xtask record-demo`.
+
+            Review the rendered GIF diff before merging; merging publishes it to the
+            `demo-assets` branch the README links.
