@@ -1,8 +1,11 @@
 # Regenerate the demo clip on demand and open a PR to review it before it goes
-# live. Runs manually against a chosen branch, so a release maintenance branch
-# can keep its own demo. The GIF is published to the orphan `demo-assets` branch
-# the README links - never committed to a code branch - so clones stay lean, and
-# GitHub renders the old and new GIF side by side in the review PR.
+# live. Runs manually against the branch you dispatch it from (the "Use workflow
+# from" selector), so a release maintenance branch can keep its own demo. Only
+# `main` and `X.Y-maintenance` branches publish here; a feature branch's demo
+# is previewed on demand via the `/record-demo` PR comment instead. The GIF is
+# published to the orphan `demo-assets` branch the README links - never
+# committed to a code branch - so clones stay lean, and GitHub renders the old
+# and new GIF side by side in the review PR.
 #
 # Requires "Allow GitHub Actions to create and approve pull requests" under
 # Settings > Actions > General.
@@ -11,11 +14,6 @@ name: Regenerate demo GIF
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Branch whose demo to regenerate (main or an X.Y-maintenance branch)"
-        type: string
-        default: main
 
 permissions:
   contents: write
@@ -26,23 +24,22 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      # Reject free-form refs before checkout: an arbitrary branch would run
-      # `cargo xtask` with a `contents: write` token, and passing the input
-      # through `env` keeps it out of the shell-injection path.
-      - name: Validate the target branch
+      # Publishing is limited to main and X.Y-maintenance branches; any other
+      # branch's demo is previewed via the `/record-demo` PR comment, not
+      # published here. Passing the branch through `env` keeps it out of the
+      # shell-injection path.
+      - name: Validate the branch
         shell: bash
         env:
-          TARGET: ${{ inputs.target }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          if [[ "$TARGET" != "main" && ! "$TARGET" =~ ^[0-9]+\.[0-9]+-maintenance$ ]]; then
-            echo "Unsupported target: '$TARGET' (expected main or X.Y-maintenance)" >&2
+          if [[ "$BRANCH" != "main" && ! "$BRANCH" =~ ^[0-9]+\.[0-9]+-maintenance$ ]]; then
+            echo "Unsupported branch: '$BRANCH' (expected main or X.Y-maintenance)" >&2
             exit 1
           fi
 
-      - name: Check out the target branch
+      - name: Check out the branch
         uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ inputs.target }}
 
       - name: Read python version
         id: python
@@ -77,12 +74,12 @@ jobs:
         id: asset
         shell: bash
         env:
-          TARGET: ${{ inputs.target }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          if [ "$TARGET" = "main" ]; then
+          if [ "$BRANCH" = "main" ]; then
             echo "name=cssh-rs.gif" >> "$GITHUB_OUTPUT"
           else
-            echo "name=cssh-rs-${TARGET%-maintenance}.gif" >> "$GITHUB_OUTPUT"
+            echo "name=cssh-rs-${BRANCH%-maintenance}.gif" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Check out the demo-assets branch
@@ -100,12 +97,12 @@ jobs:
         with:
           path: demo-assets
           base: demo-assets
-          branch: regen-demo/${{ inputs.target }}
+          branch: regen-demo/${{ github.ref_name }}
           delete-branch: true
-          commit-message: "demo: regenerate the ${{ inputs.target }} demo clip"
-          title: "demo: regenerate the ${{ inputs.target }} demo clip"
+          commit-message: "demo: regenerate the ${{ github.ref_name }} demo clip"
+          title: "demo: regenerate the ${{ github.ref_name }} demo clip"
           body: |
-            Regenerated `${{ steps.asset.outputs.name }}` from `${{ inputs.target }}` via `cargo xtask record-demo`.
+            Regenerated `${{ steps.asset.outputs.name }}` from `${{ github.ref_name }}` via `cargo xtask record-demo`.
 
             Review the rendered GIF diff before merging; merging publishes it to the
             `demo-assets` branch the README links.

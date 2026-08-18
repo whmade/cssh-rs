@@ -1,0 +1,168 @@
+#
+#   Record Demo Command
+#
+# On-demand demo-GIF preview for a pull request. A maintainer comments
+# `/record-demo` and this records the demo from the PR head, uploads the GIF,
+# and links it in a sticky PR comment (posted by post-pr-comment.yml).
+#
+# SECURITY: issue_comment runs from the base branch with a write-capable token,
+# and the `record` job checks out and executes untrusted PR-head code
+# (`cargo xtask record-demo` builds the crate, pip-installs packages, and drives
+# a Robot Framework suite). It is therefore gated to repo
+# OWNER/MEMBER/COLLABORATOR, runs with `contents: read` only, and receives no
+# secrets. The preview comment is assembled by the separate `comment` job, which
+# never runs PR code, so untrusted output cannot reach the privileged
+# post-pr-comment.yml step that posts it.
+
+name: Record Demo Command
+
+on:
+  issue_comment:
+    types: [created]
+
+# Deny by default; each job grants only what it needs.
+permissions: {}
+
+jobs:
+  authorize:
+    # Coarse gate: a PR comment mentioning the command from an authorized author.
+    # The exact-command match is tightened in the `command` step.
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/record-demo') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write         # react to the /record-demo comment
+      pull-requests: read   # resolve the PR head SHA
+    outputs:
+      proceed: ${{ steps.command.outputs.proceed }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+    steps:
+      - name: Match the exact command
+        id: command
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // Strict match so "please don't /record-demo yet" does not fire.
+            const body = (context.payload.comment.body || '').trim();
+            core.setOutput('proceed', /^\/record-demo\s*$/.test(body) ? 'true' : 'false');
+
+      - name: Acknowledge with a reaction
+        if: steps.command.outputs.proceed == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+
+      - name: Resolve PR head SHA and number
+        id: resolve
+        if: steps.command.outputs.proceed == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // issue_comment carries no pull_request payload; fetch it. The head
+            // SHA pins the reviewed commit so a later force-push cannot swap in
+            // different code after the command was issued.
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('pr_number', String(context.issue.number));
+
+  record:
+    needs: authorize
+    if: needs.authorize.outputs.proceed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # Only authorized /record-demo runs reach this job, so an unrelated PR
+    # comment cannot cancel a recording in progress.
+    concurrency:
+      group: record-demo-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    # Untrusted PR code runs here: read-only token, no secrets.
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.authorize.outputs.head_sha }}
+          persist-credentials: false
+
+      - name: Read python version
+        id: python
+        shell: bash
+        run: echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+
+      # The runner ships the OpenSSH client but not the server the demo needs.
+      - name: Enable OpenSSH server
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+
+      # Builds cssh-rs, installs the automation and demo packages, drives robot.
+      - name: Record the demo GIF
+        run: cargo xtask record-demo
+
+      - name: Validate the GIF
+        shell: pwsh
+        run: |
+          $gif = "target/demo/cssh-rs.gif"
+          if (-not (Test-Path $gif)) { throw "GIF was not produced at $gif" }
+          if ((Get-Item $gif).Length -eq 0) { throw "GIF at $gif is empty" }
+          # verify() only parses the header; load every frame so a truncated or
+          # corrupt GIF never reaches the reviewer.
+          python -c "from PIL import Image, ImageSequence; im = Image.open('target/demo/cssh-rs.gif'); assert im.format == 'GIF', im.format; [frame.load() for frame in ImageSequence.Iterator(im)]"
+
+      - name: Upload the demo GIF
+        uses: actions/upload-artifact@v7
+        with:
+          name: demo-gif
+          path: target/demo/cssh-rs.gif
+          retention-days: 7
+
+  comment:
+    # No `if`: needing both jobs runs this only when record succeeds, and skips
+    # it (no stray comment) when record fails or authorization was denied.
+    needs: [authorize, record]
+    runs-on: ubuntu-latest
+    # Trusted assembler: builds the comment from `authorize` outputs only, never
+    # from the record job's post-untrusted-code artifact or outputs.
+    steps:
+      - name: Prepare preview comment
+        shell: bash
+        env:
+          PR_NUMBER: ${{ needs.authorize.outputs.pr_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir -p comment
+          echo "$PR_NUMBER" > comment/pr_number.txt
+          echo "demo-preview" > comment/header.txt
+          cat > comment/body.txt << EOF
+          🤖 **Demo preview**
+          Recorded the demo GIF from this PR's head on request.
+          [Open this run]($RUN_URL) and download its \`demo-gif\` artifact (unzip to view \`cssh-rs.gif\`).
+          EOF
+
+      # Post-pr-comment.yml (workflow_run, holds the write token) picks up this
+      # artifact and posts the body as a sticky comment.
+      - name: Upload preview comment
+        uses: actions/upload-artifact@v7
+        with:
+          name: demo-comment
+          path: comment/
+          retention-days: 1
