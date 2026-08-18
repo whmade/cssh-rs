@@ -394,7 +394,7 @@ def _write_authorized_keys(
                         rc_lines=rc_lines,
                     )
                     homes[alias] = str(home)
-                    forced_command = _build_bash_command(_resolve_bash_path(), bash_rc)
+                    forced_command = _build_bash_command(resolve_bash_path(), bash_rc)
                 case ShellMode():
                     forced_command = None
                 case MarkerMode():
@@ -450,7 +450,7 @@ def _write_bash_rc(
     rc_path.write_text("\n".join(body) + "\n", encoding="utf-8", newline="\n")
 
 
-def _resolve_bash_path() -> str:
+def resolve_bash_path() -> str:
     """Return an absolute bash path for ScriptedShellMode, honoring ``CSSH_E2E_BASH``.
 
     On Windows a bare ``bash`` resolves via PATH to WSL's ``System32\\bash.exe``,
