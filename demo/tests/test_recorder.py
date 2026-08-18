@@ -270,7 +270,24 @@ def test_require_vim_fails_loudly(
             raise run_result
         return run_result
 
+    monkeypatch.setattr("cssh_rs_demo.recorder.resolve_bash_path", lambda: "bash")
     monkeypatch.setattr("cssh_rs_demo.recorder.subprocess.run", fake_run)
 
     with pytest.raises(DemoError, match=match):
         _require_vim()
+
+
+def test_require_vim_probes_the_resolved_bash(monkeypatch: pytest.MonkeyPatch) -> None:
+    git_bash = r"C:\Program Files\Git\bin\bash.exe"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_k: object) -> object:
+        calls.append(cmd)
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("cssh_rs_demo.recorder.resolve_bash_path", lambda: git_bash)
+    monkeypatch.setattr("cssh_rs_demo.recorder.subprocess.run", fake_run)
+
+    _require_vim()
+
+    assert calls == [[git_bash, "-lc", "command -v vim"]]

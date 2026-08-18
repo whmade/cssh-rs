@@ -19,7 +19,7 @@ from cssh_rs_automation.config_gen import ConfigGen
 from cssh_rs_automation.keycast import Keycast, KeycastOverlay
 from cssh_rs_automation.keystrokes import Keystrokes
 from cssh_rs_automation.screen_recorder import ScreenRecorder
-from cssh_rs_automation.sshd_fixture import ScriptedShellMode, SshdFixture
+from cssh_rs_automation.sshd_fixture import ScriptedShellMode, SshdFixture, resolve_bash_path
 from cssh_rs_automation.window_focus import WindowFocus
 
 from cssh_rs_demo.gif_export import export_gif
@@ -315,8 +315,9 @@ class DemoRecorder:
 
 def _require_vim() -> None:
     """Fail loudly if the scripted bash has no vim, which the demo's edit step needs."""
+    bash = resolve_bash_path()
     try:
-        found = subprocess.run(["bash", "-lc", "command -v vim"], capture_output=True, check=False)
+        found = subprocess.run([bash, "-lc", "command -v vim"], capture_output=True, check=False)
     except OSError as exc:
         raise DemoError("the demo needs bash on PATH; install Git for Windows") from exc
     if found.returncode != 0:

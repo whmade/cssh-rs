@@ -97,14 +97,14 @@ def test_resolve_bash_path_honors_existing_override(
     fake_bash.write_text("", encoding="utf-8")
     monkeypatch.setenv("CSSH_E2E_BASH", str(fake_bash))
 
-    assert sshd_fixture._resolve_bash_path() == str(fake_bash.resolve())
+    assert sshd_fixture.resolve_bash_path() == str(fake_bash.resolve())
 
 
 def test_resolve_bash_path_rejects_missing_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CSSH_E2E_BASH", "/nonexistent/bash")
 
     with pytest.raises(SshdFixtureError, match="non-existent path"):
-        sshd_fixture._resolve_bash_path()
+        sshd_fixture.resolve_bash_path()
 
 
 def test_resolve_bash_path_on_windows_ignores_wsl_bash_and_uses_git(
@@ -126,7 +126,7 @@ def test_resolve_bash_path_on_windows_ignores_wsl_bash_and_uses_git(
 
     monkeypatch.setattr(sshd_fixture.shutil, "which", fake_which)
 
-    assert sshd_fixture._resolve_bash_path() == str(git_bash)
+    assert sshd_fixture.resolve_bash_path() == str(git_bash)
 
 
 def test_resolve_bash_path_on_windows_raises_when_only_wsl_bash(
@@ -143,7 +143,7 @@ def test_resolve_bash_path_on_windows_raises_when_only_wsl_bash(
     monkeypatch.setattr(sshd_fixture, "DEFAULT_BASH_LOCATIONS", ())
 
     with pytest.raises(SshdFixtureError, match="Git for Windows bash"):
-        sshd_fixture._resolve_bash_path()
+        sshd_fixture.resolve_bash_path()
 
 
 def test_as_forward_slash_normalizes_separators() -> None:
