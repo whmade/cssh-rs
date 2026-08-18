@@ -5,14 +5,8 @@
 # `/record-demo` and this records the demo from the PR head, uploads the GIF,
 # and links it in a sticky PR comment (posted by post-pr-comment.yml).
 #
-# SECURITY: issue_comment runs from the base branch with a write-capable token,
-# and the `record` job checks out and executes untrusted PR-head code
-# (`cargo xtask record-demo` builds the crate, pip-installs packages, and drives
-# a Robot Framework suite). It is therefore gated to repo
-# OWNER/MEMBER/COLLABORATOR, runs with `contents: read` only, and receives no
-# secrets. The preview comment is assembled by the separate `comment` job, which
-# never runs PR code, so untrusted output cannot reach the privileged
-# post-pr-comment.yml step that posts it.
+# SECURITY: the `record` job builds and runs untrusted PR-head code; the
+# maintainer gate, token isolation, and SHA pinning below exist to contain it.
 
 name: Record Demo Command
 
@@ -25,20 +19,16 @@ permissions: {}
 
 jobs:
   authorize:
-    # Coarse gate: a PR comment mentioning the command from an authorized author.
-    # The exact-command match is tightened in the `command` step.
+    # Coarse pre-filter only; the real permission gate (maintain+) runs below,
+    # not off author_association (which reflects relationship, not access).
     if: >-
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/record-demo') &&
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR')
+      contains(github.event.comment.body, '/record-demo')
     runs-on: ubuntu-latest
     permissions:
-      issues: write         # react to the /record-demo comment
-      pull-requests: read   # resolve the PR head SHA
+      pull-requests: read
     outputs:
-      proceed: ${{ steps.command.outputs.proceed }}
+      proceed: ${{ steps.command.outputs.match == 'true' && steps.authz.outputs.authorized == 'true' }}
       head_sha: ${{ steps.resolve.outputs.head_sha }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
     steps:
@@ -49,12 +39,36 @@ jobs:
           script: |
             // Strict match so "please don't /record-demo yet" does not fire.
             const body = (context.payload.comment.body || '').trim();
-            core.setOutput('proceed', /^\/record-demo\s*$/.test(body) ? 'true' : 'false');
+            core.setOutput('match', /^\/record-demo\s*$/.test(body) ? 'true' : 'false');
 
-      - name: Acknowledge with a reaction
-        if: steps.command.outputs.proceed == 'true'
+      - name: Require maintain access
+        id: authz
+        if: steps.command.outputs.match == 'true'
         uses: actions/github-script@v9
         with:
+          # role_name, not the coarse `permission` field (which collapses
+          # maintain into write); reading it needs more than the default token.
+          github-token: ${{ secrets.RECORD_DEMO_TOKEN }}
+          script: |
+            const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            const authorized = perm.role_name === 'admin' || perm.role_name === 'maintain';
+            core.setOutput('authorized', authorized ? 'true' : 'false');
+            if (!authorized) {
+              core.notice(
+                `Ignoring /record-demo from @${context.payload.comment.user.login} ` +
+                  `(role: ${perm.role_name}); maintain or admin access is required.`,
+              );
+            }
+
+      - name: Acknowledge with a reaction
+        if: steps.authz.outputs.authorized == 'true'
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.RECORD_DEMO_TOKEN }}
           script: |
             await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
@@ -65,7 +79,7 @@ jobs:
 
       - name: Resolve PR head SHA and number
         id: resolve
-        if: steps.command.outputs.proceed == 'true'
+        if: steps.authz.outputs.authorized == 'true'
         uses: actions/github-script@v9
         with:
           script: |
