@@ -37,10 +37,9 @@ Record The Feature Tour
     Copy Readme
     Hold    2
 
-    # Silence hosta.dev (bottom-left), then write the README into the rest.
-    # FIXME: "down" assumes hosta.dev lands bottom-left in the control-mode
-    # grid, which depends on the client window layout and is not enforced.
-    Disable Client    down
+    # Silence hosta.dev, then write the README into the rest. The client is found
+    # by its window title, so this holds whatever grid layout the daemon produces.
+    Disable Client    hosta.dev
     Edit Readme
     Hold    2
 

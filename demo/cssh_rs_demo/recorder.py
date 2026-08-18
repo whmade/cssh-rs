@@ -28,8 +28,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 DAEMON_TITLE = "cssh-rs daemon"
+# The " - " is absent from the daemon title, so this matches only client windows.
+CLIENT_TITLE_MATCH = "cssh-rs - "
 DEFAULT_CLUSTER = "demo"
 DEFAULT_FPS = 10
+
+# Absorbs the tiler's deliberate 1px repaint nudge when clustering cells.
+_GRID_CLUSTER_TOLERANCE_PX = 10
 
 # Two prod and two dev hosts. The second dev host joins live via control mode,
 # and only the first dev host ships the README the demo propagates to the rest.
@@ -190,13 +195,18 @@ class DemoRecorder:
         self._press("esc")
         self._type_command(":wq")
 
-    def disable_client(self, *moves: str) -> None:
-        """Disable one client via the submenu: open it, navigate ``moves``, press [d].
+    def disable_client(self, alias: str) -> None:
+        """Disable the client for ``alias`` via the enable/disable submenu.
+
+        Locates the client window by title and derives the arrow-key path from
+        its real on-screen cell, so the right client is disabled whatever grid
+        layout the daemon produces.
 
         Args:
-            moves: Arrow keys stepping the submenu selection from the top-left
-                cell to the target client before it is disabled.
+            alias: Host alias whose client is disabled.
         """
+        boxes = self._focus.window_boxes(CLIENT_TITLE_MATCH, match_mode="substring")
+        moves = _disable_moves(boxes, alias)
         self.enter_control_mode()
         self._press("e")
         for move in moves:
@@ -311,6 +321,55 @@ class DemoRecorder:
             if alias == README_HOST:
                 readme = data_dir / README_NAME
                 readme.write_text(f"{README_CONTENT}\n", encoding="utf-8", newline="\n")
+
+
+def _disable_moves(boxes: list[tuple[str, int, int, int, int]], alias: str) -> list[str]:
+    """Arrow-key path from the submenu's top-left cell to ``alias``'s client.
+
+    The submenu selection starts at the top-left grid cell and a vertical step
+    keeps its anchor column, landing on the leftmost cell of the target row, so
+    ``down`` per row then ``right`` per column reaches any cell in a dense row.
+    A 4-host demo only ever puts the trailing host in a stretched partial-last-row
+    cell, so every alias the demo disables sits in a dense row and this is exact.
+
+    Args:
+        boxes: ``(title, left, top, width, height)`` for each client window.
+        alias: Host alias whose client cell is targeted.
+
+    Returns:
+        The ``"down"``/``"right"`` moves to reach the client, in order.
+    """
+    needle = f"@{alias}"
+    target = next((box for box in boxes if needle in box[0]), None)
+    if target is None:
+        raise DemoError(f"no client window found for alias {alias!r}")
+    _title, target_left, target_top, _width, _height = target
+    row = _cluster_index([box[2] for box in boxes], target_top)
+    row_lefts = [box[1] for box in boxes if abs(box[2] - target_top) <= _GRID_CLUSTER_TOLERANCE_PX]
+    col = _cluster_index(row_lefts, target_left)
+    return ["down"] * row + ["right"] * col
+
+
+def _cluster_index(values: list[int], target: int) -> int:
+    """Index of ``target``'s cluster among ``values`` grouped within the tolerance.
+
+    Args:
+        values: Coordinates (tops for rows, lefts for columns) to cluster.
+        target: The coordinate whose cluster index is returned.
+
+    Returns:
+        The 0-based cluster index of ``target``.
+    """
+    clusters: list[list[int]] = []
+    for value in sorted(set(values)):
+        if clusters and value - clusters[-1][-1] <= _GRID_CLUSTER_TOLERANCE_PX:
+            clusters[-1].append(value)
+        else:
+            clusters.append([value])
+    for index, cluster in enumerate(clusters):
+        if any(abs(target - value) <= _GRID_CLUSTER_TOLERANCE_PX for value in cluster):
+            return index
+    raise DemoError(f"coordinate {target} not among the client windows")
 
 
 def _require_vim() -> None:
