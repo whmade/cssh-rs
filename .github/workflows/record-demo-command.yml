@@ -128,8 +128,11 @@ jobs:
         shell: pwsh
         run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 
-      - name: Set display resolution
-        uses: ./.github/actions/set-display-resolution
+      # demo-setup and demo-teardown are the PR-extensible hooks: their steps are
+      # read from the checked-out PR head, so a PR can add setup/teardown a
+      # preview picks up even though this workflow runs from the default branch.
+      - name: Set up the demo desktop
+        uses: ./.github/actions/demo-setup
 
       # Builds cssh-rs, installs the automation and demo packages, drives robot.
       - name: Record the demo GIF
@@ -151,6 +154,11 @@ jobs:
           name: demo-gif
           path: target/demo/cssh-rs.gif
           retention-days: 7
+
+      # always(): undo the desktop setup even when recording failed above.
+      - name: Tear down the demo desktop
+        if: always()
+        uses: ./.github/actions/demo-teardown
 
   comment:
     # No `if`: needing both jobs runs this only when record succeeds, and skips

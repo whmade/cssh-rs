@@ -1,37 +1,31 @@
-# The demo recorder captures the desktop at its native resolution, and
-# windows-latest defaults to a cramped 1024x768; switch to a larger mode.
+# Set up the windows-latest desktop before `cargo xtask record-demo`, and the
+# /record-demo extension point for it. record-demo-command.yml is pinned to the
+# default branch (issue_comment can only run the default-branch workflow), but a
+# local composite action's steps are read from the checked-out PR head - so a PR
+# can add arbitrary setup here and preview it via /record-demo without changing
+# the workflow. Keep steps self-contained, and pair anything that must be undone
+# with a step in demo-teardown.
+#
+# Initial step: switch the display to the recording resolution.
 
-name: Set display resolution
-description: Switch the windows-latest primary display to a fixed resolution for demo recording.
-
-inputs:
-  width:
-    description: Target desktop width in pixels.
-    required: false
-    default: "1600"
-  height:
-    description: Target desktop height in pixels.
-    required: false
-    default: "900"
+name: Demo setup
+description: Prepare the windows-latest desktop for demo recording; extend by adding steps from a PR.
 
 runs:
   using: composite
   steps:
     - name: Set display resolution
       shell: pwsh
-      env:
-        TARGET_WIDTH: ${{ inputs.width }}
-        TARGET_HEIGHT: ${{ inputs.height }}
       run: |
-        $width = [int]$env:TARGET_WIDTH
-        $height = [int]$env:TARGET_HEIGHT
+        $width = 1600
+        $height = 900
         # The DEVMODE struct is built and passed entirely inside this compiled
         # helper: marshalling a boxed value-type struct with ByValTStr fields
         # through PowerShell's [ref] mangles it and ChangeDisplaySettings then
-        # rejects it with ERROR_INVALID_PARAMETER. Only width/height cross the
-        # PowerShell boundary. Flagging just dmPelsWidth/dmPelsHeight in dmFields
-        # tells ChangeDisplaySettings to keep the current colour depth and
-        # refresh rate, so there is no need to read the current mode first.
+        # rejects it with ERROR_INVALID_PARAMETER. Flagging just
+        # dmPelsWidth/dmPelsHeight in dmFields tells ChangeDisplaySettings to keep
+        # the current colour depth and refresh rate, so there is no need to read
+        # the current mode first.
         # https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-changedisplaysettingsa
         $src = @'
         using System;
