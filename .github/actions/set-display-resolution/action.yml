@@ -1,0 +1,64 @@
+# The demo recorder captures the desktop at its native resolution, and
+# windows-latest defaults to a cramped 1024x768; switch to a larger mode.
+
+name: Set display resolution
+description: Switch the windows-latest primary display to a fixed resolution for demo recording.
+
+inputs:
+  width:
+    description: Target desktop width in pixels.
+    required: false
+    default: "1600"
+  height:
+    description: Target desktop height in pixels.
+    required: false
+    default: "900"
+
+runs:
+  using: composite
+  steps:
+    - name: Set display resolution
+      shell: pwsh
+      env:
+        TARGET_WIDTH: ${{ inputs.width }}
+        TARGET_HEIGHT: ${{ inputs.height }}
+      run: |
+        $width = [int]$env:TARGET_WIDTH
+        $height = [int]$env:TARGET_HEIGHT
+        $src = @'
+        using System;
+        using System.Runtime.InteropServices;
+        public class Disp {
+          [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Ansi)]
+          public struct DEVMODE {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string dmDeviceName;
+            public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+            public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+            public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string dmFormName;
+            public short dmLogPixels;
+            public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+            public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2;
+            public int dmPanningWidth, dmPanningHeight;
+          }
+          [DllImport("user32.dll")] public static extern int EnumDisplaySettings(string dev, int mode, ref DEVMODE dm);
+          [DllImport("user32.dll")] public static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+        }
+        '@
+        $ENUM_CURRENT_SETTINGS = -1
+        $DM_PELSWIDTH = 0x80000
+        $DM_PELSHEIGHT = 0x100000
+        $DISP_CHANGE_SUCCESSFUL = 0
+        Add-Type $src
+        $dm = New-Object Disp+DEVMODE
+        $dm.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($dm)
+        if ([Disp]::EnumDisplaySettings($null, $ENUM_CURRENT_SETTINGS, [ref]$dm) -eq 0) { throw "EnumDisplaySettings failed to read the current display mode" }
+        $dm.dmPelsWidth = $width
+        $dm.dmPelsHeight = $height
+        $dm.dmFields = $DM_PELSWIDTH -bor $DM_PELSHEIGHT
+        $ret = [Disp]::ChangeDisplaySettings([ref]$dm, 0)  # flags 0: apply the change dynamically
+        if ($ret -ne $DISP_CHANGE_SUCCESSFUL) { throw "ChangeDisplaySettings failed with code $ret" }
+        Add-Type -AssemblyName System.Windows.Forms
+        $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        Write-Host "Display is now $($b.Width)x$($b.Height)"
+        if ($b.Width -ne $width -or $b.Height -ne $height) { throw "resolution not applied" }
