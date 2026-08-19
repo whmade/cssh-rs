@@ -13,7 +13,10 @@ use std::time::Duration;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_C, VK_CANCEL};
 
 use crate::utils::config::ClientConfig;
-use crate::utils::windows::{get_console_title, set_console_color, WindowsApi};
+use crate::utils::windows::{
+    get_console_title, restore_console_output_attributes, set_console_color,
+    snapshot_console_output_attributes, WindowsApi,
+};
 use ssh2_config::{ParseRule, SshConfig};
 use tokio::net::windows::named_pipe::NamedPipeClient;
 use tokio::process::{Child, Command};
@@ -70,7 +73,15 @@ const HIGHLIGHT_FLASH_DURATION: Duration = Duration::from_millis(250);
 /// [`shutdown_child`] force-kills it.
 const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
-/// Resolve the console color for a `(state, highlighted)` combination;
+/// A state repaint: `Tint` floods the buffer with one attribute, `Restore`
+/// writes the saved per-cell attributes back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ConsolePaint {
+    Restore,
+    Tint(CONSOLE_CHARACTER_ATTRIBUTES),
+}
+
+/// Resolve the paint intent for a `(state, highlighted)` combination;
 /// highlight overlays the disabled color.
 ///
 /// # Arguments
@@ -87,26 +98,26 @@ const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 ///
 /// # Returns
 ///
-/// The color to paint, or `None` when `original_console_color` is `None`.
+/// The paint intent, or `None` when `original_console_color` is `None`.
 fn get_effective_color(
     state: ClientState,
     highlighted: bool,
     original_console_color: Option<CONSOLE_CHARACTER_ATTRIBUTES>,
     disabled_console_color: CONSOLE_CHARACTER_ATTRIBUTES,
     highlighted_console_color: CONSOLE_CHARACTER_ATTRIBUTES,
-) -> Option<CONSOLE_CHARACTER_ATTRIBUTES> {
-    let original = original_console_color?;
+) -> Option<ConsolePaint> {
+    original_console_color?;
     if highlighted {
-        return Some(highlighted_console_color);
+        return Some(ConsolePaint::Tint(highlighted_console_color));
     }
     match state {
-        ClientState::Active => return Some(original),
-        ClientState::Disabled => return Some(disabled_console_color),
+        ClientState::Active => return Some(ConsolePaint::Restore),
+        ClientState::Disabled => return Some(ConsolePaint::Tint(disabled_console_color)),
     }
 }
 
-/// Resolve the underlying state color, with the highlight overlay bypassed,
-/// for the action-feedback flash.
+/// Resolve the underlying-state paint intent, with the highlight overlay
+/// bypassed, for the action-feedback flash.
 ///
 /// # Arguments
 ///
@@ -117,16 +128,16 @@ fn get_effective_color(
 ///
 /// # Returns
 ///
-/// The color to paint, or `None` when `original_console_color` is `None`.
+/// The paint intent, or `None` when `original_console_color` is `None`.
 fn get_flash_color(
     state: ClientState,
     original_console_color: Option<CONSOLE_CHARACTER_ATTRIBUTES>,
     disabled_console_color: CONSOLE_CHARACTER_ATTRIBUTES,
-) -> Option<CONSOLE_CHARACTER_ATTRIBUTES> {
-    let original = original_console_color?;
+) -> Option<ConsolePaint> {
+    original_console_color?;
     match state {
-        ClientState::Active => return Some(original),
-        ClientState::Disabled => return Some(disabled_console_color),
+        ClientState::Active => return Some(ConsolePaint::Restore),
+        ClientState::Disabled => return Some(ConsolePaint::Tint(disabled_console_color)),
     }
 }
 
@@ -142,7 +153,7 @@ struct ConsolePalette {
     highlighted: CONSOLE_CHARACTER_ATTRIBUTES,
 }
 
-/// Repaint the console to the steady-state color for `(state, highlighted)`.
+/// Repaint the console to the steady-state look for `(state, highlighted)`.
 ///
 /// # Arguments
 ///
@@ -150,13 +161,15 @@ struct ConsolePalette {
 /// * `state`       - The client's current [`ClientState`].
 /// * `highlighted` - Whether the client is the submenu's highlighted target.
 /// * `palette`     - The available colors.
-/// * `last`        - Most recently painted color; updated in place.
+/// * `snapshot`    - Saved per-cell attributes; updated in place.
+/// * `last`        - Most recently painted intent; updated in place.
 fn paint_steady(
     api: &dyn WindowsApi,
     state: ClientState,
     highlighted: bool,
     palette: &ConsolePalette,
-    last: &mut Option<CONSOLE_CHARACTER_ATTRIBUTES>,
+    snapshot: &mut Option<Vec<u16>>,
+    last: &mut Option<ConsolePaint>,
 ) {
     paint_console_color(
         api,
@@ -167,6 +180,8 @@ fn paint_steady(
             palette.disabled,
             palette.highlighted,
         ),
+        palette.original.unwrap_or_default(),
+        snapshot,
         last,
     );
 }
@@ -176,10 +191,11 @@ fn paint_steady(
 ///
 /// # Arguments
 ///
-/// * `api`     - The Windows API implementation to use.
-/// * `state`   - The just-applied [`ClientState`].
-/// * `palette` - The available colors.
-/// * `last`    - Most recently painted color; updated in place.
+/// * `api`      - The Windows API implementation to use.
+/// * `state`    - The just-applied [`ClientState`].
+/// * `palette`  - The available colors.
+/// * `snapshot` - Saved per-cell attributes; updated in place.
+/// * `last`     - Most recently painted intent; updated in place.
 ///
 /// # Returns
 ///
@@ -188,40 +204,65 @@ fn start_flash(
     api: &dyn WindowsApi,
     state: ClientState,
     palette: &ConsolePalette,
-    last: &mut Option<CONSOLE_CHARACTER_ATTRIBUTES>,
+    snapshot: &mut Option<Vec<u16>>,
+    last: &mut Option<ConsolePaint>,
 ) -> tokio::time::Instant {
     paint_console_color(
         api,
         get_flash_color(state, palette.original, palette.disabled),
+        palette.original.unwrap_or_default(),
+        snapshot,
         last,
     );
     return tokio::time::Instant::now() + HIGHLIGHT_FLASH_DURATION;
 }
 
-/// Paint `target` if it differs from `last`, then update `last`.
-///
-/// Skipping unchanged repaints avoids an unnecessary LPC roundtrip to
-/// conhost and the post-fill `InvalidateRect`/WM_PAINT.
+/// Apply `target` if it differs from `last`, then update `last`.
 ///
 /// # Arguments
 ///
-/// * `api`    - The Windows API implementation to use.
-/// * `target` - The color to paint, or `None` to skip.
-/// * `last`   - The most recently painted color; updated in-place after a
-///              successful repaint.
+/// * `api`      - The Windows API implementation to use.
+/// * `target`   - The paint intent, or `None` to skip.
+/// * `original` - Default text attribute restored for new output on a restore.
+/// * `snapshot` - Saved per-cell attributes; captured on tint, consumed on restore.
+/// * `last`     - Most recently painted intent; updated in place.
 fn paint_console_color(
     api: &dyn WindowsApi,
-    target: Option<CONSOLE_CHARACTER_ATTRIBUTES>,
-    last: &mut Option<CONSOLE_CHARACTER_ATTRIBUTES>,
+    target: Option<ConsolePaint>,
+    original: CONSOLE_CHARACTER_ATTRIBUTES,
+    snapshot: &mut Option<Vec<u16>>,
+    last: &mut Option<ConsolePaint>,
 ) {
-    let Some(color) = target else {
+    let Some(paint) = target else {
         return;
     };
-    if last.map(|c| return c.0) == Some(color.0) {
+    // An unchanged repaint still costs a conhost LPC roundtrip and a WM_PAINT.
+    if *last == Some(paint) {
         return;
     }
-    set_console_color(api, color);
-    *last = Some(color);
+    match paint {
+        ConsolePaint::Tint(color) => {
+            // Re-reading during a tint -> tint transition would capture the
+            // already-flattened colors, so snapshot only from a non-tint state.
+            if !matches!(*last, Some(ConsolePaint::Tint(_))) {
+                *snapshot = snapshot_console_output_attributes(api);
+            }
+            set_console_color(api, color);
+        }
+        ConsolePaint::Restore => {
+            match snapshot.take() {
+                Some(attributes) => restore_console_output_attributes(api, original, &attributes),
+                // At startup (last is None) real colors are still on screen;
+                // otherwise a failed capture falls back to `original`.
+                None => {
+                    if last.is_some() {
+                        set_console_color(api, original);
+                    }
+                }
+            }
+        }
+    }
+    *last = Some(paint);
 }
 
 /// Write the given [INPUT_RECORD_0] to the console input buffer using the provided API.
@@ -855,10 +896,18 @@ async fn run_visuals_loop(
     };
     let mut prev_state = *state_receiver.borrow_and_update();
     let mut prev_highlight = *highlight_receiver.borrow_and_update();
-    let mut last_painted: Option<CONSOLE_CHARACTER_ATTRIBUTES> = None;
+    let mut last_painted: Option<ConsolePaint> = None;
+    let mut snapshot: Option<Vec<u16>> = None;
     let mut flash_until: Option<tokio::time::Instant> = None;
 
-    paint_steady(api, prev_state, prev_highlight, &palette, &mut last_painted);
+    paint_steady(
+        api,
+        prev_state,
+        prev_highlight,
+        &palette,
+        &mut snapshot,
+        &mut last_painted,
+    );
 
     loop {
         // Independent watch channels: `state_receiver` and `highlight_receiver` may be observed out of send-order, so the flash branch can fire (or not) on stale `prev_highlight`.
@@ -869,9 +918,22 @@ async fn run_visuals_loop(
                 }
                 prev_state = *state_receiver.borrow_and_update();
                 if prev_highlight {
-                    flash_until = Some(start_flash(api, prev_state, &palette, &mut last_painted));
+                    flash_until = Some(start_flash(
+                        api,
+                        prev_state,
+                        &palette,
+                        &mut snapshot,
+                        &mut last_painted,
+                    ));
                 } else {
-                    paint_steady(api, prev_state, prev_highlight, &palette, &mut last_painted);
+                    paint_steady(
+                        api,
+                        prev_state,
+                        prev_highlight,
+                        &palette,
+                        &mut snapshot,
+                        &mut last_painted,
+                    );
                     flash_until = None;
                 }
             }
@@ -885,7 +947,14 @@ async fn run_visuals_loop(
                 }
                 prev_highlight = next_highlight;
                 flash_until = None;
-                paint_steady(api, prev_state, prev_highlight, &palette, &mut last_painted);
+                paint_steady(
+                    api,
+                    prev_state,
+                    prev_highlight,
+                    &palette,
+                    &mut snapshot,
+                    &mut last_painted,
+                );
             }
             _ = async {
                 match flash_until {
@@ -894,7 +963,14 @@ async fn run_visuals_loop(
                 }
             } => {
                 flash_until = None;
-                paint_steady(api, prev_state, prev_highlight, &palette, &mut last_painted);
+                paint_steady(
+                    api,
+                    prev_state,
+                    prev_highlight,
+                    &palette,
+                    &mut snapshot,
+                    &mut last_painted,
+                );
             }
         }
     }

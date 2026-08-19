@@ -14,10 +14,10 @@ use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::Console::{
     FillConsoleOutputAttribute, GetConsoleProcessList, GetConsoleScreenBufferInfo,
-    GetConsoleWindow, GetStdHandle, ReadConsoleInputW, SetConsoleCtrlHandler,
-    SetConsoleTextAttribute, CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD,
-    CTRL_BREAK_EVENT, CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE,
-    STD_OUTPUT_HANDLE,
+    GetConsoleWindow, GetStdHandle, ReadConsoleInputW, ReadConsoleOutputAttribute,
+    SetConsoleCtrlHandler, SetConsoleTextAttribute, WriteConsoleOutputAttribute,
+    CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD, CTRL_BREAK_EVENT,
+    CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE};
 use windows::Win32::System::Console::{
@@ -128,6 +128,38 @@ pub trait WindowsApi: Send + Sync {
         &self,
         attribute: u16,
         length: u32,
+        coord: COORD,
+    ) -> windows::core::Result<u32>;
+
+    /// Reads a run of per-cell attributes from the console screen buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - Number of cells to read.
+    /// * `coord` - Starting coordinate.
+    ///
+    /// # Returns
+    ///
+    /// The attributes read (one per cell) or error.
+    fn read_console_output_attribute(
+        &self,
+        length: u32,
+        coord: COORD,
+    ) -> windows::core::Result<Vec<u16>>;
+
+    /// Writes a run of per-cell attributes to the console screen buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `attributes` - Attributes to write (one per cell).
+    /// * `coord` - Starting coordinate.
+    ///
+    /// # Returns
+    ///
+    /// Number of cells actually written or error.
+    fn write_console_output_attribute(
+        &self,
+        attributes: &[u16],
         coord: COORD,
     ) -> windows::core::Result<u32>;
 
@@ -664,6 +696,42 @@ impl WindowsApi for DefaultWindowsApi {
         return Ok(number_written);
     }
 
+    fn read_console_output_attribute(
+        &self,
+        length: u32,
+        coord: COORD,
+    ) -> windows::core::Result<Vec<u16>> {
+        let mut attributes = vec![0u16; length as usize];
+        let mut number_read = 0u32;
+        unsafe {
+            ReadConsoleOutputAttribute(
+                self.get_stdout_handle()?,
+                &mut attributes,
+                coord,
+                &mut number_read,
+            )?
+        };
+        attributes.truncate(number_read as usize);
+        return Ok(attributes);
+    }
+
+    fn write_console_output_attribute(
+        &self,
+        attributes: &[u16],
+        coord: COORD,
+    ) -> windows::core::Result<u32> {
+        let mut number_written = 0u32;
+        unsafe {
+            WriteConsoleOutputAttribute(
+                self.get_stdout_handle()?,
+                attributes,
+                coord,
+                &mut number_written,
+            )?
+        };
+        return Ok(number_written);
+    }
+
     fn scroll_console_screen_buffer(
         &self,
         scroll_rect: SMALL_RECT,
@@ -1123,6 +1191,65 @@ pub fn set_console_color(api: &dyn WindowsApi, color: CONSOLE_CHARACTER_ATTRIBUT
     // such trigger).
     if let Err(err) = api.invalidate_console_window() {
         warn!("Failed to invalidate console window after recolor: {}", err);
+    }
+}
+
+/// Snapshots the whole screen buffer's per-cell attributes for a later
+/// [`restore_console_output_attributes`].
+///
+/// # Arguments
+///
+/// * `api` - The Windows API implementation to use.
+///
+/// # Returns
+///
+/// `Some(attributes)` on success, or `None` if the buffer could not be read
+/// (painting degrades to a no-op rather than aborting the session).
+pub fn snapshot_console_output_attributes(api: &dyn WindowsApi) -> Option<Vec<u16>> {
+    let buffer_info = match api.get_console_screen_buffer_info() {
+        Ok(info) => info,
+        Err(err) => {
+            warn!(
+                "Failed to read console screen buffer info; color snapshot skipped: {}",
+                err
+            );
+            return None;
+        }
+    };
+    let width: u32 = buffer_info.dwSize.X.try_into().unwrap();
+    let height: u32 = buffer_info.dwSize.Y.try_into().unwrap();
+    match api.read_console_output_attribute(width * height, COORD { X: 0, Y: 0 }) {
+        Ok(attributes) => return Some(attributes),
+        Err(err) => {
+            warn!(
+                "Failed to snapshot console output attributes; color snapshot skipped: {}",
+                err
+            );
+            return None;
+        }
+    }
+}
+
+/// Writes a per-cell attribute snapshot back from `(0,0)` and resets the default
+/// text attribute to `default`, undoing a [`set_console_color`] tint without
+/// flattening the captured per-cell colors.
+///
+/// # Arguments
+///
+/// * `api`        - The Windows API implementation to use.
+/// * `default`    - The default text attribute to restore for new output.
+/// * `attributes` - The per-cell attribute snapshot to write back from `(0,0)`.
+pub fn restore_console_output_attributes(
+    api: &dyn WindowsApi,
+    default: CONSOLE_CHARACTER_ATTRIBUTES,
+    attributes: &[u16],
+) {
+    api.set_console_text_attribute(default).unwrap();
+    api.write_console_output_attribute(attributes, COORD { X: 0, Y: 0 })
+        .unwrap();
+    // Force a WM_PAINT for the stale sub-cell edge slivers, as in set_console_color.
+    if let Err(err) = api.invalidate_console_window() {
+        warn!("Failed to invalidate console window after restore: {}", err);
     }
 }
 

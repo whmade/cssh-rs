@@ -4,8 +4,9 @@
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 
 use crate::api::{
-    clear_screen, is_windows_10, read_console_input, read_keyboard_input, set_console_border_color,
-    set_console_color, utf16_buffer_to_string, MockWindowsApi, KEY_EVENT,
+    clear_screen, is_windows_10, read_console_input, read_keyboard_input,
+    restore_console_output_attributes, set_console_border_color, set_console_color,
+    snapshot_console_output_attributes, utf16_buffer_to_string, MockWindowsApi, KEY_EVENT,
 };
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::System::Console::{
@@ -264,6 +265,123 @@ mod console_color_test {
             result.is_err(),
             "Should panic when set_console_text_attribute fails"
         );
+    }
+}
+
+/// Test module for the per-cell attribute snapshot/restore helpers.
+mod attribute_snapshot_test {
+    use super::*;
+
+    /// Snapshotting reads `width * height` cells from `(0,0)` and returns them.
+    #[test]
+    fn test_snapshot_console_output_attributes() {
+        let mut mock_api = MockWindowsApi::new();
+
+        let mut buffer_info = CONSOLE_SCREEN_BUFFER_INFO::default();
+        buffer_info.dwSize.X = 80;
+        buffer_info.dwSize.Y = 25;
+
+        mock_api
+            .expect_get_console_screen_buffer_info()
+            .times(1)
+            .return_const(Ok(buffer_info));
+        mock_api
+            .expect_read_console_output_attribute()
+            .with(
+                mockall::predicate::eq(80u32 * 25u32),
+                mockall::predicate::eq(COORD { X: 0, Y: 0 }),
+            )
+            .times(1)
+            .returning(|length, _| return Ok(vec![0x1F; length as usize]));
+
+        let snapshot = snapshot_console_output_attributes(&mock_api);
+
+        assert_eq!(snapshot, Some(vec![0x1F; 80 * 25]));
+    }
+
+    /// A buffer-info failure degrades the snapshot to `None` rather than panicking.
+    #[test]
+    fn test_snapshot_console_output_attributes_buffer_info_error_returns_none() {
+        let mut mock_api = MockWindowsApi::new();
+        mock_api
+            .expect_get_console_screen_buffer_info()
+            .times(1)
+            .returning(|| return Err(windows::core::Error::from_thread()));
+
+        assert_eq!(snapshot_console_output_attributes(&mock_api), None);
+    }
+
+    /// A read failure degrades the snapshot to `None` rather than panicking.
+    #[test]
+    fn test_snapshot_console_output_attributes_read_error_returns_none() {
+        let mut mock_api = MockWindowsApi::new();
+
+        let mut buffer_info = CONSOLE_SCREEN_BUFFER_INFO::default();
+        buffer_info.dwSize.X = 80;
+        buffer_info.dwSize.Y = 25;
+
+        mock_api
+            .expect_get_console_screen_buffer_info()
+            .times(1)
+            .return_const(Ok(buffer_info));
+        mock_api
+            .expect_read_console_output_attribute()
+            .times(1)
+            .returning(|_, _| return Err(windows::core::Error::from_thread()));
+
+        assert_eq!(snapshot_console_output_attributes(&mock_api), None);
+    }
+
+    /// Restoring resets the default attribute, writes the snapshot back from
+    /// `(0,0)`, and forces the post-write repaint.
+    #[test]
+    fn test_restore_console_output_attributes() {
+        let mut mock_api = MockWindowsApi::new();
+        let default = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
+        let attributes = vec![0x1F_u16; 3];
+
+        mock_api
+            .expect_set_console_text_attribute()
+            .with(mockall::predicate::eq(default))
+            .times(1)
+            .returning(|_| return Ok(()));
+        mock_api
+            .expect_write_console_output_attribute()
+            .with(
+                mockall::predicate::eq(vec![0x1F_u16; 3]),
+                mockall::predicate::eq(COORD { X: 0, Y: 0 }),
+            )
+            .times(1)
+            .returning(|attrs, _| return Ok(attrs.len() as u32));
+        mock_api
+            .expect_invalidate_console_window()
+            .times(1)
+            .returning(|| return Ok(()));
+
+        restore_console_output_attributes(&mock_api, default, &attributes);
+    }
+
+    /// A failing invalidate is logged and does not propagate - a stale visual
+    /// is recoverable and must not kill the SSH session.
+    #[test]
+    fn test_restore_console_output_attributes_swallows_invalidate_error() {
+        let mut mock_api = MockWindowsApi::new();
+        let default = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
+
+        mock_api
+            .expect_set_console_text_attribute()
+            .times(1)
+            .returning(|_| return Ok(()));
+        mock_api
+            .expect_write_console_output_attribute()
+            .times(1)
+            .returning(|attrs, _| return Ok(attrs.len() as u32));
+        mock_api
+            .expect_invalidate_console_window()
+            .times(1)
+            .returning(|| return Err(windows::core::Error::from_thread()));
+
+        restore_console_output_attributes(&mock_api, default, &[0x1F, 0x1F]);
     }
 }
 
