@@ -128,6 +128,9 @@ jobs:
         shell: pwsh
         run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 
+      - name: Set display resolution
+        uses: ./.github/actions/set-display-resolution
+
       # Builds cssh-rs, installs the automation and demo packages, drives robot.
       - name: Record the demo GIF
         run: cargo xtask record-demo
