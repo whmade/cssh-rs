@@ -48,6 +48,9 @@ Record The Feature Tour
     Broadcast    cat README
     Hold    2
 
+    # Clear every client so the ping broadcast starts on a clean screen.
+    Clear Screen
+
     # A broadcast ping shows the whole cluster reacting; Ctrl+C aborts it.
     Broadcast    ping google.com
     Hold    1

@@ -17,6 +17,7 @@ from cssh_rs_automation.sshd_fixture import ScriptedShellMode
 
 from cssh_rs_demo.recorder import (
     CLIENT_TITLE_MATCH,
+    DAEMON_CONSOLE_COLOR,
     DAEMON_TITLE,
     DEFAULT_CLUSTER,
     DISPLAY_USER,
@@ -87,7 +88,7 @@ def test_start_demo_seeds_hosts_wires_overlay_and_launches(
     recorder.start_demo(str(binary), "out", fps="10")
 
     mocks["sshd"].start_sshd.assert_called_once_with(
-        HOSTS, mode=ScriptedShellMode(rc_lines=SHELL_RC_LINES)
+        HOSTS, mode=ScriptedShellMode(rc_lines=SHELL_RC_LINES, colored_prompt=True)
     )
     generate_kwargs = mocks["config_gen"].generate_config.call_args.kwargs
     assert mocks["config_gen"].generate_config.call_args.args[3] == INITIAL_HOSTS
@@ -97,6 +98,7 @@ def test_start_demo_seeds_hosts_wires_overlay_and_launches(
         f"User={getpass.getuser()}",
         USERNAME_HOST_PLACEHOLDER,
     ]
+    assert generate_kwargs["daemon_console_color"] == DAEMON_CONSOLE_COLOR
     mocks["recorder"].add_overlay.assert_called_once()
     mocks["keystrokes"].add_key_listener.assert_called_once()
     popen.assert_called_once_with([str(binary), "-u", DISPLAY_USER, DEFAULT_CLUSTER])
@@ -178,6 +180,7 @@ def test_edit_readme_opens_vim_then_pastes(monkeypatch: pytest.MonkeyPatch) -> N
     [
         (lambda r: r.enable_all(), [call.send_hotkey("ctrl", "a"), call.press_key("n")]),
         (lambda r: r.interrupt(), [call.send_hotkey("ctrl", "c")]),
+        (lambda r: r.clear_screen(), [call.send_hotkey("ctrl", "l")]),
     ],
 )
 def test_control_mode_key_sequences(

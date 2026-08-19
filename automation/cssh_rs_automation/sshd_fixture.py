@@ -77,9 +77,12 @@ class ScriptedShellMode:
 
     Args:
         rc_lines: Extra bash appended to each session's rc, e.g. shell aliases.
+        colored_prompt: When true, colorize the prompt like a standard bash PS1;
+            otherwise it is plain.
     """
 
     rc_lines: str = ""
+    colored_prompt: bool = False
 
 
 SshdMode = MarkerMode | ShellMode | ScriptedShellMode
@@ -382,7 +385,7 @@ def _write_authorized_keys(
             pubkey = alias_key_path.with_suffix(".pub").read_text(encoding="utf-8").strip()
             marker_path = markers_dir / f"{alias}.log"
             match mode:
-                case ScriptedShellMode(rc_lines=rc_lines):
+                case ScriptedShellMode(rc_lines=rc_lines, colored_prompt=colored_prompt):
                     home = homes_dir / alias
                     home.mkdir(parents=True)
                     bash_rc = home / ".bashrc"
@@ -392,6 +395,7 @@ def _write_authorized_keys(
                         home=home,
                         marker_path=marker_path,
                         rc_lines=rc_lines,
+                        colored_prompt=colored_prompt,
                     )
                     homes[alias] = str(home)
                     forced_command = _build_bash_command(resolve_bash_path(), bash_rc)
@@ -433,14 +437,28 @@ def _build_bash_command(bash_path: str, rc_path: Path) -> str:
 
 
 def _write_bash_rc(
-    rc_path: Path, *, prompt_host: str, home: Path, marker_path: Path, rc_lines: str
+    rc_path: Path,
+    *,
+    prompt_host: str,
+    home: Path,
+    marker_path: Path,
+    rc_lines: str,
+    colored_prompt: bool = False,
 ) -> None:
     """Write a per-host bash rc: root@<host> prompt, host home as ~, extra lines, ready marker."""
     # Set HOME to $PWD after cd so \w abbreviates the canonicalized home to ~.
+    if colored_prompt:
+        # \[ \] wrap the escapes so readline does not count them in the prompt width.
+        ps1 = (
+            f"export PS1='\\[\\e[31m\\]root@{prompt_host}\\[\\e[0m\\]:"
+            f"\\[\\e[35m\\]\\w\\[\\e[0m\\]\\$ '"
+        )
+    else:
+        ps1 = f"export PS1='root@{prompt_host}:\\w\\$ '"
     body = [
         f'cd "{_as_forward_slash(home)}"',
         'export HOME="$PWD"',
-        f"export PS1='root@{prompt_host}:\\w\\$ '",
+        ps1,
     ]
     if rc_lines:
         body.append(rc_lines)

@@ -51,6 +51,9 @@ SHELL_RC_LINES = "alias ll='ls -alF'"
 DISPLAY_USER = "root"
 USERNAME_HOST_PLACEHOLDER = "{{USERNAME_AT_HOST}}"
 
+# The 207 default lands on the palette's yellow slot; index-8 white matches the clients.
+DAEMON_CONSOLE_COLOR = 200
+
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _WINDOW_TIMEOUT_SECONDS = 20.0
 _POLL_INTERVAL_SECONDS = 0.5
@@ -110,7 +113,9 @@ class DemoRecorder:
             raise DemoError(f"cssh-rs binary not found: {binary_path}")
         _require_vim()
 
-        info = self._sshd.start_sshd(HOSTS, mode=ScriptedShellMode(rc_lines=SHELL_RC_LINES))
+        info = self._sshd.start_sshd(
+            HOSTS, mode=ScriptedShellMode(rc_lines=SHELL_RC_LINES, colored_prompt=True)
+        )
         self._seed_host_files(cast("dict[str, str]", info["homes"]))
         self._config_path = self._config_gen.generate_config(
             str(binary_path),
@@ -119,6 +124,7 @@ class DemoRecorder:
             INITIAL_HOSTS,
             cluster_name=DEFAULT_CLUSTER,
             arguments=["-o", f"User={getpass.getuser()}", USERNAME_HOST_PLACEHOLDER],
+            daemon_console_color=DAEMON_CONSOLE_COLOR,
         )
 
         keycast = Keycast()
@@ -233,6 +239,11 @@ class DemoRecorder:
         """Broadcast Ctrl+C from the daemon to abort the running remote command."""
         self.focus_daemon()
         self._hotkey("ctrl", "c")
+
+    def clear_screen(self) -> None:
+        """Broadcast Ctrl+L from the daemon to clear every client's screen."""
+        self.focus_daemon()
+        self._hotkey("ctrl", "l")
 
     def hold(self, seconds: float) -> None:
         """Hold the current frame on screen for ``seconds``.

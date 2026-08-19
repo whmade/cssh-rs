@@ -90,6 +90,25 @@ def test_write_bash_rc_sets_prompt_home_marker_and_extra_lines(tmp_path: Path) -
     assert f"""PROMPT_COMMAND='echo ready > "{marker_path}"; unset PROMPT_COMMAND'""" in content
 
 
+def test_write_bash_rc_colored_prompt_uses_ansi_ps1(tmp_path: Path) -> None:
+    rc = tmp_path / ".bashrc"
+    home = tmp_path / "home"
+    marker = tmp_path / "markers" / "hosta.dev.log"
+
+    sshd_fixture._write_bash_rc(
+        rc,
+        prompt_host="hosta.dev",
+        home=home,
+        marker_path=marker,
+        rc_lines="",
+        colored_prompt=True,
+    )
+
+    content = rc.read_text(encoding="utf-8")
+    assert r"export PS1='\[\e[31m\]root@hosta.dev\[\e[0m\]:\[\e[35m\]\w\[\e[0m\]\$ '" in content
+    assert r"export PS1='root@hosta.dev:\w\$ '" not in content
+
+
 def test_resolve_bash_path_honors_existing_override(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

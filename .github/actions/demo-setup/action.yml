@@ -5,8 +5,6 @@
 # can add arbitrary setup here and preview it via /record-demo without changing
 # the workflow. Keep steps self-contained, and pair anything that must be undone
 # with a step in demo-teardown.
-#
-# Initial step: switch the display to the recording resolution.
 
 name: Demo setup
 description: Prepare the windows-latest desktop for demo recording; extend by adding steps from a PR.
@@ -66,3 +64,49 @@ runs:
         $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
         Write-Host "Display is now $($b.Width)x$($b.Height)"
         if ($b.Width -ne $width -or $b.Height -ne $height) { throw "resolution not applied" }
+
+    - name: Enable dark mode and apply the console theme
+      shell: pwsh
+      run: |
+        # Read at window creation, so it must land before cssh-rs spawns consoles.
+        $personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        New-Item -Path $personalize -Force | Out-Null
+        Set-ItemProperty -Path $personalize -Name AppsUseLightTheme -Value 0 -Type DWord
+        Set-ItemProperty -Path $personalize -Name SystemUsesLightTheme -Value 0 -Type DWord
+
+        # cssh-rs paints attribute indices, not RGB, so the palette lives in these
+        # conhost defaults, read when each console is created.
+        $console = "HKCU:\Console"
+        $colorTable = @(
+          3483686, 10777185, 8190287, 11171480, 5526783, 11171480, 12941823, 5526783,
+          16250871, 11171480, 8190287, 8190287, 5526783, 5526783, 9173488, 7125247
+        )
+        for ($i = 0; $i -lt $colorTable.Length; $i++) {
+          $name = "ColorTable{0:D2}" -f $i
+          Set-ItemProperty -Path $console -Name $name -Value $colorTable[$i] -Type DWord
+        }
+        Set-ItemProperty -Path $console -Name ScreenColors -Value 8 -Type DWord
+        # WindowAlpha is 0-255; 191 is 75% opacity.
+        Set-ItemProperty -Path $console -Name WindowAlpha -Value 191 -Type DWord
+        # conhost v1 ignores WindowAlpha; ForceV2 keeps the v2 engine that honours it.
+        Set-ItemProperty -Path $console -Name ForceV2 -Value 1 -Type DWord
+
+        # Enlarge the font, not the desktop, so text stays legible. FontSize's high
+        # word is the cell height, 1572864 = 24px; a TrueType face honours it.
+        Set-ItemProperty -Path $console -Name FaceName -Value "Consolas" -Type String
+        Set-ItemProperty -Path $console -Name FontFamily -Value 54 -Type DWord
+        Set-ItemProperty -Path $console -Name FontWeight -Value 400 -Type DWord
+        Set-ItemProperty -Path $console -Name FontSize -Value 1572864 -Type DWord
+
+    - name: Install gifsicle
+      shell: pwsh
+      run: |
+        # gif_export recompresses the GIF with gifsicle when it is on PATH.
+        $version = (Get-Content .config/demo/gifsicle.version).Trim()
+        choco install gifsicle --version $version --yes --no-progress
+
+    - name: Minimize open windows
+      shell: pwsh
+      run: |
+        # Safe before recording: cssh-rs launches its consoles only after capture starts.
+        (New-Object -ComObject Shell.Application).MinimizeAll()

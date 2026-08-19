@@ -135,6 +135,7 @@ mod cli_args_test {
                 arguments: vec!["-o".to_string(), "User=deploy".to_string()],
                 cluster: "e2e".to_string(),
                 output: Some("/tmp/out.toml".to_string()),
+                daemon_console_color: None,
             })
         );
         assert_eq!(args.hosts, vec!["host1", "host2"]);
@@ -151,9 +152,28 @@ mod cli_args_test {
                 arguments: vec![],
                 cluster: "default".to_string(),
                 output: None,
+                daemon_console_color: None,
             })
         );
         assert_eq!(args.hosts, vec!["host1"]);
+    }
+
+    #[test]
+    fn test_parse_generate_config_daemon_console_color() {
+        let args = Args::parse_from(vec![
+            "executable_name",
+            "generate-config",
+            "--daemon-console-color",
+            "200",
+            "host1",
+        ]);
+        assert!(matches!(
+            args.command,
+            Some(Commands::GenerateConfig {
+                daemon_console_color: Some(200),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -2044,7 +2064,7 @@ mod interactive_mode_test {
 /// Tests for the `generate-config` subcommand helpers.
 mod generate_config_test {
     use crate::cli::{build_generate_config, run_generate_config, MockConfigManager, MockOutput};
-    use crate::utils::config::{ClientConfig, Config, ConfigOpt};
+    use crate::utils::config::{ClientConfig, Config, ConfigOpt, DaemonConfig};
     use mockall::predicate::eq;
 
     const PLACEHOLDER: &str = "{{USERNAME_AT_HOST}}";
@@ -2057,6 +2077,7 @@ mod generate_config_test {
             Some("ssh"),
             None,
             vec![],
+            None,
         );
 
         assert_eq!(config.client.arguments, vec![PLACEHOLDER.to_string()]);
@@ -2079,6 +2100,7 @@ mod generate_config_test {
                 "User=deploy".to_string(),
                 PLACEHOLDER.to_string(),
             ],
+            None,
         );
 
         // -F prefix, then the override written verbatim (placeholder not re-added).
@@ -2101,7 +2123,9 @@ mod generate_config_test {
     #[test]
     fn test_build_generate_config_preserves_default_colors() {
         let default_client = ClientConfig::default();
-        let config = build_generate_config(vec!["h".to_string()], "default", None, None, vec![]);
+        let default_daemon = DaemonConfig::default();
+        let config =
+            build_generate_config(vec!["h".to_string()], "default", None, None, vec![], None);
 
         // An unset --program keeps the ClientConfig default.
         assert_eq!(config.client.program, default_client.program);
@@ -2113,6 +2137,22 @@ mod generate_config_test {
             config.client.highlighted_console_color,
             default_client.highlighted_console_color
         );
+        // An unset --daemon-console-color keeps the DaemonConfig default.
+        assert_eq!(config.daemon.console_color, default_daemon.console_color);
+    }
+
+    #[test]
+    fn test_build_generate_config_sets_daemon_console_color() {
+        let config = build_generate_config(
+            vec!["h".to_string()],
+            "default",
+            None,
+            None,
+            vec![],
+            Some(200),
+        );
+
+        assert_eq!(config.daemon.console_color, 200);
     }
 
     #[test]
@@ -2123,6 +2163,7 @@ mod generate_config_test {
             Some("ssh"),
             Some("/tmp/c"),
             vec![],
+            None,
         );
 
         let serialized = toml::to_string(&config).expect("serialize");
@@ -2153,6 +2194,7 @@ mod generate_config_test {
             Some("ssh"),
             None,
             Vec::new(),
+            None,
             None,
         );
 
@@ -2192,6 +2234,7 @@ mod generate_config_test {
             None,
             Vec::new(),
             None,
+            None,
         );
 
         assert!(result.is_ok());
@@ -2219,6 +2262,7 @@ mod generate_config_test {
             Some("/tmp/c"),
             Vec::new(),
             Some("/tmp/out.toml"),
+            None,
         );
 
         assert!(result.is_ok());
