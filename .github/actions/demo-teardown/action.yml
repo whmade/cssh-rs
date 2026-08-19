@@ -1,0 +1,16 @@
+# Tear down the demo desktop after `cargo xtask record-demo`, and the
+# /record-demo teardown extension point. Symmetric to demo-setup: its steps are
+# read from the checked-out PR head, and record-demo-command.yml runs it with
+# `if: always()` so cleanup happens even when recording fails. Undo here whatever
+# a demo-setup step changed that should not outlive the recording; on the
+# ephemeral runner there is nothing to undo yet.
+
+name: Demo teardown
+description: Tear down the demo desktop after recording; extend by adding steps from a PR.
+
+runs:
+  using: composite
+  steps:
+    - name: Nothing to tear down
+      shell: pwsh
+      run: Write-Host "No demo teardown steps configured."
