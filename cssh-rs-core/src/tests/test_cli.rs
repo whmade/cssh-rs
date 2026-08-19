@@ -331,7 +331,7 @@ mod cli_main_test {
         main, Args, Commands, MockArgsCommand, MockConfigManager, MockEntrypoint, MockEnvironment,
         MockInput, MockLoggerInitializer, MockOutput,
     };
-    use crate::utils::config::ConfigOpt;
+    use crate::utils::config::{Config, ConfigOpt};
     use crate::utils::windows::MockWindowsApi;
     use cssh_rs_meta::PACKAGE_NAME;
 
@@ -603,6 +603,62 @@ mod cli_main_test {
             )
             .await;
         }
+    }
+
+    #[tokio::test]
+    async fn test_main_generate_config_dispatch() {
+        let mock = MockEntrypoint::new();
+        let mut mock_windows_api = MockWindowsApi::new();
+        let mut mock_output = MockOutput::new();
+        let mut mock_input = MockInput::new();
+        let mut mock_environment = MockEnvironment::new();
+        let mock_args_command = MockArgsCommand::new();
+        let mock_logger_initializer = MockLoggerInitializer::new();
+        let mut mock_config_manager = MockConfigManager::new();
+
+        setup_common_windows_api_mocks(&mut mock_windows_api, &mut mock_output, false);
+        setup_common_environment_mocks(&mut mock_environment);
+
+        // generate-config dispatches before load_config, so only store_config is hit.
+        mock_config_manager
+            .expect_store_config()
+            .with(
+                mockall::predicate::eq("/tmp/out.toml"),
+                mockall::predicate::function(|cfg: &Config| {
+                    return cfg.daemon.console_color == 200;
+                }),
+            )
+            .times(1)
+            .returning(|_, _| return Ok(()));
+        mock_output.expect_println().times(1).returning(|_| {});
+
+        let args = Args {
+            command: Some(Commands::GenerateConfig {
+                ssh_config_path: None,
+                program: None,
+                arguments: vec![],
+                cluster: "default".to_string(),
+                output: Some("/tmp/out.toml".to_string()),
+                daemon_console_color: Some(200),
+            }),
+            username: None,
+            port: None,
+            hosts: vec!["host1".to_string()],
+            debug: false,
+        };
+
+        main(
+            &mock_windows_api,
+            args,
+            mock,
+            &mut mock_output,
+            &mut mock_input,
+            &mock_environment,
+            &mock_args_command,
+            &mock_logger_initializer,
+            &mock_config_manager,
+        )
+        .await;
     }
 
     #[tokio::test]
