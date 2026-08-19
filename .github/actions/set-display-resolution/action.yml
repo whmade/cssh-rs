@@ -25,15 +25,24 @@ runs:
       run: |
         $width = [int]$env:TARGET_WIDTH
         $height = [int]$env:TARGET_HEIGHT
+        # The DEVMODE struct is built and passed entirely inside this compiled
+        # helper: marshalling a boxed value-type struct with ByValTStr fields
+        # through PowerShell's [ref] mangles it and ChangeDisplaySettings then
+        # rejects it with ERROR_INVALID_PARAMETER. Only width/height cross the
+        # PowerShell boundary. Flagging just dmPelsWidth/dmPelsHeight in dmFields
+        # tells ChangeDisplaySettings to keep the current colour depth and
+        # refresh rate, so there is no need to read the current mode first.
+        # https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-changedisplaysettingsa
         $src = @'
         using System;
         using System.Runtime.InteropServices;
         public class Disp {
           [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Ansi)]
-          public struct DEVMODE {
+          struct DEVMODE {
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string dmDeviceName;
             public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
-            public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+            public int dmFields;
+            public short dmOrientation, dmPaperSize, dmPaperLength, dmPaperWidth, dmScale, dmCopies, dmDefaultSource, dmPrintQuality;
             public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string dmFormName;
             public short dmLogPixels;
@@ -41,22 +50,23 @@ runs:
             public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2;
             public int dmPanningWidth, dmPanningHeight;
           }
-          [DllImport("user32.dll")] public static extern int EnumDisplaySettings(string dev, int mode, ref DEVMODE dm);
-          [DllImport("user32.dll")] public static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+          [DllImport("user32.dll")] static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+          const int DM_PELSWIDTH = 0x80000, DM_PELSHEIGHT = 0x100000;
+          public static int Apply(int width, int height) {
+            DEVMODE dm = new DEVMODE();
+            dm.dmDeviceName = new String(new char[32]);
+            dm.dmFormName = new String(new char[32]);
+            dm.dmSize = (short)Marshal.SizeOf(dm);
+            dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+            dm.dmPelsWidth = width;
+            dm.dmPelsHeight = height;
+            return ChangeDisplaySettings(ref dm, 0);  // flags 0: apply the change dynamically
+          }
         }
         '@
-        $ENUM_CURRENT_SETTINGS = -1
-        $DM_PELSWIDTH = 0x80000
-        $DM_PELSHEIGHT = 0x100000
         $DISP_CHANGE_SUCCESSFUL = 0
         Add-Type $src
-        $dm = New-Object Disp+DEVMODE
-        $dm.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($dm)
-        if ([Disp]::EnumDisplaySettings($null, $ENUM_CURRENT_SETTINGS, [ref]$dm) -eq 0) { throw "EnumDisplaySettings failed to read the current display mode" }
-        $dm.dmPelsWidth = $width
-        $dm.dmPelsHeight = $height
-        $dm.dmFields = $DM_PELSWIDTH -bor $DM_PELSHEIGHT
-        $ret = [Disp]::ChangeDisplaySettings([ref]$dm, 0)  # flags 0: apply the change dynamically
+        $ret = [Disp]::Apply($width, $height)
         if ($ret -ne $DISP_CHANGE_SUCCESSFUL) { throw "ChangeDisplaySettings failed with code $ret" }
         Add-Type -AssemblyName System.Windows.Forms
         $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
