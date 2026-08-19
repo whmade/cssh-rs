@@ -33,8 +33,30 @@ permissions:
   actions: write
 
 jobs:
+  # Compile both toolchains once; `ci` and `e2e` restore these warm caches.
+  build:
+    uses: ./.github/workflows/_build.yml
+    with:
+      ref: ${{ github.sha }}
+
+  # No build artifacts needed, so this runs concurrently with `build`.
+  checks-standalone:
+    uses: ./.github/workflows/_checks-standalone.yml
+    with:
+      ref: ${{ github.sha }}
+
+  # Build-dependent checks and the E2E suite run in parallel once `build` is
+  # done, each reusing its warm caches. `coverage-report` needs only `ci`, so
+  # it no longer waits on the E2E suite.
   ci:
+    needs: build
     uses: ./.github/workflows/_shared-ci.yml
+    with:
+      ref: ${{ github.sha }}
+
+  e2e:
+    needs: build
+    uses: ./.github/workflows/_e2e.yml
     with:
       ref: ${{ github.sha }}
 

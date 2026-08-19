@@ -1,0 +1,158 @@
+#
+#   cssh-rs Standalone Checks
+#
+# Reusable workflow for checks that need no compiled Rust artifacts:
+# rustfmt, the Python automation and demo packages, and the portable-crate
+# cross-compile probes. Callers invoke this without `needs: build` so it
+# runs concurrently with `_build.yml` rather than waiting on it; the
+# build-dependent jobs live in `_shared-ci.yml`.
+
+name: Standalone Checks
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Git ref or SHA to check out. Empty string falls back to the
+          triggering event's default ref.
+        type: string
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check-format:
+    runs-on: &runner-version windows-latest
+    steps:
+      - uses: &checkout-action actions/checkout@v7.0.1
+        with: &checkout-with
+          ref: ${{ inputs.ref }}
+      - name: Check format
+        run: cargo fmt -- --check
+
+  automation-lint:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - &read-python
+        name: Read python version
+        id: python
+        shell: bash
+        run: echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
+      - &setup-python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+          cache: pip
+          cache-dependency-path: automation/pyproject.toml
+      - &install-automation
+        name: Install automation package with dev tooling
+        working-directory: automation
+        run: pip install -e ".[dev]"
+      - name: Ruff lint
+        working-directory: automation
+        run: ruff check
+
+  automation-format:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - *read-python
+      - *setup-python
+      - *install-automation
+      - name: Ruff format check
+        working-directory: automation
+        run: ruff format --check
+
+  automation-typecheck:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - *read-python
+      - *setup-python
+      - *install-automation
+      - name: Pyrefly type check
+        working-directory: automation
+        run: pyrefly check
+
+  automation-test:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - *read-python
+      - *setup-python
+      - *install-automation
+      - name: Pytest
+        working-directory: automation
+        run: pytest
+
+  # Lint, format, type-check and test the Python demo package on
+  # windows-latest. Installs the automation library first so the demo's
+  # imports and type-checks resolve.
+  demo-checks:
+    runs-on: *runner-version
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - *read-python
+      - *setup-python
+      - *install-automation
+      - name: Install demo package with dev tooling
+        working-directory: demo
+        run: pip install -e ".[dev]"
+      - name: Ruff lint
+        working-directory: demo
+        run: ruff check
+      - name: Ruff format check
+        working-directory: demo
+        run: ruff format --check
+      - name: Pyrefly type check
+        working-directory: demo
+        run: pyrefly check
+      - name: Pytest
+        working-directory: demo
+        run: pytest
+      # Validate the task suite resolves every keyword against the demo library
+      # without executing it (no real windows or binary needed).
+      - name: Robot dry-run
+        working-directory: demo
+        run: robot --dryrun --output NONE --log NONE --report NONE suites/record_demo.robot
+
+  # Compile-only cross-checks for the portable crate subset on native
+  # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still
+  # Windows-tied (ported off the windows crate in M4/M5) and are excluded;
+  # the --exclude form fails loudly if a portable crate later grows a
+  # Windows dependency.
+  check-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - uses: &rust-cache-action Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+      - name: Add target
+        run: rustup target add x86_64-unknown-linux-gnu
+      - name: Check portable crates
+        run: cargo check --workspace --target x86_64-unknown-linux-gnu --exclude cssh-rs --exclude cssh-rs-core --exclude cssh-rs-protocol
+
+  check-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: *checkout-action
+        with: *checkout-with
+      - uses: *rust-cache-action
+        with:
+          shared-key: macos-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
+      - name: Add target
+        run: rustup target add aarch64-apple-darwin
+      - name: Check portable crates
+        run: cargo check --workspace --target aarch64-apple-darwin --exclude cssh-rs --exclude cssh-rs-core --exclude cssh-rs-protocol

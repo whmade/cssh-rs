@@ -58,12 +58,32 @@ jobs:
             workflows:
               - '.github/workflows/pre-submit.yml'
               - '.github/workflows/post-submit.yml'
-              - '.github/workflows/_shared-ci.yml'
+              - '.github/workflows/_*.yml'
 
-  ci:
+  # Compile both toolchains once; `ci` and `e2e` restore these warm caches.
+  build:
     needs: detect-changes
     if: needs.detect-changes.outputs.src == 'true' || needs.detect-changes.outputs.workflows == 'true'
+    uses: ./.github/workflows/_build.yml
+
+  # No build artifacts needed, so this runs concurrently with `build`.
+  checks-standalone:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.src == 'true' || needs.detect-changes.outputs.workflows == 'true'
+    uses: ./.github/workflows/_checks-standalone.yml
+
+  # Build-dependent checks and the E2E suite run in parallel once `build` is
+  # done, each reusing its warm caches. `coverage-report`/`diff-cover` need
+  # only `ci`, so they no longer wait on the E2E run.
+  ci:
+    needs: build
+    if: always() && needs.build.result == 'success'
     uses: ./.github/workflows/_shared-ci.yml
+
+  e2e:
+    needs: build
+    if: always() && needs.build.result == 'success'
+    uses: ./.github/workflows/_e2e.yml
 
   coverage-report:
     needs: ci
@@ -199,8 +219,32 @@ jobs:
       - if: steps.diff-cover.outputs.result == 'failed'
         run: exit 1
 
+  # Post the coverage and diff-cover comments in-run for same-repo PRs, so they
+  # land as soon as `coverage-report`/`diff-cover` finish instead of waiting on
+  # the E2E suite. Fork PRs get them from `post-pr-comment.yml` instead, since a
+  # fork's in-run token cannot post comments.
+  post-coverage-comment:
+    needs: coverage-report
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      pull-requests: write
+      actions: read
+    uses: ./.github/workflows/_post-comment.yml
+    with:
+      artifact: coverage-comment
+
+  post-diff-cover-comment:
+    needs: diff-cover
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      pull-requests: write
+      actions: read
+    uses: ./.github/workflows/_post-comment.yml
+    with:
+      artifact: diff-cover-comment
+
   ci-summary:
-    needs: [detect-changes, ci, coverage-report, diff-cover]
+    needs: [detect-changes, build, checks-standalone, ci, e2e, coverage-report, diff-cover, post-coverage-comment, post-diff-cover-comment]
     if: always()
     runs-on: *runner
     steps:
