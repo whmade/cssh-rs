@@ -11,7 +11,9 @@
 #
 # The tests job reuses build-nightly's instrumented binaries via the
 # nightly target cache; it reinstalls the nightly toolchain and llvm-cov
-# because those live on the runner, not in the cache.
+# because those live on the runner, not in the cache. On an exact-sha cache hit
+# it ages the checked-out source below the restored artifacts so cargo reuses
+# those binaries instead of recompiling our crates.
 
 name: Shared CI Logic
 
@@ -60,6 +62,7 @@ jobs:
         with:
           shared-key: nightly
       - uses: *target-cache
+        id: target-cache
         with:
           path: target
           key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
@@ -82,6 +85,21 @@ jobs:
         with:
           crate: cargo-llvm-cov
           version: "^0.8.0"
+
+      # A fresh checkout looks newer than the restored artifacts, so cargo would
+      # recompile our crates here and skew coverage; age source below them so it
+      # reuses build-nightly's binaries as-is. Only an exact-sha hit restores
+      # this commit's binaries; on a restore-key fallback the artifacts are from
+      # another commit, so skip aging and let cargo rebuild against the source.
+      - name: Age source below the restored binaries
+        if: steps.target-cache.outputs.cache-hit == 'true'
+        run: |
+          $stale = Get-Date '2000-01-01'
+          git ls-files | ForEach-Object {
+            if (Test-Path -LiteralPath $_ -PathType Leaf) {
+              (Get-Item -LiteralPath $_).LastWriteTime = $stale
+            }
+          }
 
       - name: Run tests with coverage
         run: |

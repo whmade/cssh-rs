@@ -97,8 +97,9 @@ jobs:
 
       # cargo-llvm-cov has no build-only mode (its `--no-run` is the deprecated
       # `report` alias), so source the coverage env via `show-env` and run a
-      # plain `cargo test --no-run`. The tests job sources the same env, so the
-      # binaries are fingerprint-identical and restored without a recompile.
+      # plain `cargo test --no-run`. `clean --workspace` first rebuilds our
+      # crates from this commit's source (deps stay warm) so the tests job
+      # reuses them without recompiling.
       # `--with-pwsh-env-prefix` emits `$env:K=V` lines.
       - name: Build instrumented test binaries
         run: |
@@ -113,5 +114,7 @@ jobs:
             }
           }
           $covEnv | Invoke-Expression
+          cargo +$nightly llvm-cov clean --workspace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo +$nightly test --no-run --all-features --workspace
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
