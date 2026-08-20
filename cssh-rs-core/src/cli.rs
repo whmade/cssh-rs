@@ -103,6 +103,9 @@ enum Commands {
         /// `cssh-rs-config.toml` next to the running executable.
         #[clap(long)]
         output: Option<String>,
+        /// Value written to `daemon.console_color`; unset keeps the config default.
+        #[clap(long)]
+        daemon_console_color: Option<u16>,
     },
 }
 
@@ -512,6 +515,7 @@ fn build_generate_config(
     program: Option<&str>,
     ssh_config_path: Option<&str>,
     arguments: Vec<String>,
+    daemon_console_color: Option<u16>,
 ) -> Config {
     let mut config = Config {
         clusters: vec![Cluster {
@@ -523,6 +527,10 @@ fn build_generate_config(
 
     if let Some(program) = program {
         config.client.program = program.to_string();
+    }
+
+    if let Some(console_color) = daemon_console_color {
+        config.daemon.console_color = console_color;
     }
 
     let mut client_arguments = Vec::new();
@@ -554,12 +562,20 @@ fn run_generate_config<O: Output, C: ConfigManager>(
     ssh_config_path: Option<&str>,
     arguments: Vec<String>,
     output_path: Option<&str>,
+    daemon_console_color: Option<u16>,
 ) -> Result<(), String> {
     if hosts.is_empty() {
         return Err("generate-config requires at least one host".to_string());
     }
 
-    let config = build_generate_config(hosts, cluster, program, ssh_config_path, arguments);
+    let config = build_generate_config(
+        hosts,
+        cluster,
+        program,
+        ssh_config_path,
+        arguments,
+        daemon_console_color,
+    );
     let target_path = std::path::PathBuf::from(output_path.unwrap_or(default_config_path));
     let target_str = target_path.to_string_lossy().into_owned();
 
@@ -638,6 +654,7 @@ pub async fn main<
         arguments,
         cluster,
         output: output_path,
+        daemon_console_color,
     }) = &args.command
     {
         if let Err(err) = run_generate_config(
@@ -650,6 +667,7 @@ pub async fn main<
             ssh_config_path.as_deref(),
             arguments.to_owned(),
             output_path.as_deref(),
+            *daemon_console_color,
         ) {
             output.eprintln(&err);
             std::process::exit(1);

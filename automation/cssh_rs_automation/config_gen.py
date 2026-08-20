@@ -36,6 +36,7 @@ class ConfigGen:
         cluster_name: str = "e2e",
         program: str = "ssh",
         arguments: list[str] | tuple[str, ...] | None = None,
+        daemon_console_color: int | None = None,
     ) -> str:
         """Write ``cssh-rs-config.toml`` into ``output_dir`` and return its path.
 
@@ -53,6 +54,8 @@ class ConfigGen:
             arguments: Full program arguments that replace the default
                 ``<user>@<host>`` placeholder; must include it, e.g.
                 ``["-o", "User=deploy", "{{USERNAME_AT_HOST}}"]``.
+            daemon_console_color: When set, written to ``daemon.console_color``;
+                unset keeps the config default.
 
         Returns:
             Absolute path to the written ``cssh-rs-config.toml`` as a str.
@@ -78,6 +81,11 @@ class ConfigGen:
             cluster_name,
             "--output",
             str(config_path),
+            *(
+                ["--daemon-console-color", str(daemon_console_color)]
+                if daemon_console_color is not None
+                else []
+            ),
             # Attached form so values starting with `-` are not parsed as flags.
             *(f"--arguments={value}" for value in arguments),
             *host_list,

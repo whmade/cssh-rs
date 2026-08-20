@@ -127,6 +127,35 @@ def test_generate_config_forwards_arguments_before_hosts(
     assert argv.index("--arguments=User=deploy") < argv.index("h1")
 
 
+def test_generate_config_forwards_daemon_console_color(
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
+) -> None:
+    ConfigGen().generate_config(
+        "cssh-rs.exe",
+        str(tmp_path),
+        ssh_config_path,
+        ["h1"],
+        daemon_console_color=200,
+    )
+
+    argv = fake_run.calls[0][0]
+    assert argv[argv.index("--daemon-console-color") + 1] == "200"
+    assert argv.index("--daemon-console-color") < argv.index("h1")
+
+
+def test_generate_config_omits_daemon_console_color_when_unset(
+    fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
+) -> None:
+    ConfigGen().generate_config(
+        "cssh-rs.exe",
+        str(tmp_path),
+        ssh_config_path,
+        ["h1"],
+    )
+
+    assert "--daemon-console-color" not in fake_run.calls[0][0]
+
+
 def test_generate_config_captures_output(
     fake_run: _FakeRun, tmp_path: Path, ssh_config_path: str
 ) -> None:
