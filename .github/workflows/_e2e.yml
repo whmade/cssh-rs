@@ -1,0 +1,113 @@
+#
+#   cssh-rs E2E Suite
+#
+# Reusable workflow that runs the Robot Framework E2E suite against the
+# cssh-rs binary. Split out of `_shared-ci.yml` so the coverage report -
+# which only consumes the `tests` job's coverage artifact and never
+# anything E2E produces - no longer waits on the E2E run. Callers invoke
+# this with `needs: build`, so `_build.yml`'s build-stable job has already
+# populated the exact-sha `target` cache this job restores; it verifies
+# and reuses that binary rather than rebuilding it.
+
+name: E2E Suite
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Git ref or SHA to check out. Empty string falls back to the
+          triggering event's default ref.
+        type: string
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  e2e-run:
+    timeout-minutes: 10
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: stable
+
+      - uses: actions/cache@v6.1.0
+        with:
+          path: target
+          key: ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-
+            ${{ runner.os }}-target-stable-
+
+      # Callers gate this on `needs: build`, so build-stable has already saved
+      # the exact-sha target cache restored above. Reuse that binary rather than
+      # rebuilding it.
+      - name: Verify cached cssh-rs binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path target/debug/cssh-rs.exe)) {
+            throw "target/debug/cssh-rs.exe missing - build-stable target cache was not restored"
+          }
+
+      - name: Read python version
+        id: python
+        shell: bash
+        run: echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+          cache: pip
+          cache-dependency-path: automation/pyproject.toml
+
+      - name: Install automation package with dev tooling
+        working-directory: automation
+        run: pip install -e ".[dev]"
+
+      # The runner ships the OpenSSH client but not the server the sshd fixture needs.
+      - name: Enable OpenSSH server
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+
+      - name: Run E2E suite
+        shell: pwsh
+        run: >-
+          robot
+          --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
+          --outputdir e2e-output
+          --listener cssh_rs_automation.recording_listener.RecordingListener
+          tests/e2e/suites/
+
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-robot-report
+          path: e2e-output/
+          retention-days: 7
+
+      - name: Upload E2E recordings (kept 24h on success)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-recordings
+          path: e2e-recordings/
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Upload E2E recordings (kept 7 days on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-recordings
+          path: e2e-recordings/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,68 @@
+#
+#   Post PR Comment
+#
+# Reusable workflow that downloads a comment artifact and posts it as a
+# sticky PR comment. Two callers:
+#
+#   - A producing workflow (e.g. Pre-Submit CI) calls this in-run right after
+#     it uploads the artifact, leaving `run-id` empty so it downloads from the
+#     current run. Same-repo PRs get the comment without waiting on the rest
+#     of the run.
+#   - `post-pr-comment.yml` calls this on `workflow_run`, passing the finished
+#     run's id, so fork PRs - whose in-run token is read-only - still get
+#     comments posted from the base-repo context.
+#
+# Artifact layout:
+#   comment/body.txt        - markdown body
+#   comment/pr_number.txt   - target PR number
+#   comment/header.txt      - sticky-comment header id
+
+name: Post PR Comment
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: Name of the comment artifact to download and post.
+        type: string
+        required: true
+      run-id:
+        description: >-
+          Run id the artifact lives in. Empty string downloads from the
+          current run, for in-run callers.
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  pull-requests: write
+  actions: read
+
+jobs:
+  post-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact }}
+          path: comment
+          run-id: ${{ inputs.run-id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read comment data
+        id: comment
+        if: steps.download.outcome == 'success'
+        run: |
+          echo "pr_number=$(cat comment/pr_number.txt)" >> $GITHUB_OUTPUT
+          echo "header=$(cat comment/header.txt)" >> $GITHUB_OUTPUT
+
+      - name: Post comment
+        if: steps.comment.outputs.pr_number != ''
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          number: ${{ steps.comment.outputs.pr_number }}
+          header: ${{ steps.comment.outputs.header }}
+          path: comment/body.txt

@@ -1,19 +1,17 @@
 #
 #   cssh-rs Shared CI Logic
 #
-# Reusable workflow containing common CI jobs that can be called by both
-# the main CI workflow and the coverage CI workflow.
-# Uses YAML anchors where possible to reduce redundancy.
+# Reusable workflow holding the CI jobs that consume compiled Rust
+# artifacts: clippy, the coverage test run, doc-tests, and the xtask
+# checks. Callers invoke `_build.yml` first and gate this on it with
+# `needs: build`, so every job restores the warm exact-sha cache that
+# build-stable / build-nightly saved instead of recompiling. Checks that
+# need no build artifacts live in `_checks-standalone.yml`; the E2E suite
+# lives in `_e2e.yml`.
 #
-# Caching: each toolchain compiles once in a builder job (build-stable,
-# build-nightly); follow-up jobs restore that warm target instead of
-# recompiling. Two builders because cargo fingerprints by rustc version +
-# RUSTFLAGS, so stable and nightly (+instrument-coverage) artifacts differ.
-# Per builder, Swatinem/rust-cache owns ~/.cargo + the pruned dependency
-# target; actions/cache owns the full target (incl. llvm-cov-target) that
-# carries the instrumented binaries to the tests job. The github.sha key
-# suffix gives same-run consumers an exact hit; restore-keys gives the
-# builder a warm base from the previous run.
+# The tests job reuses build-nightly's instrumented binaries via the
+# nightly target cache; it reinstalls the nightly toolchain and llvm-cov
+# because those live on the runner, not in the cache.
 
 name: Shared CI Logic
 
@@ -30,22 +28,18 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Keep the actions/cache `target` lean and machine-portable. Swatinem sets
-  # this too, but setting it here guards the cache independently of step order.
   CARGO_INCREMENTAL: 0
 
 jobs:
-  build-stable:
+  check-lint:
     runs-on: &runner-version windows-latest
     steps:
       - uses: &checkout-action actions/checkout@v7.0.1
         with: &checkout-with
           ref: ${{ inputs.ref }}
-
       - uses: &rust-cache-action Swatinem/rust-cache@v2
         with: &rust-cache-stable
           shared-key: stable
-
       - uses: &target-cache actions/cache@v6.1.0
         with: &target-cache-stable
           path: target
@@ -53,110 +47,41 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-target-stable-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}-
             ${{ runner.os }}-target-stable-
-
-      - name: Build
-        run: |
-          cargo build --workspace --all-targets --profile dev --verbose
-          cargo build --workspace --all-targets --profile test --verbose
-
-      - name: Build docs
-        run: cargo docs
-
-  build-nightly:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-
-      - uses: *rust-cache-action
-        with: &rust-cache-nightly
-          shared-key: nightly
-
-      - uses: *target-cache
-        with: &target-cache-nightly
-          path: target
-          key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-
-            ${{ runner.os }}-target-nightly-
-
-      - &read-nightly
-        name: Read nightly toolchain version
-        id: nightly
-        shell: bash
-        run: |
-          echo "version=$(cat .config/coverage/nightly-toolchain.version)" >> $GITHUB_OUTPUT
-
-      - &install-nightly
-        name: Install nightly toolchain
-        run: |
-          rustup toolchain install ${{ steps.nightly.outputs.version }} --component llvm-tools
-
-      - &install-llvm-cov
-        name: Install cargo-llvm-cov
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-llvm-cov
-          version: "^0.8.0"
-
-      # cargo-llvm-cov has no build-only mode (its `--no-run` is the deprecated
-      # `report` alias), so source the coverage env via `show-env` and run a
-      # plain `cargo test --no-run`. The tests job sources the same env, so the
-      # binaries are fingerprint-identical and restored without a recompile.
-      # `--with-pwsh-env-prefix` emits `$env:K=V` lines (renamed `--pwsh` in
-      # llvm-cov 0.7+; we pin ^0.6).
-      - name: Build instrumented test binaries
-        run: |
-          $nightly = "${{ steps.nightly.outputs.version }}"
-          # Confirm every line is a fully-escaped `$env:NAME="..."` assignment
-          # so Invoke-Expression cannot run anything show-env did not emit.
-          $covEnv = cargo +$nightly llvm-cov show-env --with-pwsh-env-prefix
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($line in $covEnv) {
-            if ($line -and $line -notmatch '^\$env:\w+="(`u\{[0-9a-fA-F]+\})*"$') {
-              Write-Error "Unexpected llvm-cov show-env output: $line"; exit 1
-            }
-          }
-          $covEnv | Invoke-Expression
-          cargo +$nightly test --no-run --all-features --workspace
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-  check-format:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - name: Check format
-        run: cargo fmt -- --check
-
-  check-lint:
-    runs-on: *runner-version
-    needs: build-stable
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - uses: *rust-cache-action
-        with: *rust-cache-stable
-      - uses: *target-cache
-        with: *target-cache-stable
       - name: Run linter
         run: cargo lint
 
   tests:
     timeout-minutes: 8
     runs-on: *runner-version
-    needs: build-nightly
     steps:
       - uses: *checkout-action
         with: *checkout-with
       - uses: *rust-cache-action
-        with: *rust-cache-nightly
+        with:
+          shared-key: nightly
       - uses: *target-cache
-        with: *target-cache-nightly
+        with:
+          path: target
+          key: ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-target-nightly-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.config/coverage/nightly-toolchain.version') }}-
+            ${{ runner.os }}-target-nightly-
 
-      - *read-nightly
-      - *install-nightly
-      - *install-llvm-cov
+      - name: Read nightly toolchain version
+        id: nightly
+        shell: bash
+        run: |
+          echo "version=$(cat .config/coverage/nightly-toolchain.version)" >> $GITHUB_OUTPUT
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install ${{ steps.nightly.outputs.version }} --component llvm-tools
+
+      - name: Install cargo-llvm-cov
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-llvm-cov
+          version: "^0.8.0"
 
       - name: Run tests with coverage
         run: |
@@ -211,7 +136,6 @@ jobs:
   tests-docs:
     timeout-minutes: 6
     runs-on: *runner-version
-    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
@@ -224,7 +148,6 @@ jobs:
 
   check-readme-help:
     runs-on: *runner-version
-    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
@@ -237,7 +160,6 @@ jobs:
 
   check-typography:
     runs-on: *runner-version
-    needs: build-stable
     steps:
       - uses: *checkout-action
         with: *checkout-with
@@ -247,186 +169,3 @@ jobs:
         with: *target-cache-stable
       - name: Run check-typography
         run: cargo xtask check-typography
-
-  # Lint, format, type-check and test the cssh-rs-automation library as four parallel
-  # jobs on windows-latest, its target platform. Deps via pyproject.toml.
-  automation-lint:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - &e2e-read-python
-        name: Read python version
-        id: python
-        shell: bash
-        run: echo "version=$(cat .config/python.version)" >> $GITHUB_OUTPUT
-      - &e2e-setup-python
-        uses: actions/setup-python@v7.0.0
-        with:
-          python-version: ${{ steps.python.outputs.version }}
-          cache: pip
-          cache-dependency-path: automation/pyproject.toml
-      - &e2e-install
-        name: Install automation package with dev tooling
-        working-directory: automation
-        run: pip install -e ".[dev]"
-      - name: Ruff lint
-        working-directory: automation
-        run: ruff check
-
-  automation-format:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - *e2e-read-python
-      - *e2e-setup-python
-      - *e2e-install
-      - name: Ruff format check
-        working-directory: automation
-        run: ruff format --check
-
-  automation-typecheck:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - *e2e-read-python
-      - *e2e-setup-python
-      - *e2e-install
-      - name: Pyrefly type check
-        working-directory: automation
-        run: pyrefly check
-
-  automation-test:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - *e2e-read-python
-      - *e2e-setup-python
-      - *e2e-install
-      - name: Pytest
-        working-directory: automation
-        run: pytest
-
-  # Lint, format, type-check and test the Python demo package on
-  # windows-latest. Installs the automation library first so the demo's
-  # imports and type-checks resolve.
-  demo-checks:
-    runs-on: *runner-version
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - *e2e-read-python
-      - *e2e-setup-python
-      - *e2e-install
-      - name: Install demo package with dev tooling
-        working-directory: demo
-        run: pip install -e ".[dev]"
-      - name: Ruff lint
-        working-directory: demo
-        run: ruff check
-      - name: Ruff format check
-        working-directory: demo
-        run: ruff format --check
-      - name: Pyrefly type check
-        working-directory: demo
-        run: pyrefly check
-      - name: Pytest
-        working-directory: demo
-        run: pytest
-      # Validate the task suite resolves every keyword against the demo library
-      # without executing it (no real windows or binary needed).
-      - name: Robot dry-run
-        working-directory: demo
-        run: robot --dryrun --output NONE --log NONE --report NONE suites/record_demo.robot
-
-  # Runs the E2E suite; lives in the reusable workflow so it is per-PR blocking.
-  e2e-run:
-    timeout-minutes: 10
-    runs-on: *runner-version
-    needs: build-stable
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - uses: *rust-cache-action
-        with: *rust-cache-stable
-      - uses: *target-cache
-        with: *target-cache-stable
-      # Reuse the warm build-stable target cache instead of rebuilding.
-      - name: Verify cached cssh-rs binary
-        shell: pwsh
-        run: |
-          if (-not (Test-Path target/debug/cssh-rs.exe)) {
-            throw "target/debug/cssh-rs.exe missing - build-stable target cache was not restored"
-          }
-      - *e2e-read-python
-      - *e2e-setup-python
-      - *e2e-install
-      # The runner ships the OpenSSH client but not the server the sshd fixture needs.
-      - name: Enable OpenSSH server
-        shell: pwsh
-        run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-      - name: Run E2E suite
-        shell: pwsh
-        run: >-
-          robot
-          --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
-          --outputdir e2e-output
-          --listener cssh_rs_automation.recording_listener.RecordingListener
-          tests/e2e/suites/
-      - name: Upload E2E report
-        if: always()
-        uses: *upload-artifact-action
-        with:
-          name: e2e-robot-report
-          path: e2e-output/
-          retention-days: 7
-      - name: Upload E2E recordings (kept 24h on success)
-        if: success()
-        uses: *upload-artifact-action
-        with:
-          name: e2e-recordings
-          path: e2e-recordings/
-          retention-days: 1
-          if-no-files-found: ignore
-      - name: Upload E2E recordings (kept 7 days on failure)
-        if: failure()
-        uses: *upload-artifact-action
-        with:
-          name: e2e-recordings
-          path: e2e-recordings/
-          retention-days: 7
-          if-no-files-found: ignore
-
-  # Compile-only cross-checks for the portable crate subset on native
-  # runners. cssh-rs, cssh-rs-core, and cssh-rs-protocol are still
-  # Windows-tied (ported off the windows crate in M4/M5) and are excluded;
-  # the --exclude form fails loudly if a portable crate later grows a
-  # Windows dependency.
-  check-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - uses: *rust-cache-action
-        with:
-          shared-key: linux-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
-      - name: Add target
-        run: rustup target add x86_64-unknown-linux-gnu
-      - name: Check portable crates
-        run: cargo check --workspace --target x86_64-unknown-linux-gnu --exclude cssh-rs --exclude cssh-rs-core --exclude cssh-rs-protocol
-
-  check-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: *checkout-action
-        with: *checkout-with
-      - uses: *rust-cache-action
-        with:
-          shared-key: macos-${{ hashFiles('Cargo.toml', 'rust-toolchain.toml') }}
-      - name: Add target
-        run: rustup target add aarch64-apple-darwin
-      - name: Check portable crates
-        run: cargo check --workspace --target aarch64-apple-darwin --exclude cssh-rs --exclude cssh-rs-core --exclude cssh-rs-protocol

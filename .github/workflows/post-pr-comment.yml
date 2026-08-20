@@ -1,13 +1,12 @@
 #
-#   Post PR Comment
+#   Post PR Comment Dispatch
 #
-# Generic workflow that posts comments to PRs from artifacts.
-# Runs after jobs that produce comment artifacts complete.
-#
-# Artifact structure expected:
-#   comment/body.txt - The comment body (markdown)
-#   comment/pr_number.txt - The PR number
-#   comment/header.txt - A unique header identifier for the comment
+# Dispatches comment artifacts to `_post-comment.yml` after a producing
+# workflow completes. Same-repo Pre-Submit CI runs post their coverage and
+# diff-cover comments in-run (see pre-submit.yml) so they need not wait on the
+# E2E suite; those two artifacts are dispatched here only for fork PRs, whose
+# in-run token is read-only. The news-fragment and demo comments are always
+# dispatched here.
 
 name: Post PR Comment
 
@@ -16,46 +15,29 @@ on:
     workflows: ["News Fragment Check", "Pre-Submit CI", "Record Demo Command"]
     types: [completed]
 
-permissions:
-  pull-requests: write
-  actions: read
-
 jobs:
   post-comment:
-    runs-on: ubuntu-latest
-    # Run for each possible comment artifact
+    # One matrix leg per comment artifact. Same-repo Pre-Submit CI runs post
+    # their coverage/diff-cover comments in-run (see pre-submit.yml), so those
+    # two artifacts are dropped here for same-repo runs. The routing lives in
+    # matrix construction because the matrix context is unavailable in a
+    # job-level `if` (evaluated before the matrix expands).
     strategy:
       matrix:
-        artifact: [comment, coverage-comment, diff-cover-comment, demo-comment]
+        artifact: >-
+          ${{ github.event.workflow_run.head_repository.full_name == github.repository
+              && fromJSON('["comment", "demo-comment"]')
+              || fromJSON('["comment", "coverage-comment", "diff-cover-comment", "demo-comment"]') }}
       fail-fast: false
     # Pre-Submit CI runs are `pull_request`; the on-demand demo preview is an
     # `issue_comment` (`/record-demo`) run.
     if: >-
       github.event.workflow_run.event == 'pull_request' ||
       github.event.workflow_run.event == 'issue_comment'
-    steps:
-      - name: Download artifact
-        id: download
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ matrix.artifact }}
-          path: comment
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Read comment data
-        id: comment
-        if: steps.download.outcome == 'success'
-        run: |
-          echo "pr_number=$(cat comment/pr_number.txt)" >> $GITHUB_OUTPUT
-          echo "header=$(cat comment/header.txt)" >> $GITHUB_OUTPUT
-          echo "Comment will be posted to PR #$pr_number with header: $header"
-
-      - name: Post comment
-        if: steps.comment.outputs.pr_number != ''
-        uses: marocchino/sticky-pull-request-comment@v3.0.5
-        with:
-          number: ${{ steps.comment.outputs.pr_number }}
-          header: ${{ steps.comment.outputs.header }}
-          path: comment/body.txt
+    permissions:
+      pull-requests: write
+      actions: read
+    uses: ./.github/workflows/_post-comment.yml
+    with:
+      artifact: ${{ matrix.artifact }}
+      run-id: ${{ github.event.workflow_run.id }}
