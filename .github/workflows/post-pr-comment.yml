@@ -5,14 +5,14 @@
 # workflow completes. Same-repo Pre-Submit CI runs post their coverage and
 # diff-cover comments in-run (see pre-submit.yml) so they need not wait on the
 # E2E suite; those two artifacts are dispatched here only for fork PRs, whose
-# in-run token is read-only. The news-fragment and demo comments are always
-# dispatched here.
+# in-run token is read-only. The news-fragment comment is always dispatched
+# here; the demo preview posts its own comment (see record-demo-command.yml).
 
 name: Post PR Comment
 
 on:
   workflow_run:
-    workflows: ["News Fragment Check", "Pre-Submit CI", "Record Demo Command"]
+    workflows: ["News Fragment Check", "Pre-Submit CI"]
     types: [completed]
 
 jobs:
@@ -26,14 +26,10 @@ jobs:
       matrix:
         artifact: >-
           ${{ github.event.workflow_run.head_repository.full_name == github.repository
-              && fromJSON('["comment", "demo-comment"]')
-              || fromJSON('["comment", "coverage-comment", "diff-cover-comment", "demo-comment"]') }}
+              && fromJSON('["comment"]')
+              || fromJSON('["comment", "coverage-comment", "diff-cover-comment"]') }}
       fail-fast: false
-    # Pre-Submit CI runs are `pull_request`; the on-demand demo preview is an
-    # `issue_comment` (`/record-demo`) run.
-    if: >-
-      github.event.workflow_run.event == 'pull_request' ||
-      github.event.workflow_run.event == 'issue_comment'
+    if: github.event.workflow_run.event == 'pull_request'
     permissions:
       pull-requests: write
       actions: read

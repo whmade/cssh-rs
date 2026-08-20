@@ -1,9 +1,8 @@
 #
 #   Record Demo Command
 #
-# On-demand demo-GIF preview for a pull request. A maintainer comments
-# `/record-demo` and this records the demo from the PR head, uploads the GIF,
-# and links it in a sticky PR comment (posted by post-pr-comment.yml).
+# On-demand demo-GIF preview: a maintainer comments `/record-demo`, this records
+# the demo from the PR head and posts the GIF in a sticky comment.
 #
 # SECURITY: the `record` job builds and runs untrusted PR-head code; the
 # maintainer gate, token isolation, and SHA pinning below exist to contain it.
@@ -94,6 +93,25 @@ jobs:
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('pr_number', String(context.issue.number));
 
+  announce:
+    needs: authorize
+    if: needs.authorize.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    # Trusted: the issue_comment token can write, and no PR code is checked out.
+    permissions:
+      pull-requests: write
+    steps:
+      # Parallel to the slow `record` job, so the comment appears immediately.
+      - name: Post the in-progress comment
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          number: ${{ needs.authorize.outputs.pr_number }}
+          header: demo-preview
+          message: |
+            🤖 **Demo preview**
+            Recording the demo GIF from this PR's head... :hourglass_flowing_sand:
+            [Follow progress in this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
   record:
     needs: authorize
     if: needs.authorize.outputs.proceed == 'true'
@@ -161,33 +179,54 @@ jobs:
         uses: ./.github/actions/demo-teardown
 
   comment:
-    # No `if`: needing both jobs runs this only when record succeeds, and skips
-    # it (no stray comment) when record fails or authorization was denied.
-    needs: [authorize, record]
+    # always() + proceed gate: report record's outcome (even fail/cancel), stay
+    # silent when denied. Needs `announce` so this writes the comment last.
+    needs: [authorize, announce, record]
+    if: always() && needs.authorize.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    # Trusted assembler: builds the comment from `authorize` outputs only, never
-    # from the record job's post-untrusted-code artifact or outputs.
+    # Trusted: body from workflow context and a trusted API query, never from
+    # the record job's untrusted output.
+    permissions:
+      pull-requests: write
+      actions: read
     steps:
-      - name: Prepare preview comment
-        shell: bash
+      - name: Build the final comment body
+        uses: actions/github-script@v9
         env:
-          PR_NUMBER: ${{ needs.authorize.outputs.pr_number }}
+          RECORD_RESULT: ${{ needs.record.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          mkdir -p comment
-          echo "$PR_NUMBER" > comment/pr_number.txt
-          echo "demo-preview" > comment/header.txt
-          cat > comment/body.txt << EOF
-          🤖 **Demo preview**
-          Recorded the demo GIF from this PR's head on request.
-          [Open this run]($RUN_URL) and download its \`demo-gif\` artifact (unzip to view \`cssh-rs.gif\`).
-          EOF
-
-      # Post-pr-comment.yml (workflow_run, holds the write token) picks up this
-      # artifact and posts the body as a sticky comment.
-      - name: Upload preview comment
-        uses: actions/upload-artifact@v7
         with:
-          name: demo-comment
-          path: comment/
-          retention-days: 1
+          script: |
+            const fs = require('fs');
+            const runUrl = process.env.RUN_URL;
+            const result = process.env.RECORD_RESULT;
+            let body;
+            if (result === 'success') {
+              // Resolve the artifact id so the link points at the zip, not the
+              // run page. Trusted API call; reads no record-job output.
+              const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+              });
+              const gif = data.artifacts.find((a) => a.name === 'demo-gif');
+              const artifactUrl = gif ? `${runUrl}/artifacts/${gif.id}` : runUrl;
+              body =
+                '🤖 **Demo preview**\n' +
+                '✅ Recorded the demo GIF from this PR\'s head.\n' +
+                `[Download the \`demo-gif\` artifact](${artifactUrl}) (zip, expires in 7 days) - unzip to view \`cssh-rs.gif\`.\n` +
+                `[View the run](${runUrl}).`;
+            } else {
+              body =
+                '🤖 **Demo preview**\n' +
+                `❌ Recording did not complete (result: ${result}).\n` +
+                `[Inspect the run](${runUrl}) for logs.`;
+            }
+            fs.writeFileSync('body.md', body + '\n');
+
+      - name: Update the sticky comment
+        uses: marocchino/sticky-pull-request-comment@v3.0.5
+        with:
+          number: ${{ needs.authorize.outputs.pr_number }}
+          header: demo-preview
+          path: body.md
