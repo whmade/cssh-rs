@@ -38,5 +38,11 @@ features = [
 mockall = "0.15.0"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time"] }
 
+# Windows-only ConPTY probe used by the throwaway `pty_spike` example (M1 gate,
+# GitHub #24). Kept out of the non-Windows dependency graph and out of the
+# shipped binary; the example is opt-in via `cargo run --example pty_spike`.
+[target.'cfg(windows)'.dev-dependencies]
+portable-pty = "0.9.0"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
