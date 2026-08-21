@@ -7,6 +7,7 @@ license-file = "../LICENSE.txt"
 [dependencies]
 serde = "1.0.228"
 serde_derive = "1.0.228"
+serde_bytes = "0.11.19"
 ciborium = "0.2.2"
 
 [dependencies.windows]
