@@ -1,0 +1,6 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+24 bytes
+0000  a2 61 6b 68 6d 6f 64 69 66 69 65 72 61 76 69 72  |.akhmodifieravir|
+0010  69 67 68 74 5f 61 6c 74                          |ight_alt|

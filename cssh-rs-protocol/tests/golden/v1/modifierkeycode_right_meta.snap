@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+11 bytes
+0000  6a 72 69 67 68 74 5f 6d 65 74 61                 |jright_meta|

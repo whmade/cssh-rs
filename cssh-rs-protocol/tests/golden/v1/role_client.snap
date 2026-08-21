@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+7 bytes
+0000  66 63 6c 69 65 6e 74                             |fclient|

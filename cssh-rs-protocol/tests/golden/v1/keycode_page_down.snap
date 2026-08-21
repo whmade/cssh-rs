@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+13 bytes
+0000  a1 61 6b 69 70 61 67 65 5f 64 6f 77 6e           |.akipage_down|

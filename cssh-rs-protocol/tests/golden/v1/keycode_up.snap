@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+6 bytes
+0000  a1 61 6b 62 75 70                                |.akbup|

@@ -1,0 +1,7 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+41 bytes
+0000  a2 61 74 68 61 63 74 69 76 61 74 65 61 63 a1 65  |.athactivateac.e|
+0010  74 6f 6b 65 6e 73 77 6d 2d 61 63 74 69 76 61 74  |tokenswm-activat|
+0020  69 6f 6e 2d 74 6f 6b 65 6e                       |ion-token|

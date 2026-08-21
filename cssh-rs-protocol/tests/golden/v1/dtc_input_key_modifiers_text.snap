@@ -1,0 +1,8 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+64 bytes
+0000  a2 61 74 65 69 6e 70 75 74 61 63 a1 65 65 76 65  |.ateinputac.eeve|
+0010  6e 74 a2 61 74 63 6b 65 79 61 63 a3 64 63 6f 64  |nt.atckeyac.dcod|
+0020  65 a2 61 6b 64 63 68 61 72 61 76 61 65 69 6d 6f  |e.akdcharavaeimo|
+0030  64 69 66 69 65 72 73 06 64 74 65 78 74 62 c3 a9  |difiers.dtextb..|

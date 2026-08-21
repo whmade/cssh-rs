@@ -1,0 +1,7 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+44 bytes
+0000  a2 61 74 69 74 65 72 6d 69 6e 61 74 65 61 63 a1  |.atiterminateac.|
+0010  66 72 65 61 73 6f 6e 74 64 61 65 6d 6f 6e 20 73  |freasontdaemon s|
+0020  68 75 74 74 69 6e 67 20 64 6f 77 6e              |hutting down|

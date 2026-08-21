@@ -1,0 +1,7 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+39 bytes
+0000  a2 69 63 6c 69 65 6e 74 5f 69 64 07 73 73 65 72  |.iclient_id.sser|
+0010  76 65 72 5f 63 61 70 61 62 69 6c 69 74 69 65 73  |ver_capabilities|
+0020  81 65 70 61 73 74 65                             |.epaste|

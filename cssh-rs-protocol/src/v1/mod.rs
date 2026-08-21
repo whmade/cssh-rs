@@ -33,3 +33,7 @@ pub mod limits;
 pub mod message;
 pub mod version;
 pub mod window;
+
+#[cfg(test)]
+#[path = "../tests/v1/test_golden.rs"]
+mod test_golden;

@@ -15,5 +15,8 @@ thiserror = "2.0.18"
 version = "0.62.2"
 features = ["Win32_System_Console"]
 
+[dev-dependencies]
+insta = "1.43"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }

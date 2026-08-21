@@ -1,0 +1,6 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+20 bytes
+0000  a2 61 74 69 68 69 67 68 6c 69 67 68 74 61 63 a1  |.atihighlightac.|
+0010  62 6f 6e f5                                      |bon.|
