@@ -4,6 +4,11 @@ version.workspace = true
 edition = "2021"
 license-file = "../LICENSE.txt"
 
+[dependencies]
+serde = "1.0.228"
+serde_derive = "1.0.228"
+ciborium = "0.2.2"
+
 [dependencies.windows]
 version = "0.62.2"
 features = ["Win32_System_Console"]
