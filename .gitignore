@@ -8,3 +8,8 @@
 !/.paseo/README.md
 # Claude Code per-worktree local settings (contains the injected GH_TOKEN)
 /.claude/settings.local.json
+
+# insta pending snapshots - regenerate accepted fixtures with
+# INSTA_UPDATE=always; the pending artifacts are never committed.
+*.snap.new
+*.pending-snap

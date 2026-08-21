@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+7 bytes
+0000  66 61 63 74 69 76 65                             |factive|

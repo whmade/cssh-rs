@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+12 bytes
+0000  6b 72 69 67 68 74 5f 73 68 69 66 74              |kright_shift|

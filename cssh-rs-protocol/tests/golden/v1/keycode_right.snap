@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+9 bytes
+0000  a1 61 6b 65 72 69 67 68 74                       |.akeright|

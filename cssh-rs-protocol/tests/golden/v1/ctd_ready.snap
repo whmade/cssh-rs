@@ -1,0 +1,8 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+62 bytes
+0000  a2 61 74 65 72 65 61 64 79 61 63 a2 69 63 68 69  |.atereadyac.ichi|
+0010  6c 64 5f 70 69 64 19 10 e1 66 77 69 6e 64 6f 77  |ld_pid...fwindow|
+0020  a2 64 6b 69 6e 64 6c 77 69 6e 64 6f 77 73 2e 68  |.dkindlwindows.h|
+0030  77 6e 64 65 76 61 6c 75 65 1a 00 0a 12 34        |wndevalue....4|

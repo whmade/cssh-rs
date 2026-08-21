@@ -218,6 +218,23 @@ For easy manual testing on Windows we recommend the following setup:
     cargo run -- -u $env:USERNAME localhost localhost
     ```
 
+### Regenerating golden snapshots
+
+Some tests freeze exact bytes or output as golden fixtures with the `insta`
+crate - for example the v1 protocol wire fixtures under
+`cssh-rs-protocol/tests/golden/v1/*.snap`. A plain `cargo test` compares
+against the committed snapshots, so an accidental change fails CI. When you
+change the output *on purpose*, regenerate the snapshots and review the diff
+before committing:
+
+```sh
+INSTA_UPDATE=always cargo test
+```
+
+(or `cargo insta review` if you have `cargo-insta` installed). Commit the
+updated `.snap` files alongside the change. This applies to every `insta`
+snapshot in the repo, not just the protocol fixtures.
+
 ### Commit Messages
 
 - Use clear, descriptive commit messages

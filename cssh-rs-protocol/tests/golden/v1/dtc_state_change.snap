@@ -1,0 +1,7 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+34 bytes
+0000  a2 61 74 6c 73 74 61 74 65 5f 63 68 61 6e 67 65  |.atlstate_change|
+0010  61 63 a1 65 73 74 61 74 65 68 64 69 73 61 62 6c  |ac.estatehdisabl|
+0020  65 64                                            |ed|

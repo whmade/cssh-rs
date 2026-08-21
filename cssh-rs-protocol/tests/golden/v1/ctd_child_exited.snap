@@ -1,0 +1,6 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+25 bytes
+0000  a2 61 74 6c 63 68 69 6c 64 5f 65 78 69 74 65 64  |.atlchild_exited|
+0010  61 63 a1 64 63 6f 64 65 20                       |ac.dcode |

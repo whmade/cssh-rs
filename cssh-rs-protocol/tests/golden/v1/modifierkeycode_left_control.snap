@@ -1,0 +1,5 @@
+---
+source: cssh-rs-protocol/src/v1/../tests/v1/test_golden.rs
+---
+13 bytes
+0000  6c 6c 65 66 74 5f 63 6f 6e 74 72 6f 6c           |lleft_control|
