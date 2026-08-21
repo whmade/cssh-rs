@@ -20,6 +20,7 @@ use windows::Win32::System::Console::INPUT_RECORD_0;
 pub mod deserialization;
 #[allow(missing_docs)]
 pub mod serialization;
+pub mod v1;
 
 /// Length of a serialized [INPUT_RECORD_0][1]
 ///
