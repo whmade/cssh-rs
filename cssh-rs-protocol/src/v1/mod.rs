@@ -24,4 +24,10 @@
 //! in a later minor version carries `#[serde(default)]` so a frame from an
 //! older peer that omits it still deserializes.
 
+pub mod handshake;
+pub mod input;
+pub mod keycode;
+pub mod limits;
+pub mod message;
+pub mod version;
 pub mod window;
