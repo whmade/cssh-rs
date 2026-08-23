@@ -252,12 +252,13 @@ impl ConfigManager for CLIConfigManager {
 #[cfg_attr(test, automock)]
 pub trait Entrypoint {
     /// Entrypoint for the client subcommand
-    fn client_main<W: WindowsApi + 'static>(
+    fn client_main<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
         host: String,
         username: Option<String>,
         port: Option<u16>,
+        daemon_channel: Option<String>,
         config: &ClientConfig,
     ) -> impl std::future::Future<Output = ()> + Send;
     /// Entrypoint for the daemon subcommand
@@ -283,15 +284,16 @@ pub trait Entrypoint {
 }
 
 impl Entrypoint for MainEntrypoint {
-    async fn client_main<W: WindowsApi>(
+    async fn client_main<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
         host: String,
         username: Option<String>,
         port: Option<u16>,
+        daemon_channel: Option<String>,
         config: &ClientConfig,
     ) {
-        client_main(windows_api, host, username, port, config).await;
+        client_main(windows_api, host, username, port, daemon_channel, config).await;
     }
 
     async fn daemon_main<W: WindowsApi + Clone + 'static>(
@@ -683,7 +685,10 @@ pub async fn main<
 
     match &args.command {
         Some(Commands::GenerateConfig { .. }) => unreachable!("handled before config load"),
-        Some(Commands::Client { host, .. }) => {
+        Some(Commands::Client {
+            host,
+            daemon_channel,
+        }) => {
             if args.debug {
                 logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));
             }
@@ -693,6 +698,7 @@ pub async fn main<
                     host.to_owned(),
                     args.username.to_owned(),
                     args.port,
+                    daemon_channel.to_owned(),
                     &config.client,
                 )
                 .await;
