@@ -17,8 +17,9 @@ use windows::Win32::System::Threading::PROCESS_INFORMATION;
 
 use crate::api::MockWindowsApi;
 use crate::traits::{
-    SendHwnd, SendProcessInformation, WindowsControlChannelClient, WindowsControlChannelServer,
-    WindowsLaunchContext, WindowsProcessSpawner, WindowsWindowHandleProbe,
+    control_endpoint, SendHwnd, SendProcessInformation, WindowsControlChannelClient,
+    WindowsControlChannelServer, WindowsLaunchContext, WindowsProcessSpawner,
+    WindowsWindowHandleProbe,
 };
 
 /// Construct a unique named-pipe endpoint per test invocation so concurrent
@@ -186,6 +187,34 @@ mod window_handle_probe_tests {
 
 mod control_channel_tests {
     use super::*;
+
+    #[test]
+    fn control_endpoint_format() {
+        assert_eq!(
+            control_endpoint(1234),
+            OsString::from(r"\\.\pipe\cssh-rs-1234-control")
+        );
+        let live = control_endpoint(std::process::id());
+        let live = live.to_string_lossy();
+        assert!(live.starts_with(r"\\.\pipe\cssh-rs-"));
+        assert!(live.ends_with("-control"));
+    }
+
+    #[test]
+    fn connect_before_bind_errors() {
+        let runtime = Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .expect("tokio runtime");
+        runtime.block_on(async {
+            let endpoint = unique_pipe_name("connect-before-bind");
+            let mut client = WindowsControlChannelClient::new();
+            client
+                .connect(&endpoint)
+                .await
+                .expect_err("connect must fail when no server is bound");
+        });
+    }
 
     /// End-to-end round trip: server binds, client connects, both sides
     /// exchange bytes. Covers `bind`, `accept`, `send`, `recv`,

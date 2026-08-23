@@ -29,7 +29,8 @@ mod daemon_test {
 
     use crate::{
         daemon::{
-            classify_control_mode_key, classify_enable_disable_submenu_key, expand_hosts,
+            build_client_args, classify_control_mode_key, classify_enable_disable_submenu_key,
+            expand_hosts,
             grid::{grid_dimensions, ClientGrid},
             named_pipe_server_routine, next_submenu_selection, resolve_cluster_tags,
             workspace::WorkspaceArea,
@@ -55,6 +56,49 @@ mod daemon_test {
             x_size_frame: 0,
             y_size_frame: 0,
         };
+    }
+
+    #[test]
+    fn test_build_client_args_includes_daemon_channel() {
+        let control = r"\\.\pipe\cssh-rs-4321-control";
+        let args = build_client_args("host1", None, None, false, control);
+        assert_eq!(
+            args,
+            vec![
+                "client".to_string(),
+                "--daemon-channel".to_string(),
+                control.to_string(),
+                "--".to_string(),
+                "host1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_client_args_positions_daemon_channel_with_all_options() {
+        let control = r"\\.\pipe\cssh-rs-99-control";
+        let args = build_client_args(
+            "alice@host2",
+            Some("ignored".to_string()),
+            Some(2222),
+            true,
+            control,
+        );
+        assert_eq!(
+            args,
+            vec![
+                "-d".to_string(),
+                "-u".to_string(),
+                "alice".to_string(),
+                "-p".to_string(),
+                "2222".to_string(),
+                "client".to_string(),
+                "--daemon-channel".to_string(),
+                control.to_string(),
+                "--".to_string(),
+                "host2".to_string(),
+            ]
+        );
     }
 
     /// Send `pid` as a 4 byte little-endian sequence to the pipe server.

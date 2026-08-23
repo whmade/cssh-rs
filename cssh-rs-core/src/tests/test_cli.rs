@@ -183,7 +183,8 @@ mod cli_args_test {
         assert_eq!(
             args.command,
             Some(Commands::Client {
-                host: "host1".to_string()
+                host: "host1".to_string(),
+                daemon_channel: None,
             })
         );
         assert_eq!(args.username, None);
@@ -194,12 +195,29 @@ mod cli_args_test {
         assert_eq!(
             args.command,
             Some(Commands::Client {
-                host: "host1".to_string()
+                host: "host1".to_string(),
+                daemon_channel: None,
             })
         );
         assert_eq!(args.username, Some("username".to_string()));
         assert_eq!(args.hosts, Vec::<String>::new());
         assert!(!args.debug);
+        // With the daemon-supplied control-channel path
+        let args = Args::parse_from(vec![
+            "executable_name",
+            "client",
+            "--daemon-channel",
+            r"\\.\pipe\cssh-rs-4321-control",
+            "--",
+            "host1",
+        ]);
+        assert_eq!(
+            args.command,
+            Some(Commands::Client {
+                host: "host1".to_string(),
+                daemon_channel: Some(r"\\.\pipe\cssh-rs-4321-control".to_string()),
+            })
+        );
     }
 }
 
@@ -755,6 +773,7 @@ mod cli_main_test {
         let args = Args {
             command: Some(Commands::Client {
                 host: "host1".to_string(),
+                daemon_channel: None,
             }),
             username: Some("username".to_string()),
             port: None,
@@ -825,6 +844,7 @@ mod cli_main_test {
         let args = Args {
             command: Some(Commands::Client {
                 host: "testhost".to_string(),
+                daemon_channel: None,
             }),
             username: Some("testuser".to_string()),
             port: Some(2222),
@@ -1202,6 +1222,7 @@ mod execute_parsed_command_test {
         let args = Args {
             command: Some(Commands::Client {
                 host: "testhost".to_string(),
+                daemon_channel: None,
             }),
             username: Some("testuser".to_string()),
             port: Some(2222),
