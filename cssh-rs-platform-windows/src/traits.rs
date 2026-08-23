@@ -145,6 +145,17 @@ impl<A: WindowsApi + 'static> ProcessSpawner for WindowsProcessSpawner<A> {
     }
 }
 
+/// Return the named-pipe path of the control channel owned by a daemon.
+///
+/// # Arguments
+/// * `pid` - Process id of the daemon.
+///
+/// # Returns
+/// `\\.\pipe\cssh-rs-<pid>-control`.
+pub fn control_endpoint(pid: u32) -> OsString {
+    return OsString::from(format!(r"\\.\pipe\cssh-rs-{pid}-control"));
+}
+
 /// Daemon-side control channel backed by a Windows named pipe server.
 ///
 /// One instance owns one [`NamedPipeServer`] endpoint. `accept`

@@ -29,7 +29,8 @@ mod daemon_test {
 
     use crate::{
         daemon::{
-            classify_control_mode_key, classify_enable_disable_submenu_key, expand_hosts,
+            build_client_args, classify_control_mode_key, classify_enable_disable_submenu_key,
+            expand_hosts,
             grid::{grid_dimensions, ClientGrid},
             named_pipe_server_routine, next_submenu_selection, resolve_cluster_tags,
             workspace::WorkspaceArea,
@@ -55,6 +56,32 @@ mod daemon_test {
             x_size_frame: 0,
             y_size_frame: 0,
         };
+    }
+
+    #[test]
+    fn test_build_client_args_with_all_options() {
+        let args = build_client_args(
+            "alice@host",
+            Some("ignored".to_string()),
+            Some(2222),
+            true,
+            "pipe",
+        );
+        assert_eq!(
+            args,
+            [
+                "-d",
+                "-u",
+                "alice",
+                "-p",
+                "2222",
+                "client",
+                "--daemon-channel",
+                "pipe",
+                "--",
+                "host",
+            ]
+        );
     }
 
     /// Send `pid` as a 4 byte little-endian sequence to the pipe server.
