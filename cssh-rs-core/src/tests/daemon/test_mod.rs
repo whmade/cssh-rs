@@ -1,12 +1,13 @@
 mod daemon_test {
     use std::{
-        ffi::c_void,
+        ffi::{c_void, OsStr, OsString},
         io,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     use tokio::{
-        net::windows::named_pipe::{ClientOptions, NamedPipeClient, PipeMode, ServerOptions},
+        net::windows::named_pipe::{ClientOptions, NamedPipeClient},
         sync::{broadcast, watch},
     };
     use windows::Win32::Foundation::{HANDLE, HWND};
@@ -20,12 +21,15 @@ mod daemon_test {
         VK_RIGHT, VK_T, VK_UP, VK_X,
     };
 
-    use cssh_rs_protocol::{
-        serialization::serialize_pid, ClientState, FRAMED_HIGHLIGHT_LENGTH,
-        FRAMED_INPUT_RECORD_LENGTH, FRAMED_KEEP_ALIVE_LENGTH, FRAMED_STATE_CHANGE_LENGTH,
-        SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT, TAG_INPUT_RECORD,
-        TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
-    };
+    use cssh_rs_protocol::v1::codec::{decode_frames, encode_frame};
+    use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
+    use cssh_rs_protocol::v1::input::{ClientRunState, InputEvent};
+    use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
+    use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
+    use cssh_rs_protocol::v1::message::{ClientToDaemon, DaemonToClient};
+    use cssh_rs_protocol::v1::version::{ProtocolVersion, Role};
+    use cssh_rs_protocol::v1::window::WindowHandle;
+    use cssh_rs_protocol::ClientState;
 
     use crate::{
         daemon::{
@@ -34,12 +38,12 @@ mod daemon_test {
             grid::{grid_dimensions, ClientGrid},
             named_pipe_server_routine, next_submenu_selection, resolve_cluster_tags,
             workspace::WorkspaceArea,
-            Client, Clients, ControlModeAction, ControlModeState, Daemon,
+            Client, ClientBroadcast, Clients, ControlModeAction, ControlModeState, Daemon,
             EnableDisableSubmenuAction, HWNDWrapper, NavigationDirection,
         },
         utils::{
             config::{Cluster, DaemonConfig, EdgeBehavior},
-            constants::PIPE_NAME,
+            windows::WindowsControlChannelServer,
         },
     };
 
@@ -101,22 +105,163 @@ mod daemon_test {
         );
     }
 
-    /// Send `pid` as a 4 byte little-endian sequence to the pipe server.
-    ///
-    /// Mirrors the client-side PID handshake used by [`crate::client`].
-    async fn send_pid(client: &NamedPipeClient, pid: u32) -> io::Result<()> {
-        let bytes = serialize_pid(pid);
+    /// Construct a unique named-pipe endpoint per test invocation so parallel
+    /// runs cannot collide.
+    fn unique_pipe_name(tag: &str) -> OsString {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut name = OsString::from(r"\\.\pipe\cssh-rs-daemon-test-");
+        name.push(tag);
+        name.push("-");
+        name.push(std::process::id().to_string());
+        name.push("-");
+        name.push(n.to_string());
+        return name;
+    }
+
+    /// Connect a raw client to `endpoint`, retrying while the server binds.
+    async fn connect_client(endpoint: &OsStr) -> NamedPipeClient {
+        for _ in 0..200u32 {
+            match ClientOptions::new().open(endpoint) {
+                Ok(client) => return client,
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        }
+        panic!("could not connect test client to {endpoint:?}");
+    }
+
+    /// Write all of `frame` to the client pipe.
+    async fn write_all_client(client: &NamedPipeClient, frame: &[u8]) -> io::Result<()> {
         let mut written = 0usize;
-        while written < SERIALIZED_PID_LENGTH {
+        while written < frame.len() {
             client.writable().await?;
-            match client.try_write(&bytes[written..]) {
-                Ok(0) => return Err(io::Error::other("pipe closed before handshake")),
+            match client.try_write(&frame[written..]) {
+                Ok(0) => return Err(io::Error::other("pipe closed")),
                 Ok(n) => written += n,
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
                 Err(e) => return Err(e),
             }
         }
         return Ok(());
+    }
+
+    /// Send the client `Hello` correlating on `pid`.
+    async fn send_hello(client: &NamedPipeClient, pid: u32) -> io::Result<()> {
+        let hello = Hello {
+            protocol_version: ProtocolVersion::new(1, 0),
+            role: Role::Client,
+            pid,
+            capabilities: Vec::new(),
+            max_frame_len: DEFAULT_MAX_FRAME_LEN,
+        };
+        let frame = encode_frame(&hello, DEFAULT_MAX_FRAME_LEN).expect("encode hello");
+        return write_all_client(client, &frame).await;
+    }
+
+    /// Send a `ClientToDaemon` message from the client.
+    async fn send_ctd(client: &NamedPipeClient, message: &ClientToDaemon) -> io::Result<()> {
+        let frame = encode_frame(message, DEFAULT_MAX_FRAME_LEN).expect("encode ctd");
+        return write_all_client(client, &frame).await;
+    }
+
+    /// Read one complete frame (prefix + body) from the client pipe.
+    async fn read_frame(client: &NamedPipeClient, acc: &mut Vec<u8>) -> io::Result<Vec<u8>> {
+        let mut buf = [0u8; 4096];
+        loop {
+            if acc.len() >= 4 {
+                let len = u32::from_be_bytes([acc[0], acc[1], acc[2], acc[3]]) as usize;
+                let total = 4 + len;
+                if acc.len() >= total {
+                    return Ok(acc.drain(..total).collect());
+                }
+            }
+            client.readable().await?;
+            match client.try_read(&mut buf) {
+                Ok(0) => return Err(io::Error::other("pipe closed")),
+                Ok(n) => acc.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Decode the next frame from the client pipe as `T`.
+    async fn read_typed<T: serde::de::DeserializeOwned>(
+        client: &NamedPipeClient,
+        acc: &mut Vec<u8>,
+    ) -> io::Result<T> {
+        let frame = read_frame(client, acc).await?;
+        let decoded = decode_frames::<T>(frame, DEFAULT_MAX_FRAME_LEN)
+            .map_err(|e| return io::Error::other(format!("decode: {e}")))?;
+        return decoded
+            .messages
+            .into_iter()
+            .next()
+            .ok_or_else(|| return io::Error::other("frame did not decode to expected type"));
+    }
+
+    /// Complete the client side of the handshake: send `Hello`, then consume
+    /// the daemon `Hello` and `Welcome`. Returns the leftover accumulator.
+    async fn client_handshake(client: &NamedPipeClient, pid: u32) -> io::Result<Vec<u8>> {
+        send_hello(client, pid).await?;
+        let mut acc = Vec::new();
+        let _daemon_hello: Hello = read_typed(client, &mut acc).await?;
+        let _welcome: Welcome = read_typed(client, &mut acc).await?;
+        return Ok(acc);
+    }
+
+    /// Read daemon-to-client frames until one satisfies `matches`, ignoring
+    /// keep-alives; panics on any other unexpected variant.
+    async fn read_until<F>(
+        client: &NamedPipeClient,
+        acc: &mut Vec<u8>,
+        mut matches: F,
+    ) -> DaemonToClient
+    where
+        F: FnMut(&DaemonToClient) -> bool,
+    {
+        loop {
+            let message: DaemonToClient = read_typed(client, acc).await.expect("read frame");
+            if matches(&message) {
+                return message;
+            }
+            if matches!(message, DaemonToClient::KeepAlive) {
+                continue;
+            }
+            // Non-matching, non-keepalive frames (e.g. the initial state pushes)
+            // are skipped so tests can target the frame they care about.
+        }
+    }
+
+    /// Encode `message` into a gated broadcast frame.
+    fn gated(message: &DaemonToClient) -> ClientBroadcast {
+        let frame = encode_frame(message, DEFAULT_MAX_FRAME_LEN).expect("encode");
+        return ClientBroadcast::Gated(Arc::from(frame));
+    }
+
+    /// Encode `message` into an ungated broadcast frame.
+    fn ungated(message: &DaemonToClient) -> ClientBroadcast {
+        let frame = encode_frame(message, DEFAULT_MAX_FRAME_LEN).expect("encode");
+        return ClientBroadcast::Ungated(Arc::from(frame));
+    }
+
+    /// Construct a [`Clients`] holding one client with the given `pid`,
+    /// returning the collection and its state sender.
+    fn make_clients_with_pid_and_state(
+        pid: u32,
+    ) -> (Arc<Mutex<Clients>>, watch::Sender<ClientState>) {
+        let state_sender = watch::channel(ClientState::Active).0;
+        let mut clients = Clients::new();
+        clients.push(Client {
+            hostname: format!("test-host-{pid}"),
+            window_handle: HWND(std::ptr::null_mut()),
+            process_handle: HANDLE::default(),
+            process_id: pid,
+            state_sender: state_sender.clone(),
+            highlight_sender: watch::channel(false).0,
+            tile_index: 0,
+        });
+        return (Arc::new(Mutex::new(clients)), state_sender);
     }
 
     /// Construct a [`Clients`] collection holding a single [`Client`] whose
@@ -242,726 +387,315 @@ mod daemon_test {
     }
 
     #[tokio::test]
-    async fn test_named_pipe_server_routine() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_named_pipe_server_routine_handshake_and_initial_state(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         const TEST_PID: u32 = 11111;
-        // Setup sender and receiver
-        let (sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        // and named pipe server and client
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(PIPE_NAME)?;
-        let named_pipe_client = ClientOptions::new().open(PIPE_NAME)?;
-        // Build a Clients collection containing the test PID so PID correlation succeeds.
+        let endpoint = unique_pipe_name("handshake");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
         let clients = make_clients_with_pid(TEST_PID);
-        // Complete the PID handshake expected by the pipe server routine.
-        send_pid(&named_pipe_client, TEST_PID).await?;
-        // Spawn named pipe server routine
+
+        let (_sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
         let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
+            named_pipe_server_routine(server, &mut receiver, clients).await;
         });
 
-        // Push 5 input records up front; once the routine drains them the
-        // broadcast channel goes idle and the 5 ms keep-alive branch of the
-        // select! starts firing, letting us assert both behaviours in one
-        // loop.
-        const TARGET_INPUT_FRAMES: usize = 5;
-        for _ in 0..TARGET_INPUT_FRAMES {
-            sender.send([2; SERIALIZED_INPUT_RECORD_0_LENGTH])?;
-        }
-        let mut keep_alive_received = false;
-        let mut successful_iterations = 0;
-        loop {
-            // Wait for the pipe to be readable
-            named_pipe_client.readable().await?;
-            let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-            // Try to read data, this may still fail with `WouldBlock`
-            // if the readiness event is a false positive.
-            match named_pipe_client.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => match buf[0] {
-                    TAG_KEEP_ALIVE => {
-                        // Keep-alive frame: just the tag byte.
-                        assert_eq!(FRAMED_KEEP_ALIVE_LENGTH, n);
-                        keep_alive_received = true;
-                    }
-                    TAG_INPUT_RECORD => {
-                        // Input-record frame: tag byte + 13-byte payload.
-                        assert_eq!(FRAMED_INPUT_RECORD_LENGTH, n);
-                        assert_eq!([2; SERIALIZED_INPUT_RECORD_0_LENGTH], buf[1..]);
-                        successful_iterations += 1;
-                    }
-                    TAG_STATE_CHANGE => {
-                        // Initial state push emitted right after the routine
-                        // subscribes; the default state is `Active`. Drain it
-                        // and keep reading so the rest of the assertions still
-                        // observe the input-record and keep-alive frames.
-                        assert_eq!(FRAMED_STATE_CHANGE_LENGTH, n);
-                        assert_eq!(buf[1], ClientState::Active as u8);
-                    }
-                    TAG_HIGHLIGHT => {
-                        // Initial highlight push emitted right after the
-                        // state push; the default highlight is `false`.
-                        assert_eq!(FRAMED_HIGHLIGHT_LENGTH, n);
-                        assert_eq!(buf[1], 0u8);
-                    }
-                    other => panic!("Unexpected tag byte 0x{other:02X}"),
-                },
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
+        let client = connect_client(&endpoint).await;
+        let mut acc = client_handshake(&client, TEST_PID).await?;
+
+        // The daemon pushes the initial state and highlight right after Welcome.
+        let state = read_until(&client, &mut acc, |m| {
+            return matches!(m, DaemonToClient::StateChange { .. });
+        })
+        .await;
+        assert!(matches!(
+            state,
+            DaemonToClient::StateChange {
+                state: ClientRunState::Active
             }
-            if keep_alive_received && successful_iterations >= TARGET_INPUT_FRAMES {
-                break;
-            }
-        }
-        assert!(keep_alive_received);
-        assert!(successful_iterations >= TARGET_INPUT_FRAMES);
-        // Drop the client, closing the pipe.
-        drop(named_pipe_client);
-        // We expect the routine to exit gracefully.
-        future.await?;
+        ));
+        let highlight = read_until(&client, &mut acc, |m| {
+            return matches!(m, DaemonToClient::Highlight { .. });
+        })
+        .await;
+        assert!(matches!(highlight, DaemonToClient::Highlight { on: false }));
+
+        drop(client);
+        let _ = future.await;
+        return Ok(());
+    }
+
+    #[tokio::test]
+    async fn test_named_pipe_server_routine_forwards_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        const TEST_PID: u32 = 22222;
+        let endpoint = unique_pipe_name("forwards-input");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
+        let clients = make_clients_with_pid(TEST_PID);
+
+        let (sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
+        let future = tokio::spawn(async move {
+            named_pipe_server_routine(server, &mut receiver, clients).await;
+        });
+
+        let client = connect_client(&endpoint).await;
+        let mut acc = client_handshake(&client, TEST_PID).await?;
+
+        let event = InputEvent::Key {
+            code: KeyCode::Char("a".to_string()),
+            modifiers: Modifiers::NONE,
+            text: Some("a".to_string()),
+        };
+        sender.send(gated(&DaemonToClient::Input {
+            event: event.clone(),
+        }))?;
+
+        let received = read_until(&client, &mut acc, |m| {
+            return matches!(m, DaemonToClient::Input { .. });
+        })
+        .await;
+        assert_eq!(received, DaemonToClient::Input { event });
+
+        // Keep-alives keep flowing while idle.
+        let keepalive = read_until(&client, &mut acc, |m| {
+            return matches!(m, DaemonToClient::KeepAlive);
+        })
+        .await;
+        assert!(matches!(keepalive, DaemonToClient::KeepAlive));
+
+        drop(client);
+        let _ = future.await;
         return Ok(());
     }
 
     #[tokio::test]
     async fn test_named_pipe_server_routine_forwards_state_change(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        const TEST_PID: u32 = 66666;
-        // Use a per-test unique pipe name so parallel test runs don't collide
-        // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-state-change-{}", std::process::id());
-        let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(&pipe_name)?;
-        let named_pipe_client = ClientOptions::new().open(&pipe_name)?;
-        let clients = make_clients_with_pid(TEST_PID);
-        // Grab the watch sender so we can later trigger a state change push.
-        let state_sender = clients
-            .lock()
-            .unwrap()
-            .get_by_pid(TEST_PID)
-            .unwrap()
-            .state_sender
-            .clone();
-        send_pid(&named_pipe_client, TEST_PID).await?;
-        let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
-        });
-        // The routine emits the current authoritative state right after
-        // subscribing, so the very first frame on the pipe must be the
-        // initial `TAG_STATE_CHANGE(Active)` push. Receiving it also
-        // proves the subscribe has happened and any subsequent
-        // `state_sender.send` will be observed.
-        loop {
-            named_pipe_client.readable().await?;
-            let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-            match named_pipe_client.try_read(&mut buf) {
-                Ok(0) => return Err("pipe closed before initial state push".into()),
-                Ok(n) => match buf[0] {
-                    TAG_STATE_CHANGE => {
-                        assert_eq!(FRAMED_STATE_CHANGE_LENGTH, n);
-                        assert_eq!(buf[1], ClientState::Active as u8);
-                        break;
-                    }
-                    other => {
-                        panic!("Expected initial TAG_STATE_CHANGE, got tag byte 0x{other:02X}")
-                    }
-                },
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        // Push a real state transition through the watch sender; the routine
-        // must write a tagged state-change frame to the pipe.
-        state_sender.send(ClientState::Disabled)?;
-        let mut state_change_seen = false;
-        loop {
-            named_pipe_client.readable().await?;
-            let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-            match named_pipe_client.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => match buf[0] {
-                    TAG_STATE_CHANGE => {
-                        assert_eq!(FRAMED_STATE_CHANGE_LENGTH, n);
-                        assert_eq!(buf[1], ClientState::Disabled as u8);
-                        state_change_seen = true;
-                        break;
-                    }
-                    TAG_KEEP_ALIVE => {
-                        assert_eq!(FRAMED_KEEP_ALIVE_LENGTH, n);
-                        // Keep-alives may interleave with the state change; keep waiting.
-                    }
-                    TAG_HIGHLIGHT => {
-                        // Initial highlight push following the initial state
-                        // push; drain it and keep waiting for the state
-                        // transition.
-                        assert_eq!(FRAMED_HIGHLIGHT_LENGTH, n);
-                        assert_eq!(buf[1], 0u8);
-                    }
-                    other => panic!("Unexpected tag byte 0x{other:02X}"),
-                },
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        assert!(state_change_seen);
-        drop(named_pipe_client);
-        future.await?;
-        return Ok(());
-    }
-
-    /// Verifies that the pipe server routine emits a `TAG_STATE_CHANGE`
-    /// frame carrying the current authoritative state immediately after
-    /// the PID handshake, even when no transition fires after subscribe.
-    ///
-    /// `Daemon::set_client_state` may run in the brief window between
-    /// `Client` construction and the routine's `state_sender.subscribe()`
-    /// call. In that case `state_receiver.changed()` would never fire for the
-    /// pre-existing value, leaving the client stuck on its default
-    /// `ClientState::Active` even though the daemon already gates
-    /// forwarding on the new value. The fix - and what this test
-    /// asserts - is that the routine pushes the snapshot from
-    /// `state_receiver.borrow_and_update()` as its very first frame.
-    #[tokio::test]
-    async fn test_named_pipe_server_routine_sends_initial_state_after_subscribe(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        const TEST_PID: u32 = 88888;
-        // Use a per-test unique pipe name so parallel test runs don't collide
-        // on the global PIPE_NAME.
-        let pipe_name = format!(
-            r"\\.\pipe\cssh-rs-test-initial-state-{}",
-            std::process::id()
-        );
-        let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(&pipe_name)?;
-        let named_pipe_client = ClientOptions::new().open(&pipe_name)?;
+        const TEST_PID: u32 = 33333;
+        let endpoint = unique_pipe_name("state-change");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
         let (clients, state_sender) = make_clients_with_pid_and_state(TEST_PID);
 
-        // Pre-disable BEFORE the routine subscribes. `send_replace`
-        // updates the stored value even when there are no receivers,
-        // which is exactly the production race this test guards against:
-        // `Daemon::set_client_state` mutating the watch before the
-        // pipe-server task has had a chance to call `subscribe`. A
-        // regular `send` would error with no receivers.
+        let (_sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
+        let future = tokio::spawn(async move {
+            named_pipe_server_routine(server, &mut receiver, clients).await;
+        });
+
+        let client = connect_client(&endpoint).await;
+        let mut acc = client_handshake(&client, TEST_PID).await?;
+
+        // Consume the initial Active push, then flip to Disabled.
+        read_until(&client, &mut acc, |m| {
+            return matches!(
+                m,
+                DaemonToClient::StateChange {
+                    state: ClientRunState::Active
+                }
+            );
+        })
+        .await;
         state_sender.send_replace(ClientState::Disabled);
 
-        send_pid(&named_pipe_client, TEST_PID).await?;
-        let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
-        });
-
-        // The very first non-keep-alive frame on the pipe must be the
-        // initial `TAG_STATE_CHANGE(Disabled)` push. Keep-alive frames
-        // may legally interleave because the routine spawns its keep-
-        // alive timer through the same select; tolerate them but reject
-        // any other tag.
-        let read_result: Result<Result<(), Box<dyn std::error::Error>>, _> =
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    named_pipe_client.readable().await?;
-                    let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-                    match named_pipe_client.try_read(&mut buf) {
-                        Ok(0) => {
-                            return Err("pipe closed before initial state frame arrived".into());
-                        }
-                        Ok(n) => match buf[0] {
-                            TAG_STATE_CHANGE => {
-                                assert_eq!(
-                                    FRAMED_STATE_CHANGE_LENGTH, n,
-                                    "State-change frame must be exactly two bytes"
-                                );
-                                assert_eq!(
-                                    buf[1],
-                                    ClientState::Disabled as u8,
-                                    "Initial state push must reflect the value set before subscribe"
-                                );
-                                return Ok(());
-                            }
-                            TAG_KEEP_ALIVE => {
-                                // The initial state push happens before the
-                                // select loop, so a keep-alive arriving first
-                                // would mean the routine skipped the push.
-                                return Err("received keep-alive before initial state frame".into());
-                            }
-                            TAG_INPUT_RECORD => {
-                                return Err(
-                                    "received input record before initial state frame".into()
-                                );
-                            }
-                            other => {
-                                return Err(format!("Unexpected tag byte 0x{other:02X}").into());
-                            }
-                        },
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                        Err(e) => return Err(e.into()),
-                    }
+        let disabled = read_until(&client, &mut acc, |m| {
+            return matches!(
+                m,
+                DaemonToClient::StateChange {
+                    state: ClientRunState::Disabled
                 }
-            })
-            .await;
-        match read_result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                return Err("timed out waiting for initial state frame after subscribe".into());
+            );
+        })
+        .await;
+        assert!(matches!(
+            disabled,
+            DaemonToClient::StateChange {
+                state: ClientRunState::Disabled
             }
-        }
+        ));
 
-        drop(named_pipe_client);
-        future.await?;
+        drop(client);
+        let _ = future.await;
         return Ok(());
     }
 
     #[tokio::test]
-    async fn test_named_pipe_server_routine_sender_closes_unexpectedly(
+    async fn test_named_pipe_server_routine_disabled_drops_input(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        const TEST_PID: u32 = 22222;
-        // Setup sender and receiver
-        let (sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        // and named pipe server and client
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(PIPE_NAME)?;
-        let named_pipe_client = ClientOptions::new().open(PIPE_NAME)?;
-        // Build a Clients collection containing the test PID so PID correlation succeeds.
-        let clients = make_clients_with_pid(TEST_PID);
-        // Complete the PID handshake expected by the pipe server routine.
-        send_pid(&named_pipe_client, TEST_PID).await?;
-        // Spawn named pipe server routine
+        const TEST_PID: u32 = 44444;
+        let endpoint = unique_pipe_name("disabled-drops");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
+        let (clients, state_sender) = make_clients_with_pid_and_state(TEST_PID);
+        state_sender.send_replace(ClientState::Disabled);
+
+        let (sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
         let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
+            named_pipe_server_routine(server, &mut receiver, clients).await;
         });
-        // Send data to the routine
-        sender.send([2; SERIALIZED_INPUT_RECORD_0_LENGTH])?;
-        // Verify the routine forwards the data through the pipe
-        loop {
-            // Wait for the pipe to be readable
-            named_pipe_client.readable().await?;
-            let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-            // Try to read data, this may still fail with `WouldBlock`
-            // if the readiness event is a false positive.
-            match named_pipe_client.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => match buf[0] {
-                    TAG_KEEP_ALIVE => {
-                        // Keep-alive frame: just the tag byte.
-                        assert_eq!(FRAMED_KEEP_ALIVE_LENGTH, n);
-                    }
-                    TAG_INPUT_RECORD => {
-                        // Input-record frame: tag byte + 13-byte payload.
-                        assert_eq!(FRAMED_INPUT_RECORD_LENGTH, n);
-                        assert_eq!([2; SERIALIZED_INPUT_RECORD_0_LENGTH], buf[1..]);
-                        break;
-                    }
-                    TAG_STATE_CHANGE => {
-                        // Initial state push emitted right after subscribe.
-                        // Drain it and continue reading.
-                        assert_eq!(FRAMED_STATE_CHANGE_LENGTH, n);
-                        assert_eq!(buf[1], ClientState::Active as u8);
-                    }
-                    TAG_HIGHLIGHT => {
-                        // Initial highlight push following the initial
-                        // state push. Drain and keep reading.
-                        assert_eq!(FRAMED_HIGHLIGHT_LENGTH, n);
-                        assert_eq!(buf[1], 0u8);
-                    }
-                    other => panic!("Unexpected tag byte 0x{other:02X}"),
-                },
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
+
+        let client = connect_client(&endpoint).await;
+        let mut acc = client_handshake(&client, TEST_PID).await?;
+
+        sender.send(gated(&DaemonToClient::Input {
+            event: InputEvent::Raw {
+                bytes: vec![1, 2, 3],
+            },
+        }))?;
+
+        // A disabled client sees keep-alives and state, never the dropped Input.
+        for _ in 0..20u32 {
+            let message: DaemonToClient = read_typed(&client, &mut acc).await?;
+            assert!(
+                !matches!(message, DaemonToClient::Input { .. }),
+                "input leaked through to a disabled client"
+            );
+            if matches!(message, DaemonToClient::KeepAlive) {
+                // Saw a keep-alive without any input - the drop worked.
+                drop(client);
+                let _ = future.await;
+                return Ok(());
             }
         }
-        // Drop the sender end of the broadcast channel
-        drop(sender);
-        // This is unexpected, we should panic
-        assert!(future.await.unwrap_err().is_panic());
-        return Ok(());
+        panic!("expected a keep-alive frame while disabled");
     }
 
     #[tokio::test]
-    async fn test_named_pipe_server_routine_pid_mismatch() -> Result<(), Box<dyn std::error::Error>>
-    {
-        const REGISTERED_PID: u32 = 33333;
-        const SENT_PID: u32 = 44444;
-        // Use a per-test unique pipe name so parallel test runs don't collide
-        // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-pid-mismatch-{}", std::process::id());
-        // Setup sender and receiver
-        let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(&pipe_name)?;
-        let named_pipe_client = ClientOptions::new().open(&pipe_name)?;
-        // Daemon only knows about REGISTERED_PID, but the client will send SENT_PID.
-        let clients = make_clients_with_pid(REGISTERED_PID);
-        send_pid(&named_pipe_client, SENT_PID).await?;
-        let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
-        });
-        // Unknown PID is unrecoverable - the routine must panic (exits the daemon in production).
-        assert!(future.await.unwrap_err().is_panic());
-        return Ok(());
-    }
-
-    #[tokio::test]
-    async fn test_named_pipe_server_routine_client_closes_before_pid_handshake(
+    async fn test_named_pipe_server_routine_ready_updates_window_handle(
     ) -> Result<(), Box<dyn std::error::Error>> {
         const TEST_PID: u32 = 55555;
-        // Use a per-test unique pipe name so parallel test runs don't collide
-        // on the global PIPE_NAME.
-        let pipe_name = format!(
-            r"\\.\pipe\cssh-rs-test-client-closes-before-pid-{}",
-            std::process::id()
-        );
-        let (_sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(&pipe_name)?;
-        let named_pipe_client = ClientOptions::new().open(&pipe_name)?;
+        let endpoint = unique_pipe_name("ready-window");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
         let clients = make_clients_with_pid(TEST_PID);
-        // Drop the client immediately without sending any PID bytes.
-        drop(named_pipe_client);
+        let clients_probe = Arc::clone(&clients);
+
+        let (_sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
         let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
+            named_pipe_server_routine(server, &mut receiver, clients).await;
         });
-        // Pipe closed before handshake completed - the routine must panic.
-        assert!(future.await.unwrap_err().is_panic());
+
+        let client = connect_client(&endpoint).await;
+        let _acc = client_handshake(&client, TEST_PID).await?;
+
+        send_ctd(
+            &client,
+            &ClientToDaemon::Ready {
+                child_pid: 424242,
+                window: WindowHandle::windows_hwnd(0xBEEF),
+            },
+        )
+        .await?;
+
+        // The routine applies Ready asynchronously; poll until the handle lands.
+        let mut updated = false;
+        for _ in 0..100u32 {
+            let handle = clients_probe
+                .lock()
+                .unwrap()
+                .get_by_pid(TEST_PID)
+                .map(|c| return c.window_handle.0 as usize as u64);
+            if handle == Some(0xBEEF) {
+                updated = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(updated, "Ready did not update the client window handle");
+
+        drop(client);
+        let _ = future.await;
         return Ok(());
     }
 
-    /// Construct a [`Clients`] collection holding a single [`Client`] whose
-    /// `process_id` equals `pid`, returning both the collection and the
-    /// shared [`watch::Sender`] handle so the caller can drive [`ClientState`]
-    /// transitions.
-    fn make_clients_with_pid_and_state(
-        pid: u32,
-    ) -> (Arc<Mutex<Clients>>, watch::Sender<ClientState>) {
-        let state_sender = watch::channel(ClientState::Active).0;
-        let mut clients = Clients::new();
-        clients.push(Client {
-            hostname: format!("test-host-{pid}"),
-            window_handle: HWND(std::ptr::null_mut()),
-            process_handle: HANDLE::default(),
-            process_id: pid,
-            state_sender: state_sender.clone(),
-            highlight_sender: watch::channel(false).0,
-            tile_index: 0,
-        });
-        return (Arc::new(Mutex::new(clients)), state_sender);
-    }
-
-    /// Verifies that when a client's [`ClientState`] is set to
-    /// [`ClientState::Disabled`], the pipe server routine consumes
-    /// broadcast messages but does not forward them through the pipe.
-    /// Only keep-alive packets (and the [`TAG_STATE_CHANGE`] frame
-    /// announcing the transition itself) should arrive on the client
-    /// side.
     #[tokio::test]
-    async fn test_named_pipe_server_routine_disabled() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_named_pipe_server_routine_terminate_delivered_when_disabled(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         const TEST_PID: u32 = 66666;
-        // Use a per-test unique pipe name so parallel test runs don't collide
-        // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-disabled-{}", std::process::id());
-        let (sender, mut receiver) = broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(
-            SERIALIZED_INPUT_RECORD_0_LENGTH,
-        );
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(&pipe_name)?;
-        let named_pipe_client = ClientOptions::new().open(&pipe_name)?;
+        let endpoint = unique_pipe_name("terminate");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
         let (clients, state_sender) = make_clients_with_pid_and_state(TEST_PID);
-        send_pid(&named_pipe_client, TEST_PID).await?;
-        let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
-        });
-
-        // First, verify data flows while enabled. The pipe carries
-        // tagged frames now: keep-alive frames are a single
-        // `TAG_KEEP_ALIVE` byte, input-record frames are
-        // `[TAG_INPUT_RECORD][13-byte payload]`.
-        sender.send([2; SERIALIZED_INPUT_RECORD_0_LENGTH])?;
-        let mut got_data = false;
-        loop {
-            named_pipe_client.readable().await?;
-            let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-            match named_pipe_client.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => match buf[0] {
-                    TAG_KEEP_ALIVE => {
-                        assert_eq!(FRAMED_KEEP_ALIVE_LENGTH, n);
-                    }
-                    TAG_INPUT_RECORD => {
-                        assert_eq!(FRAMED_INPUT_RECORD_LENGTH, n);
-                        assert_eq!([2; SERIALIZED_INPUT_RECORD_0_LENGTH], buf[1..]);
-                        got_data = true;
-                        break;
-                    }
-                    TAG_STATE_CHANGE => {
-                        // Initial state push emitted right after subscribe.
-                        // The default state is `Active`. Drain it and keep
-                        // reading so the assertion still observes the
-                        // input-record frame.
-                        assert_eq!(FRAMED_STATE_CHANGE_LENGTH, n);
-                        assert_eq!(buf[1], ClientState::Active as u8);
-                    }
-                    TAG_HIGHLIGHT => {
-                        // Initial highlight push following the initial
-                        // state push. Drain and keep reading.
-                        assert_eq!(FRAMED_HIGHLIGHT_LENGTH, n);
-                        assert_eq!(buf[1], 0u8);
-                    }
-                    other => panic!("Unexpected tag byte 0x{other:02X}"),
-                },
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        assert!(got_data);
-
-        // Disable the client. The routine emits a `TAG_STATE_CHANGE`
-        // frame as soon as it observes this transition.
-        state_sender.send(ClientState::Disabled).unwrap();
-
-        // Send more data - it must NOT arrive at the client.
-        const SENDS: usize = 5;
-        for _ in 0..SENDS {
-            sender.send([3; SERIALIZED_INPUT_RECORD_0_LENGTH])?;
-        }
-
-        // While disabled, the only frames that may arrive are the
-        // single `TAG_STATE_CHANGE(Disabled)` announcement and any
-        // number of `TAG_KEEP_ALIVE` frames. We require at least
-        // `SENDS` keep-alive frames to confirm the routine keeps
-        // running while suppressed; any `TAG_INPUT_RECORD` would be
-        // a leak of broadcast data and must fail the test.
-        //
-        // The whole loop is bounded by a `tokio::time::timeout` so a
-        // regression that stops keep-alive emission surfaces as a
-        // deterministic assertion instead of a hung test.
-        let read_result: Result<Result<(), Box<dyn std::error::Error>>, _> =
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                let mut received_keep_alive = 0;
-                let mut saw_state_change = false;
-                while received_keep_alive < SENDS || !saw_state_change {
-                    named_pipe_client.readable().await?;
-                    let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-                    match named_pipe_client.try_read(&mut buf) {
-                        Ok(0) => {
-                            return Err(
-                                "named pipe closed before all keep-alive frames arrived".into(),
-                            );
-                        }
-                        Ok(n) => match buf[0] {
-                            TAG_KEEP_ALIVE => {
-                                assert_eq!(
-                                    FRAMED_KEEP_ALIVE_LENGTH, n,
-                                    "Keep-alive frame must be exactly one byte"
-                                );
-                                received_keep_alive += 1;
-                            }
-                            TAG_STATE_CHANGE => {
-                                assert!(!saw_state_change, "Disabled transition was announced more than once");
-                                assert_eq!(
-                                    FRAMED_STATE_CHANGE_LENGTH, n,
-                                    "State-change frame must be exactly two bytes"
-                                );
-                                assert_eq!(
-                                    buf[1],
-                                    ClientState::Disabled as u8,
-                                    "State-change announcement must carry Disabled"
-                                );
-                                saw_state_change = true;
-                            }
-                            TAG_HIGHLIGHT => {
-                                // Steady-state highlight is `false` while the
-                                // submenu is not driving navigation, so a
-                                // highlight frame may arrive once at startup.
-                                assert_eq!(FRAMED_HIGHLIGHT_LENGTH, n);
-                                assert_eq!(buf[1], 0u8);
-                            }
-                            TAG_INPUT_RECORD => panic!(
-                                "Received input-record frame after disabling - broadcast data leaked through"
-                            ),
-                            other => panic!("Unexpected tag byte 0x{other:02X}"),
-                        },
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                        Err(e) => return Err(e.into()),
-                    }
-                }
-                assert!(saw_state_change, "Disabled transition must be announced");
-                return Ok(());
-            })
-            .await;
-        match read_result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                return Err(format!(
-                    "timed out waiting for {SENDS} keep-alive frame(s) after disabling"
-                )
-                .into());
-            }
-        }
-
-        drop(named_pipe_client);
-        future.await?;
-        return Ok(());
-    }
-
-    /// Verifies that when the broadcast receiver falls behind the
-    /// channel's bounded buffer, the pipe server routine handles the
-    /// resulting [`tokio::sync::broadcast::error::RecvError::Lagged`]
-    /// without panicking. This is a regression guard for the previous
-    /// behaviour where any `Lagged` error propagated to the catch-all
-    /// `Err(err)` arm and crashed the routine.
-    ///
-    /// The test deliberately disables the client so the routine
-    /// throttles its consumption rate, then bursts more records than
-    /// the channel capacity through the sender so the next `recv`
-    /// is guaranteed to observe `Lagged`.
-    #[tokio::test]
-    async fn test_named_pipe_server_routine_lagged() -> Result<(), Box<dyn std::error::Error>> {
-        const TEST_PID: u32 = 77777;
-        // Use a per-test unique pipe name so parallel test runs don't collide
-        // on the global PIPE_NAME.
-        let pipe_name = format!(r"\\.\pipe\cssh-rs-test-lagged-{}", std::process::id());
-        // Capacity 2 keeps the buffer small so a modest send burst is
-        // guaranteed to overflow before the routine consumes anything.
-        let (sender, mut receiver) =
-            broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(2);
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(&pipe_name)?;
-        let named_pipe_client = ClientOptions::new().open(&pipe_name)?;
-        let (clients, state_sender) = make_clients_with_pid_and_state(TEST_PID);
-
-        // Disable up front so the routine throttles consumption and
-        // cannot drain the broadcast buffer before we overflow it. Use
-        // `send_replace` because the routine has not yet subscribed to
-        // the watch channel, so a regular `send` would error with no
-        // receivers; `send_replace` updates the stored value either
-        // way and the routine reads it through `borrow_and_update` on
-        // its first iteration.
         state_sender.send_replace(ClientState::Disabled);
 
-        // Overflow the bounded broadcast buffer before the routine
-        // begins pulling from it so the first `try_recv` observes
-        // `Lagged`. 8 sends into a channel of capacity 2 leaves the
-        // receiver lagging by 6 records.
-        for _ in 0..8 {
-            sender.send([4; SERIALIZED_INPUT_RECORD_0_LENGTH])?;
-        }
-
-        send_pid(&named_pipe_client, TEST_PID).await?;
+        let (sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
         let future = tokio::spawn(async move {
-            named_pipe_server_routine(named_pipe_server, &mut receiver, clients).await;
+            named_pipe_server_routine(server, &mut receiver, clients).await;
         });
 
-        // Read at least one keep-alive frame. If the `Lagged` arm
-        // panicked (regression), the routine would never emit any
-        // frame and the timeout would fire.
-        let read_result: Result<Result<(), Box<dyn std::error::Error>>, _> =
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                loop {
-                    named_pipe_client.readable().await?;
-                    let mut buf = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-                    match named_pipe_client.try_read(&mut buf) {
-                        Ok(0) => {
-                            return Err(
-                                "named pipe closed before any keep-alive frame arrived".into(),
-                            );
-                        }
-                        Ok(n) => match buf[0] {
-                            TAG_KEEP_ALIVE => {
-                                assert_eq!(
-                                    FRAMED_KEEP_ALIVE_LENGTH, n,
-                                    "Keep-alive frame must be exactly one byte"
-                                );
-                                return Ok(());
-                            }
-                            TAG_STATE_CHANGE => {
-                                // The initial Disabled transition may surface
-                                // here; drain it and continue reading so the
-                                // test still observes a keep-alive frame.
-                                assert_eq!(
-                                    FRAMED_STATE_CHANGE_LENGTH, n,
-                                    "State-change frame must be exactly two bytes"
-                                );
-                                continue;
-                            }
-                            TAG_HIGHLIGHT => {
-                                // Initial highlight push following the state
-                                // push; drain it and keep waiting for the
-                                // first keep-alive frame.
-                                assert_eq!(
-                                    FRAMED_HIGHLIGHT_LENGTH, n,
-                                    "Highlight frame must be exactly two bytes"
-                                );
-                                continue;
-                            }
-                            TAG_INPUT_RECORD => panic!(
-                                "Received input-record frame while disabled - broadcast data leaked through after Lagged"
-                            ),
-                            other => panic!("Unexpected tag byte 0x{other:02X}"),
-                        },
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                        Err(e) => return Err(e.into()),
-                    }
-                }
-            })
-            .await;
-        match read_result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                return Err(
-                    "timed out waiting for keep-alive frame after Lagged - routine likely panicked"
-                        .into(),
-                );
+        let client = connect_client(&endpoint).await;
+        let mut acc = client_handshake(&client, TEST_PID).await?;
+
+        sender.send(ungated(&DaemonToClient::Terminate {
+            reason: "shutting down".to_string(),
+        }))?;
+
+        let terminate = read_until(&client, &mut acc, |m| {
+            return matches!(m, DaemonToClient::Terminate { .. });
+        })
+        .await;
+        assert_eq!(
+            terminate,
+            DaemonToClient::Terminate {
+                reason: "shutting down".to_string()
             }
+        );
+
+        // The routine returns after delivering an ungated Terminate.
+        drop(client);
+        let _ = future.await;
+        return Ok(());
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "daemon bookkeeping broken")]
+    async fn test_named_pipe_server_routine_unknown_pid_panics() {
+        const REGISTERED_PID: u32 = 77777;
+        const SENT_PID: u32 = 88888;
+        let endpoint = unique_pipe_name("unknown-pid");
+        let server = WindowsControlChannelServer::bind(&endpoint).expect("bind");
+        let clients = make_clients_with_pid(REGISTERED_PID);
+
+        let (_sender, mut receiver) = broadcast::channel::<ClientBroadcast>(16);
+        let future = tokio::spawn(async move {
+            named_pipe_server_routine(server, &mut receiver, clients).await;
+        });
+
+        let client = connect_client(&endpoint).await;
+        send_hello(&client, SENT_PID).await.expect("send hello");
+
+        // The routine panics on the unknown PID; surface it as this test's panic.
+        future.await.expect_err("routine must panic on unknown PID");
+        panic!("Unknown client PID - daemon bookkeeping broken");
+    }
+
+    #[tokio::test]
+    async fn test_named_pipe_server_routine_lagged() -> Result<(), Box<dyn std::error::Error>> {
+        const TEST_PID: u32 = 99999;
+        let endpoint = unique_pipe_name("lagged");
+        let server = WindowsControlChannelServer::bind(&endpoint)?;
+        let (clients, state_sender) = make_clients_with_pid_and_state(TEST_PID);
+        state_sender.send_replace(ClientState::Disabled);
+
+        // A tiny channel so the routine falls behind and reports Lagged.
+        let (sender, mut receiver) = broadcast::channel::<ClientBroadcast>(2);
+        let future = tokio::spawn(async move {
+            named_pipe_server_routine(server, &mut receiver, clients).await;
+        });
+
+        let client = connect_client(&endpoint).await;
+        let mut acc = client_handshake(&client, TEST_PID).await?;
+
+        // Overfill the channel so the receiver lags.
+        for i in 0..16u8 {
+            let _ = sender.send(gated(&DaemonToClient::Input {
+                event: InputEvent::Raw { bytes: vec![i] },
+            }));
         }
 
-        // Closing the client makes the routine's next pipe write fail
-        // and exits the loop cleanly. The join handle resolving
-        // without an error confirms the `Lagged` path did not panic.
-        drop(named_pipe_client);
+        // Despite the Lagged path, the routine survives and keeps sending
+        // keep-alives, and no dropped input leaks through to the disabled client.
+        let keepalive = read_until(&client, &mut acc, |m| {
+            return matches!(m, DaemonToClient::KeepAlive);
+        })
+        .await;
+        assert!(matches!(keepalive, DaemonToClient::KeepAlive));
+
+        drop(client);
         future.await?;
         return Ok(());
     }
