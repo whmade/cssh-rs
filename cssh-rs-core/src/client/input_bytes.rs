@@ -118,7 +118,7 @@ fn function_key_bytes(number: u8) -> Vec<u8> {
     }
 }
 
-fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
+pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
     match virtual_key {
         VK_UP => return Some(KeyCode::Up),
         VK_DOWN => return Some(KeyCode::Down),

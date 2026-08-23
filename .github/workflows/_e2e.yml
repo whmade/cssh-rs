@@ -28,8 +28,7 @@ env:
 
 jobs:
   e2e-run:
-    # Raised from 10 while skipped scenarios exhaust their retries (GitHub #304).
-    timeout-minutes: 20
+    timeout-minutes: 10
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -78,7 +77,6 @@ jobs:
         shell: pwsh
         run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 
-      # No client connects until the daemon speaks v1 too, so skip on failure (GitHub #304).
       - name: Run E2E suite
         shell: pwsh
         run: >-
@@ -86,8 +84,6 @@ jobs:
           --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
           --outputdir e2e-output
           --listener cssh_rs_automation.recording_listener.RecordingListener
-          --settag connect-dependent
-          --skiponfailure connect-dependent
           tests/e2e/suites/
 
       - name: Upload E2E report
