@@ -143,9 +143,12 @@ fn test_palette_tint_leaves_cell_attributes_untouched() {
     let api = DefaultWindowsApi;
     let base = snapshot_console_palette(&api).expect("snapshot palette");
 
-    set_console_palette(
-        &api,
-        &tinted_palette(&base, CONSOLE_CHARACTER_ATTRIBUTES(0x1F)),
+    assert!(
+        set_console_palette(
+            &api,
+            &tinted_palette(&base, CONSOLE_CHARACTER_ATTRIBUTES(0x1F)),
+        ),
+        "applying the tinted palette must succeed"
     );
     assert_eq!(
         screen.read_attributes(0, 7),
