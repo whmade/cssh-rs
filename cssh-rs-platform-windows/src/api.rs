@@ -14,9 +14,10 @@ use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::System::Console::{
     FillConsoleOutputAttribute, GetConsoleProcessList, GetConsoleScreenBufferInfo,
-    GetConsoleWindow, GetStdHandle, ReadConsoleInputW, ReadConsoleOutputAttribute,
-    SetConsoleCtrlHandler, SetConsoleTextAttribute, WriteConsoleOutputAttribute,
-    CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD, CTRL_BREAK_EVENT,
+    GetConsoleScreenBufferInfoEx, GetConsoleWindow, GetStdHandle, ReadConsoleInputW,
+    ReadConsoleOutputAttribute, SetConsoleCtrlHandler, SetConsoleScreenBufferInfoEx,
+    SetConsoleTextAttribute, WriteConsoleOutputAttribute, CONSOLE_CHARACTER_ATTRIBUTES,
+    CONSOLE_SCREEN_BUFFER_INFO, CONSOLE_SCREEN_BUFFER_INFOEX, COORD, CTRL_BREAK_EVENT,
     CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE};
@@ -162,6 +163,31 @@ pub trait WindowsApi: Send + Sync {
         attributes: &[u16],
         coord: COORD,
     ) -> windows::core::Result<u32>;
+
+    /// Reads the extended console screen buffer info, including the 16-entry
+    /// RGB color palette.
+    ///
+    /// # Returns
+    ///
+    /// The [`CONSOLE_SCREEN_BUFFER_INFOEX`] for the output buffer or error.
+    fn get_console_screen_buffer_info_ex(
+        &self,
+    ) -> windows::core::Result<CONSOLE_SCREEN_BUFFER_INFOEX>;
+
+    /// Writes the extended console screen buffer info, including the 16-entry
+    /// RGB color palette.
+    ///
+    /// # Arguments
+    ///
+    /// * `info` - The [`CONSOLE_SCREEN_BUFFER_INFOEX`] to apply.
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure of the operation.
+    fn set_console_screen_buffer_info_ex(
+        &self,
+        info: &CONSOLE_SCREEN_BUFFER_INFOEX,
+    ) -> windows::core::Result<()>;
 
     /// Scrolls console screen buffer.
     ///
@@ -732,6 +758,24 @@ impl WindowsApi for DefaultWindowsApi {
         return Ok(number_written);
     }
 
+    fn get_console_screen_buffer_info_ex(
+        &self,
+    ) -> windows::core::Result<CONSOLE_SCREEN_BUFFER_INFOEX> {
+        let mut info = CONSOLE_SCREEN_BUFFER_INFOEX {
+            cbSize: mem::size_of::<CONSOLE_SCREEN_BUFFER_INFOEX>() as u32,
+            ..Default::default()
+        };
+        unsafe { GetConsoleScreenBufferInfoEx(self.get_stdout_handle()?, &mut info)? };
+        return Ok(info);
+    }
+
+    fn set_console_screen_buffer_info_ex(
+        &self,
+        info: &CONSOLE_SCREEN_BUFFER_INFOEX,
+    ) -> windows::core::Result<()> {
+        return unsafe { SetConsoleScreenBufferInfoEx(self.get_stdout_handle()?, info) };
+    }
+
     fn scroll_console_screen_buffer(
         &self,
         scroll_rect: SMALL_RECT,
@@ -1194,8 +1238,20 @@ pub fn set_console_color(api: &dyn WindowsApi, color: CONSOLE_CHARACTER_ATTRIBUT
     }
 }
 
-/// Snapshots the whole screen buffer's per-cell attributes for a later
-/// [`restore_console_output_attributes`].
+/// The console's captured 16-entry palette plus its default text attribute
+/// (kept so the tint can locate the default text/background entries in
+/// `color_table`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ConsolePaletteSnapshot {
+    /// The 16-entry RGB color table.
+    pub color_table: [COLORREF; 16],
+    /// The default screen text attribute.
+    pub default_attributes: CONSOLE_CHARACTER_ATTRIBUTES,
+}
+
+/// Snapshots the console's 16-entry RGB palette and default text attribute for a
+/// later restore and for locating the default foreground/background entries the
+/// tint recolors.
 ///
 /// # Arguments
 ///
@@ -1203,26 +1259,19 @@ pub fn set_console_color(api: &dyn WindowsApi, color: CONSOLE_CHARACTER_ATTRIBUT
 ///
 /// # Returns
 ///
-/// `Some(attributes)` on success, or `None` if the buffer could not be read
-/// (painting degrades to a no-op rather than aborting the session).
-pub fn snapshot_console_output_attributes(api: &dyn WindowsApi) -> Option<Vec<u16>> {
-    let buffer_info = match api.get_console_screen_buffer_info() {
-        Ok(info) => info,
-        Err(err) => {
-            warn!(
-                "Failed to read console screen buffer info; color snapshot skipped: {}",
-                err
-            );
-            return None;
+/// `Some(snapshot)` on success, or `None` if the buffer info could not be read
+/// (state visuals degrade to a no-op rather than aborting the session).
+pub fn snapshot_console_palette(api: &dyn WindowsApi) -> Option<ConsolePaletteSnapshot> {
+    match api.get_console_screen_buffer_info_ex() {
+        Ok(info) => {
+            return Some(ConsolePaletteSnapshot {
+                color_table: info.ColorTable,
+                default_attributes: info.wAttributes,
+            })
         }
-    };
-    let width: u32 = buffer_info.dwSize.X.try_into().unwrap();
-    let height: u32 = buffer_info.dwSize.Y.try_into().unwrap();
-    match api.read_console_output_attribute(width * height, COORD { X: 0, Y: 0 }) {
-        Ok(attributes) => return Some(attributes),
         Err(err) => {
             warn!(
-                "Failed to snapshot console output attributes; color snapshot skipped: {}",
+                "Failed to read console palette; state visuals will be skipped: {}",
                 err
             );
             return None;
@@ -1230,27 +1279,74 @@ pub fn snapshot_console_output_attributes(api: &dyn WindowsApi) -> Option<Vec<u1
     }
 }
 
-/// Writes a per-cell attribute snapshot back from `(0,0)` and resets the default
-/// text attribute to `default`, undoing a [`set_console_color`] tint without
-/// flattening the captured per-cell colors.
+/// Derive the tinted palette for a state color: the captured palette with the
+/// console's default-foreground and default-background entries remapped to the
+/// colors the legacy `tint` attribute's foreground and background nibbles select.
+/// Recoloring palette entries (never the per-cell attributes) leaves VT/24-bit
+/// cells - which store their color outside the palette - untouched, so the full
+/// configured color applies without hiding the child's own colored output.
 ///
 /// # Arguments
 ///
-/// * `api`        - The Windows API implementation to use.
-/// * `default`    - The default text attribute to restore for new output.
-/// * `attributes` - The per-cell attribute snapshot to write back from `(0,0)`.
-pub fn restore_console_output_attributes(
-    api: &dyn WindowsApi,
-    default: CONSOLE_CHARACTER_ATTRIBUTES,
-    attributes: &[u16],
-) {
-    api.set_console_text_attribute(default).unwrap();
-    api.write_console_output_attribute(attributes, COORD { X: 0, Y: 0 })
-        .unwrap();
-    // Force a WM_PAINT for the stale sub-cell edge slivers, as in set_console_color.
-    if let Err(err) = api.invalidate_console_window() {
-        warn!("Failed to invalidate console window after restore: {}", err);
+/// * `snapshot` - The pristine palette captured by [`snapshot_console_palette`].
+/// * `tint`     - Legacy attribute whose foreground and background nibbles select
+///                the tint's text and window colors.
+///
+/// # Returns
+///
+/// The palette to install for the tinted look.
+pub fn tinted_palette(
+    snapshot: &ConsolePaletteSnapshot,
+    tint: CONSOLE_CHARACTER_ATTRIBUTES,
+) -> [COLORREF; 16] {
+    let base = &snapshot.color_table;
+    let default = snapshot.default_attributes.0;
+    let default_foreground_index = (default & 0x0F) as usize;
+    let default_background_index = ((default >> 4) & 0x0F) as usize;
+    let requested_foreground = base[(tint.0 & 0x0F) as usize];
+    let requested_background = base[((tint.0 >> 4) & 0x0F) as usize];
+    let mut palette = *base;
+    palette[default_foreground_index] = requested_foreground;
+    palette[default_background_index] = requested_background;
+    return palette;
+}
+
+/// Installs `palette` as the console's 16-entry color table, leaving the rest of
+/// the buffer info as it currently is, and forces a repaint.
+///
+/// # Arguments
+///
+/// * `api`     - The Windows API implementation to use.
+/// * `palette` - The 16 RGB entries to install.
+///
+/// # Returns
+///
+/// `true` if the palette was written, `false` if reading or writing the buffer
+/// info failed so the caller can keep its snapshot and retry the paint.
+pub fn set_console_palette(api: &dyn WindowsApi, palette: &[COLORREF; 16]) -> bool {
+    let mut info = match api.get_console_screen_buffer_info_ex() {
+        Ok(info) => info,
+        Err(err) => {
+            warn!("Failed to read console palette before recolor: {}", err);
+            return false;
+        }
+    };
+    info.ColorTable = *palette;
+    // SetConsoleScreenBufferInfoEx shrinks the window by one cell per call; widen srWindow to keep it stable.
+    // <https://stackoverflow.com/questions/35901572>
+    info.srWindow.Right += 1;
+    info.srWindow.Bottom += 1;
+    if let Err(err) = api.set_console_screen_buffer_info_ex(&info) {
+        warn!("Failed to apply console palette: {}", err);
+        return false;
     }
+    if let Err(err) = api.invalidate_console_window() {
+        warn!(
+            "Failed to invalidate console window after palette change: {}",
+            err
+        );
+    }
+    return true;
 }
 
 /// Empties the console screen output buffer of the current console window using the provided API.

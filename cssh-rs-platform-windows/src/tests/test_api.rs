@@ -4,14 +4,14 @@
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 
 use crate::api::{
-    clear_screen, is_windows_10, read_console_input, read_keyboard_input,
-    restore_console_output_attributes, set_console_border_color, set_console_color,
-    snapshot_console_output_attributes, utf16_buffer_to_string, MockWindowsApi, KEY_EVENT,
+    clear_screen, is_windows_10, read_console_input, read_keyboard_input, set_console_border_color,
+    set_console_color, set_console_palette, snapshot_console_palette, tinted_palette,
+    utf16_buffer_to_string, ConsolePaletteSnapshot, MockWindowsApi, KEY_EVENT,
 };
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, COORD, INPUT_RECORD, INPUT_RECORD_0,
-    MOUSE_EVENT,
+    CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFO, CONSOLE_SCREEN_BUFFER_INFOEX, COORD,
+    INPUT_RECORD, INPUT_RECORD_0, MOUSE_EVENT,
 };
 
 /// Tests Windows version detection.
@@ -268,120 +268,138 @@ mod console_color_test {
     }
 }
 
-/// Test module for the per-cell attribute snapshot/restore helpers.
-mod attribute_snapshot_test {
+/// Test module for the non-destructive palette snapshot/tint/restore helpers.
+mod console_palette_test {
     use super::*;
 
-    /// Snapshotting reads `width * height` cells from `(0,0)` and returns them.
+    /// Build a `CONSOLE_SCREEN_BUFFER_INFOEX` carrying `palette`.
+    fn info_with_palette(palette: [COLORREF; 16]) -> CONSOLE_SCREEN_BUFFER_INFOEX {
+        return CONSOLE_SCREEN_BUFFER_INFOEX {
+            ColorTable: palette,
+            ..Default::default()
+        };
+    }
+
+    /// A palette with 16 distinct entries so remaps are observable.
+    fn sample_palette() -> [COLORREF; 16] {
+        let mut palette = [COLORREF(0); 16];
+        for (index, entry) in palette.iter_mut().enumerate() {
+            *entry = COLORREF(0x0000_1000 * (index as u32 + 1));
+        }
+        return palette;
+    }
+
+    /// Build a snapshot from a color table and default attribute.
+    fn snapshot_of(color_table: [COLORREF; 16], attributes: u16) -> ConsolePaletteSnapshot {
+        return ConsolePaletteSnapshot {
+            color_table,
+            default_attributes: CONSOLE_CHARACTER_ATTRIBUTES(attributes),
+        };
+    }
+
+    /// Snapshotting returns the console's color table and default attribute.
     #[test]
-    fn test_snapshot_console_output_attributes() {
-        let mut mock_api = MockWindowsApi::new();
-
-        let mut buffer_info = CONSOLE_SCREEN_BUFFER_INFO::default();
-        buffer_info.dwSize.X = 80;
-        buffer_info.dwSize.Y = 25;
-
-        mock_api
-            .expect_get_console_screen_buffer_info()
+    fn test_snapshot_console_palette_returns_table_and_attributes() {
+        let mut mock = MockWindowsApi::new();
+        let palette = sample_palette();
+        mock.expect_get_console_screen_buffer_info_ex()
             .times(1)
-            .return_const(Ok(buffer_info));
-        mock_api
-            .expect_read_console_output_attribute()
-            .with(
-                mockall::predicate::eq(80u32 * 25u32),
-                mockall::predicate::eq(COORD { X: 0, Y: 0 }),
-            )
-            .times(1)
-            .returning(|length, _| return Ok(vec![0x1F; length as usize]));
+            .returning(move || {
+                return Ok(CONSOLE_SCREEN_BUFFER_INFOEX {
+                    ColorTable: palette,
+                    wAttributes: CONSOLE_CHARACTER_ATTRIBUTES(0x08),
+                    ..Default::default()
+                });
+            });
 
-        let snapshot = snapshot_console_output_attributes(&mock_api);
-
-        assert_eq!(snapshot, Some(vec![0x1F; 80 * 25]));
+        assert_eq!(
+            snapshot_console_palette(&mock),
+            Some(snapshot_of(palette, 0x08))
+        );
     }
 
     /// A buffer-info failure degrades the snapshot to `None` rather than panicking.
     #[test]
-    fn test_snapshot_console_output_attributes_buffer_info_error_returns_none() {
-        let mut mock_api = MockWindowsApi::new();
-        mock_api
-            .expect_get_console_screen_buffer_info()
+    fn test_snapshot_console_palette_error_returns_none() {
+        let mut mock = MockWindowsApi::new();
+        mock.expect_get_console_screen_buffer_info_ex()
             .times(1)
             .returning(|| return Err(windows::core::Error::from_thread()));
 
-        assert_eq!(snapshot_console_output_attributes(&mock_api), None);
+        assert_eq!(snapshot_console_palette(&mock), None);
     }
 
-    /// A read failure degrades the snapshot to `None` rather than panicking.
+    /// Two default themes, so the remap cannot be hardcoded to a fixed slot.
     #[test]
-    fn test_snapshot_console_output_attributes_read_error_returns_none() {
-        let mut mock_api = MockWindowsApi::new();
-
-        let mut buffer_info = CONSOLE_SCREEN_BUFFER_INFO::default();
-        buffer_info.dwSize.X = 80;
-        buffer_info.dwSize.Y = 25;
-
-        mock_api
-            .expect_get_console_screen_buffer_info()
-            .times(1)
-            .return_const(Ok(buffer_info));
-        mock_api
-            .expect_read_console_output_attribute()
-            .times(1)
-            .returning(|_, _| return Err(windows::core::Error::from_thread()));
-
-        assert_eq!(snapshot_console_output_attributes(&mock_api), None);
+    fn test_tinted_palette_remaps_default_entries_by_nibble() {
+        let table = sample_palette();
+        let test_cases = [
+            ("dark, default 0/8", 0x08u16, 0x1Fu16, 8, 15, 0, 1),
+            ("light, default 1/7", 0x71u16, 0x40u16, 1, 0, 7, 4),
+        ];
+        for (description, default_attribute, tint, fg_dst, fg_src, bg_dst, bg_src) in test_cases {
+            let tinted = tinted_palette(
+                &snapshot_of(table, default_attribute),
+                CONSOLE_CHARACTER_ATTRIBUTES(tint),
+            );
+            assert_eq!(
+                tinted[fg_dst], table[fg_src],
+                "{description}: default text takes the foreground nibble color"
+            );
+            assert_eq!(
+                tinted[bg_dst], table[bg_src],
+                "{description}: default background takes the background nibble color"
+            );
+            for (index, entry) in tinted.iter().enumerate() {
+                if index == fg_dst || index == bg_dst {
+                    continue;
+                }
+                assert_eq!(
+                    *entry, table[index],
+                    "{description}: untouched entry {index} changed"
+                );
+            }
+        }
     }
 
-    /// Restoring resets the default attribute, writes the snapshot back from
-    /// `(0,0)`, and forces the post-write repaint.
     #[test]
-    fn test_restore_console_output_attributes() {
-        let mut mock_api = MockWindowsApi::new();
-        let default = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-        let attributes = vec![0x1F_u16; 3];
-
-        mock_api
-            .expect_set_console_text_attribute()
-            .with(mockall::predicate::eq(default))
+    fn test_set_console_palette_writes_color_table_widens_window_and_repaints() {
+        let base = sample_palette();
+        let mut current = base;
+        current[0] = COLORREF(0x00AB_CDEF);
+        let mut info = info_with_palette(current);
+        info.srWindow.Right = 79;
+        info.srWindow.Bottom = 24;
+        let mut mock = MockWindowsApi::new();
+        mock.expect_get_console_screen_buffer_info_ex()
             .times(1)
-            .returning(|_| return Ok(()));
-        mock_api
-            .expect_write_console_output_attribute()
-            .with(
-                mockall::predicate::eq(vec![0x1F_u16; 3]),
-                mockall::predicate::eq(COORD { X: 0, Y: 0 }),
-            )
+            .returning(move || return Ok(info));
+        mock.expect_set_console_screen_buffer_info_ex()
             .times(1)
-            .returning(|attrs, _| return Ok(attrs.len() as u32));
-        mock_api
-            .expect_invalidate_console_window()
+            .returning(move |info| {
+                assert_eq!(info.ColorTable, base);
+                assert_eq!(info.srWindow.Right, 80);
+                assert_eq!(info.srWindow.Bottom, 25);
+                return Ok(());
+            });
+        mock.expect_invalidate_console_window()
             .times(1)
             .returning(|| return Ok(()));
 
-        restore_console_output_attributes(&mock_api, default, &attributes);
+        set_console_palette(&mock, &base);
     }
 
-    /// A failing invalidate is logged and does not propagate - a stale visual
-    /// is recoverable and must not kill the SSH session.
+    /// A read failure before recolor is swallowed: no set call is attempted.
     #[test]
-    fn test_restore_console_output_attributes_swallows_invalidate_error() {
-        let mut mock_api = MockWindowsApi::new();
-        let default = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-
-        mock_api
-            .expect_set_console_text_attribute()
-            .times(1)
-            .returning(|_| return Ok(()));
-        mock_api
-            .expect_write_console_output_attribute()
-            .times(1)
-            .returning(|attrs, _| return Ok(attrs.len() as u32));
-        mock_api
-            .expect_invalidate_console_window()
+    fn test_set_console_palette_read_failure_skips_set() {
+        let base = sample_palette();
+        let mut mock = MockWindowsApi::new();
+        mock.expect_get_console_screen_buffer_info_ex()
             .times(1)
             .returning(|| return Err(windows::core::Error::from_thread()));
+        // No expect_set_console_screen_buffer_info_ex: the mock panics if called.
 
-        restore_console_output_attributes(&mock_api, default, &[0x1F, 0x1F]);
+        set_console_palette(&mock, &base);
     }
 }
 
