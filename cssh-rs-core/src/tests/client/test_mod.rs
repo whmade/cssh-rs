@@ -16,13 +16,14 @@ use crate::client::{
     ChildProcess, ConsolePaint, ReadWriteResult,
 };
 use crate::utils::config::ClientConfig;
-use crate::utils::windows::MockWindowsApi;
+use crate::utils::windows::{ConsolePaletteSnapshot, MockWindowsApi};
 use cssh_rs_protocol::serialization::{
     serialize_client_state, serialize_highlight, serialize_input_record_0,
 };
 use cssh_rs_protocol::{ClientState, TAG_HIGHLIGHT, TAG_INPUT_RECORD, TAG_STATE_CHANGE};
 use tokio::sync::watch;
-use windows::Win32::System::Console::CONSOLE_CHARACTER_ATTRIBUTES;
+use windows::Win32::Foundation::COLORREF;
+use windows::Win32::System::Console::{CONSOLE_CHARACTER_ATTRIBUTES, CONSOLE_SCREEN_BUFFER_INFOEX};
 
 // Test constants - consistent dummy values used throughout tests
 const TEST_USERNAME: &str = "testuser";
@@ -914,415 +915,227 @@ async fn test_read_write_loop_dispatches_highlight() -> Result<(), Box<dyn std::
 }
 
 #[test]
-fn test_get_effective_color_active_unhighlighted_returns_original() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
+fn test_get_effective_color_covers_state_and_highlight_matrix() {
     let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
     let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    let result = get_effective_color(
-        ClientState::Active,
-        false,
-        Some(original),
-        disabled,
-        highlighted,
-    );
-    assert_eq!(result, Some(ConsolePaint::Restore));
+    let test_cases = [
+        (
+            "active unhighlighted",
+            ClientState::Active,
+            false,
+            ConsolePaint::Restore,
+        ),
+        (
+            "disabled unhighlighted",
+            ClientState::Disabled,
+            false,
+            ConsolePaint::Tint(disabled),
+        ),
+        (
+            "highlighted active",
+            ClientState::Active,
+            true,
+            ConsolePaint::Tint(highlighted),
+        ),
+        (
+            "highlighted disabled",
+            ClientState::Disabled,
+            true,
+            ConsolePaint::Tint(highlighted),
+        ),
+    ];
+    for (description, state, is_highlighted, expected) in test_cases {
+        assert_eq!(
+            get_effective_color(state, is_highlighted, disabled, highlighted),
+            expected,
+            "{description}"
+        );
+    }
 }
 
 #[test]
-fn test_get_effective_color_disabled_unhighlighted_returns_disabled() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
+fn test_get_flash_color_covers_state_matrix() {
     let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    let result = get_effective_color(
-        ClientState::Disabled,
-        false,
-        Some(original),
-        disabled,
-        highlighted,
-    );
-    assert_eq!(result, Some(ConsolePaint::Tint(disabled)));
+    let test_cases = [
+        ("active", ClientState::Active, ConsolePaint::Restore),
+        (
+            "disabled",
+            ClientState::Disabled,
+            ConsolePaint::Tint(disabled),
+        ),
+    ];
+    for (description, state, expected) in test_cases {
+        assert_eq!(get_flash_color(state, disabled), expected, "{description}");
+    }
 }
 
-#[test]
-fn test_get_effective_color_highlighted_active_returns_highlighted() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    let result = get_effective_color(
-        ClientState::Active,
-        true,
-        Some(original),
-        disabled,
-        highlighted,
-    );
-    assert_eq!(result, Some(ConsolePaint::Tint(highlighted)));
+/// A palette with 16 distinct entries so remaps are observable.
+fn sample_palette() -> [COLORREF; 16] {
+    return core::array::from_fn(|index| return COLORREF(0x0000_1000 * (index as u32 + 1)));
 }
 
-#[test]
-fn test_get_effective_color_highlighted_disabled_returns_highlighted() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    // Highlight wins over disabled in the steady state.
-    let result = get_effective_color(
-        ClientState::Disabled,
-        true,
-        Some(original),
-        disabled,
-        highlighted,
-    );
-    assert_eq!(result, Some(ConsolePaint::Tint(highlighted)));
-}
-
-#[test]
-fn test_get_effective_color_active_unhighlighted_no_original_returns_none() {
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    // Missing original color = startup capture failed = degrade gracefully.
-    let result = get_effective_color(ClientState::Active, false, None, disabled, highlighted);
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_get_flash_color_active_returns_original() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let result = get_flash_color(ClientState::Active, Some(original), disabled);
-    assert_eq!(result, Some(ConsolePaint::Restore));
-}
-
-#[test]
-fn test_get_flash_color_disabled_returns_disabled() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let result = get_flash_color(ClientState::Disabled, Some(original), disabled);
-    assert_eq!(result, Some(ConsolePaint::Tint(disabled)));
-}
-
-#[test]
-fn test_get_flash_color_active_no_original_returns_none() {
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let result = get_flash_color(ClientState::Active, None, disabled);
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_get_effective_color_highlighted_no_original_returns_none() {
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    // Without a pristine original to revert to, even the highlight
-    // overlay must be suppressed - otherwise the window stays stuck
-    // in the highlight color when the user leaves the submenu.
-    let result = get_effective_color(ClientState::Active, true, None, disabled, highlighted);
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_get_effective_color_disabled_no_original_returns_none() {
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
-    // Same degrade-gracefully rule for the disabled palette.
-    let result = get_effective_color(ClientState::Disabled, false, None, disabled, highlighted);
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_get_flash_color_disabled_no_original_returns_none() {
-    let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x87);
-    let result = get_flash_color(ClientState::Disabled, None, disabled);
-    assert!(result.is_none());
-}
-
-/// Adds the expectations for one full `set_console_color` fill (the tint path)
-/// to `mock`: set the default attribute, read the buffer size, fill it, and
-/// invalidate. Each closure is registered `times(1)`.
-fn expect_one_fill(mock: &mut MockWindowsApi) {
-    use windows::Win32::System::Console::{CONSOLE_SCREEN_BUFFER_INFO, COORD};
-    let buffer_info = CONSOLE_SCREEN_BUFFER_INFO {
-        dwSize: COORD { X: 80, Y: 25 },
+/// Build a `CONSOLE_SCREEN_BUFFER_INFOEX` carrying `palette`.
+fn palette_info(palette: [COLORREF; 16]) -> CONSOLE_SCREEN_BUFFER_INFOEX {
+    return CONSOLE_SCREEN_BUFFER_INFOEX {
+        ColorTable: palette,
         ..Default::default()
     };
-    mock.expect_set_console_text_attribute()
-        .times(1)
+}
+
+/// Build the snapshot `snapshot_console_palette` yields for `palette_info`
+/// (default attribute `0`, matching the info builder above).
+fn palette_snapshot(palette: [COLORREF; 16]) -> ConsolePaletteSnapshot {
+    return ConsolePaletteSnapshot {
+        color_table: palette,
+        default_attributes: CONSOLE_CHARACTER_ATTRIBUTES(0),
+    };
+}
+
+/// Expect `reads` palette reads (all returning `palette`) and `writes` palette
+/// writes (all succeeding).
+fn expect_palette_ops(
+    mock: &mut MockWindowsApi,
+    palette: [COLORREF; 16],
+    reads: usize,
+    writes: usize,
+) {
+    mock.expect_get_console_screen_buffer_info_ex()
+        .times(reads)
+        .returning(move || return Ok(palette_info(palette)));
+    mock.expect_set_console_screen_buffer_info_ex()
+        .times(writes)
         .returning(|_| return Ok(()));
-    mock.expect_get_console_screen_buffer_info()
-        .times(1)
-        .return_const(Ok(buffer_info));
-    mock.expect_fill_console_output_attribute()
-        .times(1)
-        .returning(|_, _, _| return Ok(80 * 25));
+    // Each palette write forces a repaint so the recolor shows immediately.
     mock.expect_invalidate_console_window()
-        .times(1)
+        .times(writes)
         .returning(|| return Ok(()));
 }
 
 #[test]
-fn test_paint_console_color_tint_snapshots_then_fills() {
-    use windows::Win32::System::Console::{CONSOLE_SCREEN_BUFFER_INFO, COORD};
-    // First tint after a restore: capture the real per-cell colors (an extra
-    // buffer-info read + attribute read), then fill with the tint color.
+fn test_paint_console_color_tint_applies_tinted_palette() {
+    // A tint from the restored state installs the tinted palette (one read + one
+    // write inside `set_console_palette`).
+    let base = palette_snapshot(sample_palette());
     let mut mock_api = MockWindowsApi::new();
-    let buffer_info = CONSOLE_SCREEN_BUFFER_INFO {
-        dwSize: COORD { X: 80, Y: 25 },
-        ..Default::default()
-    };
-    mock_api
-        .expect_set_console_text_attribute()
-        .times(1)
-        .returning(|_| return Ok(()));
-    mock_api
-        .expect_get_console_screen_buffer_info()
-        .times(2)
-        .returning(move || return Ok(buffer_info));
-    mock_api
-        .expect_read_console_output_attribute()
-        .times(1)
-        .returning(|length, _| return Ok(vec![0x07; length as usize]));
-    mock_api
-        .expect_fill_console_output_attribute()
-        .times(1)
-        .returning(|_, _, _| return Ok(80 * 25));
-    mock_api
-        .expect_invalidate_console_window()
-        .times(1)
-        .returning(|| return Ok(()));
+    expect_palette_ops(&mut mock_api, base.color_table, 1, 1);
 
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
     let target = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F));
-    let mut snapshot: Option<Vec<u16>> = None;
-    let mut last: Option<ConsolePaint> = None;
+    let mut last: Option<ConsolePaint> = Some(ConsolePaint::Restore);
 
-    paint_console_color(&mock_api, Some(target), original, &mut snapshot, &mut last);
+    paint_console_color(&mock_api, target, Some(&base), &mut last);
 
     assert_eq!(last, Some(target));
-    assert_eq!(snapshot, Some(vec![0x07; 80 * 25]));
 }
 
 #[test]
-fn test_paint_console_color_tint_keeps_existing_snapshot() {
-    // A second, different tint while a snapshot already exists must NOT
-    // re-snapshot (that would capture the tint colors and lose the real
-    // ones) - only fill.
+fn test_paint_console_color_tint_to_tint_applies_new_color() {
+    // A different tint replaces the current one, installing the new tinted
+    // palette from the same pristine base.
+    let base = palette_snapshot(sample_palette());
     let mut mock_api = MockWindowsApi::new();
-    expect_one_fill(&mut mock_api);
+    expect_palette_ops(&mut mock_api, base.color_table, 1, 1);
 
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let saved = vec![0x07_u16; 4];
-    let mut snapshot: Option<Vec<u16>> = Some(saved.clone());
     let mut last: Option<ConsolePaint> =
         Some(ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x8F)));
     let target = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F));
 
-    paint_console_color(&mock_api, Some(target), original, &mut snapshot, &mut last);
+    paint_console_color(&mock_api, target, Some(&base), &mut last);
 
     assert_eq!(last, Some(target));
-    assert_eq!(snapshot, Some(saved));
 }
 
 #[test]
-fn test_paint_console_color_failed_capture_then_tint_does_not_snapshot_tint() {
-    // Regression for GH #279: a failed first capture must not be retried on the
-    // next tint (the buffer is already flattened), so restore takes the
-    // `original` fallback and never writes the tint back.
-    use windows::Win32::System::Console::{CONSOLE_SCREEN_BUFFER_INFO, COORD};
-    let buffer_info = CONSOLE_SCREEN_BUFFER_INFO {
-        dwSize: COORD { X: 80, Y: 25 },
-        ..Default::default()
-    };
-    let mut mock_api = MockWindowsApi::new();
-    mock_api
-        .expect_get_console_screen_buffer_info()
-        .times(4)
-        .returning(move || return Ok(buffer_info));
-    mock_api
-        .expect_read_console_output_attribute()
-        .times(1)
-        .returning(|_, _| return Err(windows::core::Error::from_thread()));
-    mock_api
-        .expect_set_console_text_attribute()
-        .times(3)
-        .returning(|_| return Ok(()));
-    mock_api
-        .expect_fill_console_output_attribute()
-        .times(3)
-        .returning(|_, _, _| return Ok(80 * 25));
-    mock_api
-        .expect_invalidate_console_window()
-        .times(3)
-        .returning(|| return Ok(()));
+fn test_paint_console_color_no_base_is_noop() {
+    // With no captured base (the palette was unreadable at startup) painting is
+    // suppressed and `last` is left unchanged. No mock calls.
+    let mock_api = MockWindowsApi::new();
+    let target = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F));
+    let mut last: Option<ConsolePaint> = Some(ConsolePaint::Restore);
 
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let mut snapshot: Option<Vec<u16>> = None;
-    let mut last: Option<ConsolePaint> = None;
-
-    let disabled = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x8F));
-    let highlighted = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F));
-    paint_console_color(
-        &mock_api,
-        Some(disabled),
-        original,
-        &mut snapshot,
-        &mut last,
-    );
-    assert_eq!(snapshot, None);
-    paint_console_color(
-        &mock_api,
-        Some(highlighted),
-        original,
-        &mut snapshot,
-        &mut last,
-    );
-    assert_eq!(snapshot, None);
-    paint_console_color(
-        &mock_api,
-        Some(ConsolePaint::Restore),
-        original,
-        &mut snapshot,
-        &mut last,
-    );
+    paint_console_color(&mock_api, target, None, &mut last);
 
     assert_eq!(last, Some(ConsolePaint::Restore));
-    assert_eq!(snapshot, None);
 }
 
 #[test]
-fn test_paint_console_color_restore_writes_snapshot_back() {
-    // Returning to the enabled look writes the saved attributes back and
-    // consumes the snapshot, instead of filling with a single color.
+fn test_paint_console_color_write_failure_keeps_last_for_retry() {
+    // If the palette write fails, `last` must be left as it was so the next
+    // transition retries, rather than recording a paint that never reached the
+    // screen (which would strand the window in the tint).
+    let base = palette_snapshot(sample_palette());
     let mut mock_api = MockWindowsApi::new();
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
     mock_api
-        .expect_set_console_text_attribute()
-        .with(mockall::predicate::eq(original))
+        .expect_get_console_screen_buffer_info_ex()
         .times(1)
-        .returning(|_| return Ok(()));
+        .returning(move || return Ok(palette_info(base.color_table)));
     mock_api
-        .expect_write_console_output_attribute()
+        .expect_set_console_screen_buffer_info_ex()
         .times(1)
-        .returning(|attrs, _| return Ok(attrs.len() as u32));
-    mock_api
-        .expect_invalidate_console_window()
-        .times(1)
-        .returning(|| return Ok(()));
+        .returning(|_| return Err(windows::core::Error::from_thread()));
+    // No invalidate: a failed write must not reach the repaint.
 
-    let mut snapshot: Option<Vec<u16>> = Some(vec![0x1F_u16; 4]);
+    let tinted = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F));
+    let mut last: Option<ConsolePaint> = Some(tinted);
+
+    paint_console_color(&mock_api, ConsolePaint::Restore, Some(&base), &mut last);
+
+    assert_eq!(last, Some(tinted));
+}
+
+#[test]
+fn test_paint_console_color_restore_writes_palette_back() {
+    // Returning to the enabled look writes the pristine base palette back.
+    let base = palette_snapshot(sample_palette());
+    let mut mock_api = MockWindowsApi::new();
+    expect_palette_ops(&mut mock_api, base.color_table, 1, 1);
+
     let mut last: Option<ConsolePaint> =
         Some(ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F)));
 
-    paint_console_color(
-        &mock_api,
-        Some(ConsolePaint::Restore),
-        original,
-        &mut snapshot,
-        &mut last,
-    );
+    paint_console_color(&mock_api, ConsolePaint::Restore, Some(&base), &mut last);
 
     assert_eq!(last, Some(ConsolePaint::Restore));
-    assert_eq!(snapshot, None);
 }
 
 #[test]
-fn test_paint_console_color_restore_fills_original_when_snapshot_missing() {
-    // A tint whose snapshot read failed leaves `snapshot == None` but
-    // `last == Some(Tint(..))`. The restore must then fill `original` so the
-    // window does not stay stuck in the tint color.
-    let mut mock_api = MockWindowsApi::new();
-    expect_one_fill(&mut mock_api);
-
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let mut snapshot: Option<Vec<u16>> = None;
-    let mut last: Option<ConsolePaint> =
-        Some(ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x8F)));
-
-    paint_console_color(
-        &mock_api,
-        Some(ConsolePaint::Restore),
-        original,
-        &mut snapshot,
-        &mut last,
-    );
-
-    assert_eq!(last, Some(ConsolePaint::Restore));
-    assert_eq!(snapshot, None);
-}
-
-#[test]
-fn test_paint_console_color_restore_is_noop_without_snapshot() {
-    // Initial Active paint at startup: no snapshot to restore, so nothing is
-    // touched (the console already shows its real colors). No mock calls.
+fn test_paint_console_color_restore_is_noop_when_not_tinted() {
+    // A restore while already restored (the client never tinted) is skipped by
+    // the equality guard, so the pristine palette is not needlessly rewritten.
+    // No mock calls.
+    let base = palette_snapshot(sample_palette());
     let mock_api = MockWindowsApi::new();
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let mut snapshot: Option<Vec<u16>> = None;
-    let mut last: Option<ConsolePaint> = None;
+    let mut last: Option<ConsolePaint> = Some(ConsolePaint::Restore);
 
-    paint_console_color(
-        &mock_api,
-        Some(ConsolePaint::Restore),
-        original,
-        &mut snapshot,
-        &mut last,
-    );
+    paint_console_color(&mock_api, ConsolePaint::Restore, Some(&base), &mut last);
 
     assert_eq!(last, Some(ConsolePaint::Restore));
-    assert_eq!(snapshot, None);
 }
 
 #[test]
 fn test_paint_console_color_skips_when_target_matches_last() {
     // No mock expectations: an unchanged intent must not touch the console.
     // `MockWindowsApi` would panic on any unexpected call.
+    let base = palette_snapshot(sample_palette());
     let mock_api = MockWindowsApi::new();
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
     let same = ConsolePaint::Tint(CONSOLE_CHARACTER_ATTRIBUTES(0x1F));
-    let mut snapshot: Option<Vec<u16>> = Some(vec![0x07; 4]);
     let mut last: Option<ConsolePaint> = Some(same);
 
-    paint_console_color(&mock_api, Some(same), original, &mut snapshot, &mut last);
+    paint_console_color(&mock_api, same, Some(&base), &mut last);
 
     assert_eq!(last, Some(same));
 }
 
-#[test]
-fn test_paint_console_color_skips_when_target_is_none() {
-    // `None` target means "leave the console untouched" - no mock calls.
-    let mock_api = MockWindowsApi::new();
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
-    let mut snapshot: Option<Vec<u16>> = None;
-    let mut last: Option<ConsolePaint> = Some(ConsolePaint::Restore);
-
-    paint_console_color(&mock_api, None, original, &mut snapshot, &mut last);
-
-    assert_eq!(last, Some(ConsolePaint::Restore));
-}
-
-/// Adds the expectations for one snapshot read (buffer info + attribute read)
-/// followed by one fill, i.e. a tint taken from a fresh (no-snapshot) state.
-fn expect_snapshot_then_fill(mock: &mut MockWindowsApi) {
-    use windows::Win32::System::Console::{CONSOLE_SCREEN_BUFFER_INFO, COORD};
-    let buffer_info = CONSOLE_SCREEN_BUFFER_INFO {
-        dwSize: COORD { X: 80, Y: 25 },
-        ..Default::default()
-    };
-    // Each tint reads the buffer size twice: once for the snapshot, once for
-    // the fill. Two tints -> 4 reads.
-    mock.expect_get_console_screen_buffer_info()
-        .times(4)
-        .returning(move || return Ok(buffer_info));
-    mock.expect_read_console_output_attribute()
-        .times(2)
-        .returning(|length, _| return Ok(vec![0x07; length as usize]));
-    mock.expect_fill_console_output_attribute()
-        .times(2)
-        .returning(|_, _, _| return Ok(80 * 25));
-    // set_console_text_attribute: 2 fills + 1 restore.
-    mock.expect_set_console_text_attribute()
+/// Adds the palette-op expectations for the flash sequence a highlighted client
+/// runs: an initial tint, a flash restore, and a re-tint. Each of the 3 paints
+/// reads then writes the buffer info inside `set_console_palette`.
+fn expect_flash_palette_ops(mock: &mut MockWindowsApi) {
+    let base = sample_palette();
+    mock.expect_get_console_screen_buffer_info_ex()
+        .times(3)
+        .returning(move || return Ok(palette_info(base)));
+    mock.expect_set_console_screen_buffer_info_ex()
         .times(3)
         .returning(|_| return Ok(()));
-    // write for the flash restore.
-    mock.expect_write_console_output_attribute()
-        .times(1)
-        .returning(|attrs, _| return Ok(attrs.len() as u32));
-    // invalidate: 2 fills + 1 restore.
     mock.expect_invalidate_console_window()
         .times(3)
         .returning(|| return Ok(()));
@@ -1332,20 +1145,18 @@ fn expect_snapshot_then_fill(mock: &mut MockWindowsApi) {
 /// submenu actions: pressing `[e]` on an already-Active highlighted
 /// client (or `[d]` on already-Disabled) must still flash the
 /// underlying state color, even though `ClientState` did not
-/// actually change. With the snapshot/restore model the Active flash
-/// restores the saved colors rather than filling.
+/// actually change. The Active flash restores the saved palette.
 #[tokio::test]
 async fn test_visuals_flash_on_same_value_state_push_while_highlighted() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
     let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x8F);
     let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
 
     // Paint sequence:
-    // 1) initial steady-state -> Tint(highlighted): snapshot + fill.
-    // 2) flash after same-Active push -> Restore: write snapshot back.
-    // 3) flash deadline elapses -> Tint(highlighted) again: snapshot + fill.
+    // 1) initial steady-state -> Tint(highlighted): apply.
+    // 2) flash after same-Active push -> Restore: write the base palette back.
+    // 3) flash deadline elapses -> Tint(highlighted) again: apply.
     let mut mock_api = MockWindowsApi::new();
-    expect_snapshot_then_fill(&mut mock_api);
+    expect_flash_palette_ops(&mut mock_api);
 
     let (state_sender, state_receiver) = watch::channel(ClientState::Active);
     let (highlight_sender, highlight_receiver) = watch::channel(true);
@@ -1354,7 +1165,7 @@ async fn test_visuals_flash_on_same_value_state_push_while_highlighted() {
         &mock_api,
         state_receiver,
         highlight_receiver,
-        Some(original),
+        Some(palette_snapshot(sample_palette())),
         disabled,
         highlighted,
     );
@@ -1376,49 +1187,21 @@ async fn test_visuals_flash_on_same_value_state_push_while_highlighted() {
     // expectations were not exactly satisfied.
 }
 
-/// Core regression test for GH #279: disabling then re-enabling a client
-/// snapshots the real per-cell colors on the tint and writes them back on
-/// re-enable, rather than flattening them with a uniform fill.
+/// Core regression test for GH #279: disabling then re-enabling a client tints
+/// via the palette and restores the pristine palette on re-enable, never
+/// touching the per-cell buffer that holds the child's (possibly truecolor)
+/// output.
 #[tokio::test]
-async fn test_visuals_disable_enable_restores_snapshot() {
-    let original = CONSOLE_CHARACTER_ATTRIBUTES(0x07);
+async fn test_visuals_disable_enable_restores_palette() {
     let disabled = CONSOLE_CHARACTER_ATTRIBUTES(0x8F);
     let highlighted = CONSOLE_CHARACTER_ATTRIBUTES(0x1F);
 
-    // Start unhighlighted + Active: the initial paint is a no-op Restore
-    // (no snapshot yet). Disable -> Tint(disabled): snapshot + fill.
-    // Re-enable -> Restore: write the snapshot back.
+    // Start unhighlighted + Active: the initial paint is a no-op Restore (last is
+    // initialised to Restore). Disable -> Tint(disabled): apply (1 read + 1
+    // write). Re-enable -> Restore: write the base palette back (1 read + 1
+    // write). Total: 2 reads, 2 writes.
     let mut mock_api = MockWindowsApi::new();
-    use windows::Win32::System::Console::{CONSOLE_SCREEN_BUFFER_INFO, COORD};
-    let buffer_info = CONSOLE_SCREEN_BUFFER_INFO {
-        dwSize: COORD { X: 80, Y: 25 },
-        ..Default::default()
-    };
-    mock_api
-        .expect_get_console_screen_buffer_info()
-        .times(2)
-        .returning(move || return Ok(buffer_info));
-    mock_api
-        .expect_read_console_output_attribute()
-        .times(1)
-        .returning(|length, _| return Ok(vec![0x07; length as usize]));
-    // One fill (disable) + one restore (re-enable) set the default attribute.
-    mock_api
-        .expect_set_console_text_attribute()
-        .times(2)
-        .returning(|_| return Ok(()));
-    mock_api
-        .expect_fill_console_output_attribute()
-        .times(1)
-        .returning(|_, _, _| return Ok(80 * 25));
-    mock_api
-        .expect_write_console_output_attribute()
-        .times(1)
-        .returning(|attrs, _| return Ok(attrs.len() as u32));
-    mock_api
-        .expect_invalidate_console_window()
-        .times(2)
-        .returning(|| return Ok(()));
+    expect_palette_ops(&mut mock_api, sample_palette(), 2, 2);
 
     let (state_sender, state_receiver) = watch::channel(ClientState::Active);
     let (highlight_sender, highlight_receiver) = watch::channel(false);
@@ -1427,7 +1210,7 @@ async fn test_visuals_disable_enable_restores_snapshot() {
         &mock_api,
         state_receiver,
         highlight_receiver,
-        Some(original),
+        Some(palette_snapshot(sample_palette())),
         disabled,
         highlighted,
     );
