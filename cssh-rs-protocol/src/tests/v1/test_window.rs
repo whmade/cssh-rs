@@ -27,6 +27,22 @@ fn test_window_handle_round_trips_through_cbor() {
 }
 
 #[test]
+fn test_windows_hwnd_constructor_round_trips() {
+    let handle = WindowHandle::windows_hwnd(0xDEAD_BEEF);
+    assert_eq!(handle.kind, KIND_WINDOWS_HWND);
+    assert_eq!(handle.as_windows_hwnd(), Some(0xDEAD_BEEF));
+}
+
+#[test]
+fn test_as_windows_hwnd_rejects_other_kinds() {
+    let handle = WindowHandle {
+        kind: KIND_X11_WINDOW.to_string(),
+        value: Value::Integer(1_i64.into()),
+    };
+    assert_eq!(handle.as_windows_hwnd(), None);
+}
+
+#[test]
 fn test_kind_constants_have_expected_values() {
     assert_eq!(KIND_WINDOWS_HWND, "windows.hwnd");
     assert_eq!(KIND_X11_WINDOW, "x11.window");

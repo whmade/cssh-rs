@@ -764,7 +764,7 @@ mod cli_main_test {
 
         mock.expect_client_main::<MockWindowsApi>()
             .once()
-            .returning(|_, host, username, port, _| {
+            .returning(|_, host, username, port, _daemon_channel, _| {
                 assert_eq!(host, "host1");
                 assert_eq!(username, Some("username".to_string()));
                 assert_eq!(port, None);
@@ -834,7 +834,7 @@ mod cli_main_test {
 
         mock.expect_client_main::<MockWindowsApi>()
             .once()
-            .returning(|_, host, username, port, _| {
+            .returning(|_, host, username, port, _daemon_channel, _| {
                 assert_eq!(host, "testhost");
                 assert_eq!(username, Some("testuser".to_string()));
                 assert_eq!(port, Some(2222));
