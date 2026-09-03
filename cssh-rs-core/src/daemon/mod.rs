@@ -1478,6 +1478,41 @@ async fn launch_clients<W: WindowsApi + 'static + Clone>(
     return clients;
 }
 
+/// Build the argv for a spawned `client` console process.
+///
+/// `--daemon-channel` is emitted after the `client` subcommand but before the
+/// `--` separator so it parses as an option; the host after `--` stays
+/// positional even when it starts with `-`.
+fn build_client_args(
+    host: &str,
+    username: Option<String>,
+    port: Option<u16>,
+    debug: bool,
+    control_channel: &str,
+) -> Vec<String> {
+    let mut client_args: Vec<String> = Vec::new();
+    if debug {
+        client_args.push("-d".to_string());
+    }
+    let mut actual_host = host;
+    let mut actual_username = username;
+    if let Some(split_result) = host.split_once("@") {
+        actual_username = Some(split_result.0.to_owned());
+        actual_host = split_result.1;
+    }
+    if let Some(actual_username) = actual_username.as_deref() {
+        client_args.extend(vec!["-u".to_string(), actual_username.to_string()]);
+    }
+    if let Some(port) = port {
+        client_args.extend(vec!["-p".to_string(), port.to_string()]);
+    }
+    client_args.push("client".to_string());
+    client_args.push("--daemon-channel".to_string());
+    client_args.push(control_channel.to_string());
+    client_args.extend(vec!["--".to_string(), actual_host.to_string()]);
+    return client_args;
+}
+
 /// Launchs a `client` console process with its own window with the given
 /// CLI arguments/options: `host`, `username`, `port`, `debug`.
 ///
@@ -1514,26 +1549,9 @@ fn launch_client_console<W: WindowsApi>(
     number_of_consoles: usize,
     aspect_ratio_adjustment: f64,
 ) -> (HWND, HANDLE, u32) {
-    // The first argument must be `--` to ensure all following arguments are treated
-    // as positional arguments and not as options if they start with `-`.
-    let mut client_args: Vec<String> = Vec::new();
-    if debug {
-        client_args.push("-d".to_string());
-    }
-    let mut actual_host = host;
-    let mut actual_username = username;
-    if let Some(split_result) = host.split_once("@") {
-        actual_username = Some(split_result.0.to_owned());
-        actual_host = split_result.1;
-    }
-    if let Some(actual_username) = actual_username.as_deref() {
-        client_args.extend(vec!["-u".to_string(), actual_username.to_string()]);
-    }
-    if let Some(port) = port {
-        client_args.extend(vec!["-p".to_string(), port.to_string()]);
-    }
-    client_args.push("client".to_string());
-    client_args.extend(vec!["--".to_string(), actual_host.to_string()]);
+    let control_path = crate::utils::windows::control_endpoint(std::process::id());
+    let client_args =
+        build_client_args(host, username, port, debug, &control_path.to_string_lossy());
 
     let process_info = spawn_console_process(windows_api, &current_exe_path(), client_args, false)
         .expect("Failed to create process");
