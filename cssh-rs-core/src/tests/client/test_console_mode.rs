@@ -4,7 +4,8 @@
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
     CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_INPUT_HANDLE,
+    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, ENABLE_WINDOW_INPUT,
+    STD_INPUT_HANDLE,
 };
 
 use crate::client::console_mode::ConsoleModeGuard;
@@ -16,6 +17,8 @@ const STDOUT_BITS: usize = 0x22;
 #[test]
 fn applies_raw_and_vt_then_restores_on_drop() {
     let stdin_original = ENABLE_LINE_INPUT.0 | ENABLE_ECHO_INPUT.0 | ENABLE_PROCESSED_INPUT.0;
+    // Raw mode clears the cooked-input bits and adds window-resize reporting.
+    let stdin_raw = ENABLE_WINDOW_INPUT.0;
     let stdout_original: u32 = 0;
     let stdout_vt = ENABLE_PROCESSED_OUTPUT.0 | ENABLE_VIRTUAL_TERMINAL_PROCESSING.0;
 
@@ -36,9 +39,9 @@ fn applies_raw_and_vt_then_restores_on_drop() {
             return Ok(CONSOLE_MODE(stdout_original));
         });
 
-    // Apply: stdin cleared to raw (0), stdout gains the VT flags.
+    // Apply: stdin cleared to raw plus window input, stdout gains the VT flags.
     api.expect_set_console_mode()
-        .withf(move |handle, mode| return handle.0 as usize == STDIN_BITS && mode.0 == 0)
+        .withf(move |handle, mode| return handle.0 as usize == STDIN_BITS && mode.0 == stdin_raw)
         .times(1)
         .returning(|_, _| return Ok(()));
     api.expect_set_console_mode()
