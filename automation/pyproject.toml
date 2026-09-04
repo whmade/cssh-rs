@@ -12,7 +12,7 @@ dependencies = [
     "pyautogui==0.9.54",
     "pywinctl==0.4.1",
     "pyperclip==1.11.0",
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
     "mss==10.2.0",
     "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",
@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.4",
+    "ruff==0.16.5",
     "pyrefly==1.2.0",
     "pytest==9.1.1",
 ]
