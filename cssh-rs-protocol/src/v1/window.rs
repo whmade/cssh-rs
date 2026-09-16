@@ -39,6 +39,37 @@ pub struct WindowHandle {
     pub value: Value,
 }
 
+impl WindowHandle {
+    /// Construct a [`KIND_WINDOWS_HWND`] handle wrapping a raw `HWND` value.
+    ///
+    /// # Arguments
+    /// * `hwnd` - The Windows window handle as a `u64`.
+    ///
+    /// # Returns
+    /// A `WindowHandle` whose `value` is the handle encoded as a CBOR integer.
+    pub fn windows_hwnd(hwnd: u64) -> Self {
+        return Self {
+            kind: KIND_WINDOWS_HWND.to_string(),
+            value: Value::from(hwnd),
+        };
+    }
+
+    /// Return the raw `HWND` value of a [`KIND_WINDOWS_HWND`] handle.
+    ///
+    /// # Returns
+    /// `Some(hwnd)` when this is a Windows handle with an integer payload in
+    /// `u64` range, otherwise `None`.
+    pub fn as_windows_hwnd(&self) -> Option<u64> {
+        if self.kind != KIND_WINDOWS_HWND {
+            return None;
+        }
+        return self
+            .value
+            .as_integer()
+            .and_then(|integer| return u64::try_from(integer).ok());
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/v1/test_window.rs"]
 mod tests;
