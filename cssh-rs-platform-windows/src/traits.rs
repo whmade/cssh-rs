@@ -145,6 +145,21 @@ impl<A: WindowsApi + 'static> ProcessSpawner for WindowsProcessSpawner<A> {
     }
 }
 
+/// Return the named-pipe endpoint for the daemon-to-client control channel
+/// owned by daemon process `pid`.
+///
+/// Renders the M1 rendezvous convention `\\.\pipe\cssh-rs-<pid>-control`.
+///
+/// # Arguments
+/// * `pid` - Operating-system process id of the daemon that owns the
+///   control channel.
+///
+/// # Returns
+/// The fully-qualified Windows named-pipe name for that daemon.
+pub fn control_endpoint(pid: u32) -> OsString {
+    return OsString::from(format!(r"\\.\pipe\cssh-rs-{pid}-control"));
+}
+
 /// Daemon-side control channel backed by a Windows named pipe server.
 ///
 /// One instance owns one [`NamedPipeServer`] endpoint. `accept`
