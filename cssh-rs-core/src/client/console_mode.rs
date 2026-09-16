@@ -7,7 +7,8 @@ use log::warn;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
     CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_INPUT_HANDLE,
+    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, ENABLE_WINDOW_INPUT,
+    STD_INPUT_HANDLE,
 };
 
 use crate::utils::windows::WindowsApi;
@@ -33,9 +34,10 @@ impl<'a> ConsoleModeGuard<'a> {
     /// stdin drops `ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
     /// ENABLE_PROCESSED_INPUT` so local keystrokes are delivered raw (the SSH
     /// child echoes through the PTY, so local echo would double-print, and a
-    /// locally typed Ctrl+C must arrive as a `0x03` byte, not a signal).
-    /// stdout gains `ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING`
-    /// so the child's escape sequences render.
+    /// locally typed Ctrl+C must arrive as a `0x03` byte, not a signal) and adds
+    /// `ENABLE_WINDOW_INPUT` so `ReadConsoleInput` reports window-size changes
+    /// that resize the PTY. stdout gains `ENABLE_PROCESSED_OUTPUT |
+    /// ENABLE_VIRTUAL_TERMINAL_PROCESSING` so the child's escape sequences render.
     ///
     /// # Arguments
     ///
@@ -83,7 +85,8 @@ fn configure_stdin(api: &dyn WindowsApi) -> Option<(isize, u32)> {
         }
     };
     let raw = CONSOLE_MODE(
-        original.0 & !(ENABLE_LINE_INPUT.0 | ENABLE_ECHO_INPUT.0 | ENABLE_PROCESSED_INPUT.0),
+        (original.0 & !(ENABLE_LINE_INPUT.0 | ENABLE_ECHO_INPUT.0 | ENABLE_PROCESSED_INPUT.0))
+            | ENABLE_WINDOW_INPUT.0,
     );
     if let Err(err) = api.set_console_mode(handle, raw) {
         warn!("Failed to set stdin to raw mode: {}", err);

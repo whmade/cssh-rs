@@ -39,22 +39,25 @@ use cssh_rs_protocol::v1::window::WindowHandle;
 use crate::client::console_mode::ConsoleModeGuard;
 use crate::client::dispatch::{dispatch_daemon_message, Dispatch};
 use crate::client::input_bytes::key_event_record_to_bytes;
-use crate::client::pty::{scan_and_answer_dsr, spawn_client_pty, SharedWriter};
+use crate::client::pty::{
+    resize_pty, scan_and_answer_dsr, spawn_client_pty, ClientPty, SharedMaster, SharedWriter,
+};
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::{
-    get_console_title, read_keyboard_input, set_console_palette, snapshot_console_palette,
-    tinted_palette, ConsolePaletteSnapshot, WindowsApi, WindowsControlChannelClient,
+    console_viewport_size, get_console_title, read_console_input, set_console_palette,
+    snapshot_console_palette, tinted_palette, ConsolePaletteSnapshot, WindowsApi,
+    WindowsControlChannelClient, KEY_EVENT, WINDOW_BUFFER_SIZE_EVENT,
 };
 
 /// Length in bytes of the frame length prefix (`u32`, big-endian).
 const LENGTH_PREFIX_LEN: usize = 4;
 
-/// Fixed initial PTY dimensions; viewport-driven sizing and resize are
-/// follow-up work (GitHub #306).
-const PTY_ROWS: u16 = 50;
-/// Fixed initial PTY dimensions; viewport-driven sizing and resize are
-/// follow-up work (GitHub #306).
-const PTY_COLS: u16 = 200;
+/// Fallback PTY dimensions used only when the console viewport size cannot be
+/// read; otherwise the PTY is seeded from and resized to the live viewport.
+const DEFAULT_PTY_ROWS: u16 = 50;
+/// Fallback PTY dimensions used only when the console viewport size cannot be
+/// read; otherwise the PTY is seeded from and resized to the live viewport.
+const DEFAULT_PTY_COLS: u16 = 200;
 
 /// Duration of the action-feedback flash painted on a highlighted client
 /// when the user toggles the state.
@@ -517,31 +520,49 @@ fn spawn_output_reader(mut reader: Box<dyn std::io::Read + Send>, master: Shared
     });
 }
 
-/// Forward this window's own keystrokes to the PTY master in a dedicated
-/// thread, so a daemon-broadcast line can be edited directly here.
+/// Read this window's console input on a dedicated thread: forward locally
+/// typed keystrokes to the PTY master (so a daemon-broadcast line can be edited
+/// directly here) and resize the PTY when the console window changes size.
 ///
 /// The thread blocks in `ReadConsoleInputW`; it is reclaimed by process exit at
 /// shutdown rather than joined.
 ///
 /// # Arguments
 ///
-/// * `api`    - The Windows API implementation to use (cloned into the thread).
-/// * `master` - Shared PTY master writer.
+/// * `api`        - The Windows API implementation to use (cloned into the thread).
+/// * `writer`     - Shared PTY master writer for locally typed keystrokes.
+/// * `pty_master` - Shared PTY master, resized on window-size-change events.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn spawn_local_input<A: WindowsApi + Clone + 'static>(api: A, master: SharedWriter) {
+fn spawn_local_input<A: WindowsApi + Clone + 'static>(
+    api: A,
+    writer: SharedWriter,
+    pty_master: SharedMaster,
+) {
     std::thread::spawn(move || loop {
-        let record = read_keyboard_input(&api);
-        let key = unsafe { record.KeyEvent };
-        if !key.bKeyDown.as_bool() {
-            continue;
-        }
-        let bytes = key_event_record_to_bytes(&key);
-        if bytes.is_empty() {
-            continue;
-        }
-        if let Ok(mut writer) = master.lock() {
-            let _ = writer.write_all(&bytes);
-            let _ = writer.flush();
+        let record = read_console_input(&api);
+        match record.EventType {
+            WINDOW_BUFFER_SIZE_EVENT => {
+                // The event carries the new buffer size, but the PTY tracks the
+                // visible viewport, so re-read the window rectangle instead.
+                if let Some((cols, rows)) = console_viewport_size(&api) {
+                    resize_pty(&pty_master, cols, rows);
+                }
+            }
+            KEY_EVENT => {
+                let key = unsafe { record.Event.KeyEvent };
+                if !key.bKeyDown.as_bool() {
+                    continue;
+                }
+                let bytes = key_event_record_to_bytes(&key);
+                if bytes.is_empty() {
+                    continue;
+                }
+                if let Ok(mut writer) = writer.lock() {
+                    let _ = writer.write_all(&bytes);
+                    let _ = writer.flush();
+                }
+            }
+            _ => {}
         }
     });
 }
@@ -735,29 +756,37 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
     let (max_frame_len, initial) = client_handshake(&mut control).await;
 
     let ssh_args = build_ssh_arguments(&resolved_username, host, port, config);
-    let mut pty = match spawn_client_pty(&config.program, &ssh_args, PTY_ROWS, PTY_COLS) {
+    // Seed the PTY from the live viewport so `ssh` sees the real terminal size;
+    // fall back to fixed dimensions only if the viewport cannot be read.
+    let (init_cols, init_rows) =
+        console_viewport_size(api).unwrap_or((DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS));
+    let pty = match spawn_client_pty(&config.program, &ssh_args, init_rows, init_cols) {
         Ok(pty) => pty,
         Err(err) => {
             error!("Failed to spawn `{}` under a PTY: {}", config.program, err);
             return;
         }
     };
-    let child_pid = pty.child_pid;
-    let master = Arc::clone(&pty.writer);
+    let ClientPty {
+        writer,
+        reader,
+        mut child,
+        child_pid,
+        master: pty_master,
+    } = pty;
 
     let window_hwnd = api.get_console_window().0 as usize as u64;
     send_ready(&mut control, child_pid, window_hwnd, max_frame_len).await;
 
-    spawn_output_reader(pty.reader, Arc::clone(&master));
-    spawn_local_input(api.clone(), Arc::clone(&master));
+    spawn_output_reader(reader, Arc::clone(&writer));
+    spawn_local_input(api.clone(), Arc::clone(&writer), Arc::clone(&pty_master));
 
     // Watch the SSH child from a blocking thread; hand its exit code to the
     // control task so it can report `ChildExited` before shutting down.
-    let mut killer = pty.child.clone_killer();
+    let mut killer = child.clone_killer();
     let (exit_tx, exit_rx) = oneshot::channel::<i32>();
     tokio::task::spawn_blocking(move || {
-        let code = pty
-            .child
+        let code = child
             .wait()
             .map(|status| return status.exit_code() as i32)
             .unwrap_or(1);
@@ -767,7 +796,7 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
     let control_task = run_control_channel(
         api,
         control,
-        Arc::clone(&master),
+        Arc::clone(&writer),
         child_pid,
         &state_sender,
         &highlight_sender,

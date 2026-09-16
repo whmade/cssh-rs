@@ -23,7 +23,7 @@ use windows::Win32::System::Console::{
 use windows::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE};
 use windows::Win32::System::Console::{
     ScrollConsoleScreenBufferW, SetConsoleCursorPosition, CHAR_INFO, KEY_EVENT as KEY_EVENT_U32,
-    SMALL_RECT,
+    SMALL_RECT, WINDOW_BUFFER_SIZE_EVENT as WINDOW_BUFFER_SIZE_EVENT_U32,
 };
 use windows::Win32::System::Threading::PROCESS_ACCESS_RIGHTS;
 use windows::Win32::System::Threading::{
@@ -1121,6 +1121,13 @@ impl WindowsApi for DefaultWindowsApi {
 /// [2]: https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/System/Console/struct.INPUT_RECORD.html
 pub const KEY_EVENT: u16 = KEY_EVENT_U32 as u16;
 
+/// u16 representation of a [WINDOW_BUFFER_SIZE_EVENT][1], matching the u16
+/// [INPUT_RECORD][2].`EventType` (the public constant is a u32, like KEY_EVENT).
+///
+/// [1]: https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/System/Console/constant.WINDOW_BUFFER_SIZE_EVENT.html
+/// [2]: https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/System/Console/struct.INPUT_RECORD.html
+pub const WINDOW_BUFFER_SIZE_EVENT: u16 = WINDOW_BUFFER_SIZE_EVENT_U32 as u16;
+
 /// Build a `STARTUPINFOW` for [`WindowsApi::create_process_with_args`].
 ///
 /// When `with_keyboard_focus` is false, `STARTF_USESHOWWINDOW` and
@@ -1308,6 +1315,31 @@ pub fn snapshot_console_palette(api: &dyn WindowsApi) -> Option<ConsolePaletteSn
                 "Failed to read console palette; state visuals will be skipped: {}",
                 err
             );
+            return None;
+        }
+    }
+}
+
+/// Return the console's visible viewport size as `(cols, rows)`, derived from
+/// the window rectangle, for seeding and resizing the client PTY.
+///
+/// # Arguments
+///
+/// * `api` - The Windows API implementation to use.
+///
+/// # Returns
+///
+/// `Some((cols, rows))`, or `None` if the buffer info could not be read.
+pub fn console_viewport_size(api: &dyn WindowsApi) -> Option<(u16, u16)> {
+    match api.get_console_screen_buffer_info_ex() {
+        Ok(info) => {
+            let window = info.srWindow;
+            let cols = (i32::from(window.Right) - i32::from(window.Left) + 1).max(1) as u16;
+            let rows = (i32::from(window.Bottom) - i32::from(window.Top) + 1).max(1) as u16;
+            return Some((cols, rows));
+        }
+        Err(err) => {
+            warn!("Failed to read console viewport size: {}", err);
             return None;
         }
     }
