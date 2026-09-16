@@ -28,12 +28,7 @@ env:
 
 jobs:
   e2e-run:
-    # Raised from 10 while the connect-dependent scenarios are skipped (GitHub
-    # #304): with no v1 daemon to connect to they exhaust their full retry
-    # budgets before being marked SKIP, pushing the run right up against the old
-    # ceiling. The change that lands the v1 daemon restores 10 once those
-    # scenarios pass again.
-    timeout-minutes: 20
+    timeout-minutes: 10
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -82,13 +77,6 @@ jobs:
         shell: pwsh
         run: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 
-      # Intermediate M1 state (GitHub #304): this change puts the client on the
-      # v1 protocol while the daemon still binds only the legacy pipe (the v1
-      # daemon lands in the next change), so no client connects and every
-      # connect-dependent e2e scenario fails in isolation. Tag every test and
-      # skip it on failure so the job reports SKIP, not FAIL, until then. The
-      # change that lands the v1 daemon removes both flags and restores the
-      # timeout above, bringing back full e2e FAIL signal.
       - name: Run E2E suite
         shell: pwsh
         run: >-
@@ -96,8 +84,6 @@ jobs:
           --variable CSSH_RS_BINARY:${{ github.workspace }}/target/debug/cssh-rs.exe
           --outputdir e2e-output
           --listener cssh_rs_automation.recording_listener.RecordingListener
-          --settag connect-dependent
-          --skiponfailure connect-dependent
           tests/e2e/suites/
 
       - name: Upload E2E report
