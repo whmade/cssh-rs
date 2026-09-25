@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Shared desktop-automation library for cssh-rs, used by the E2E suites and the demo recorder."
 requires-python = ">=3.14"
 dependencies = [
-    "robotframework==7.4.2",
+    "robotframework==7.5",
     "pyautogui==0.9.54",
     "pywinctl==0.4.1",
     "pyperclip==1.11.0",
@@ -21,8 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.7",
-    "pyrefly==1.3.0",
+    "ruff==0.16.8",
+    "pyrefly==1.3.1",
     "pytest==9.1.1",
 ]
 
