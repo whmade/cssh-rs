@@ -9,6 +9,7 @@ use crate::{
     spawn_console_process, WindowsSettingsDefaultTerminalApplicationGuard,
 };
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
+use std::ffi::OsString;
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -254,12 +255,13 @@ impl ConfigManager for CLIConfigManager {
 #[cfg_attr(test, automock)]
 pub trait Entrypoint {
     /// Entrypoint for the client subcommand
-    fn client_main<W: WindowsApi + 'static>(
+    fn client_main<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
         host: String,
         username: Option<String>,
         port: Option<u16>,
+        daemon_channel: Option<OsString>,
         config: &ClientConfig,
     ) -> impl std::future::Future<Output = ()> + Send;
     /// Entrypoint for the daemon subcommand
@@ -285,15 +287,17 @@ pub trait Entrypoint {
 }
 
 impl Entrypoint for MainEntrypoint {
-    async fn client_main<W: WindowsApi>(
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    async fn client_main<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
         host: String,
         username: Option<String>,
         port: Option<u16>,
+        daemon_channel: Option<OsString>,
         config: &ClientConfig,
     ) {
-        client_main(windows_api, host, username, port, config).await;
+        client_main(windows_api, host, username, port, daemon_channel, config).await;
     }
 
     async fn daemon_main<W: WindowsApi + Clone + 'static>(
@@ -687,7 +691,7 @@ pub async fn main<
         Some(Commands::GenerateConfig { .. }) => unreachable!("handled before config load"),
         Some(Commands::Client {
             host,
-            daemon_channel: _,
+            daemon_channel,
         }) => {
             if args.debug {
                 logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));
@@ -698,6 +702,7 @@ pub async fn main<
                     host.to_owned(),
                     args.username.to_owned(),
                     args.port,
+                    daemon_channel.as_deref().map(OsString::from),
                     &config.client,
                 )
                 .await;

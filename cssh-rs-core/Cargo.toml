@@ -13,11 +13,13 @@ chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive"] }
 cli-clipboard = "0.4.0"
 cssh-rs-meta = { path = "../cssh-rs-meta" }
+cssh-rs-platform = { path = "../cssh-rs-platform" }
 cssh-rs-platform-windows = { path = "../cssh-rs-platform-windows" }
 cssh-rs-protocol = { path = "../cssh-rs-protocol" }
 log = "0.4.31"
 log-panics = "2.1.0"
 os_info = { version = "3.15.0", default-features = false }
+portable-pty = "0.9.0"
 registry = "1.3.0"
 serde = "1.0.228"
 serde_derive = "1.0.228"
