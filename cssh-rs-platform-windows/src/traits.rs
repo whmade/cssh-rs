@@ -209,6 +209,50 @@ impl WindowsControlChannelServer {
         let ready = self.pipe.ready(Interest::READABLE).await?;
         return Ok(ready.is_readable());
     }
+
+    /// Wait until the pipe is writable.
+    ///
+    /// Takes `&self` so a caller can await readability and writability
+    /// concurrently in one `select!` (the trait `send`/`recv` take `&mut
+    /// self` and cannot be borrowed together).
+    ///
+    /// # Returns
+    /// `Ok(())` once writable, or the underlying I/O error.
+    pub async fn writable(&self) -> io::Result<()> {
+        return self.pipe.writable().await;
+    }
+
+    /// Wait until the pipe is readable.
+    ///
+    /// # Returns
+    /// `Ok(())` once readable, or the underlying I/O error.
+    pub async fn readable(&self) -> io::Result<()> {
+        return self.pipe.readable().await;
+    }
+
+    /// Attempt a non-blocking write of `buf`.
+    ///
+    /// # Arguments
+    /// * `buf` - Bytes to write.
+    ///
+    /// # Returns
+    /// The number of bytes written, or the underlying I/O error
+    /// (`WouldBlock` when the pipe is not ready).
+    pub fn try_write(&self, buf: &[u8]) -> io::Result<usize> {
+        return self.pipe.try_write(buf);
+    }
+
+    /// Attempt a non-blocking read into `buf`.
+    ///
+    /// # Arguments
+    /// * `buf` - Buffer to read into.
+    ///
+    /// # Returns
+    /// The number of bytes read (`0` on EOF), or the underlying I/O error
+    /// (`WouldBlock` when no bytes are ready).
+    pub fn try_read(&self, buf: &mut [u8]) -> io::Result<usize> {
+        return self.pipe.try_read(buf);
+    }
 }
 
 impl ControlChannelServer for WindowsControlChannelServer {

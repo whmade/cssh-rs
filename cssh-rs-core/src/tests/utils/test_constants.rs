@@ -3,19 +3,12 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 
-use cssh_rs_meta::PACKAGE_NAME;
-
-use crate::utils::constants::*;
-
 /// Test module for constants validation.
 mod constants_test {
-    use super::*;
+    use crate::utils::constants::MAX_WINDOW_TITLE_LENGTH;
 
     #[test]
-    fn test_pipe_name_format() {
-        // Test that PIPE_NAME follows the expected Windows named pipe format
-        assert!(PIPE_NAME.starts_with(r"\\.\pipe\"));
-        // Test that PIPE_NAME incorporates the package name
-        assert!(PIPE_NAME.contains(PACKAGE_NAME));
+    fn test_max_window_title_length_is_nonzero() {
+        assert!(MAX_WINDOW_TITLE_LENGTH > 0);
     }
 }

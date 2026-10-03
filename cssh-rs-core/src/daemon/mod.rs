@@ -20,32 +20,34 @@ use cssh_rs_meta::PACKAGE_NAME;
 
 use crate::{
     current_exe_path, spawn_console_process,
-    utils::{
-        constants::PIPE_NAME,
-        windows::{
-            arrange_console, get_console_input_buffer, read_keyboard_input,
-            set_console_border_color,
-        },
+    utils::windows::{
+        arrange_console, get_console_input_buffer, read_keyboard_input, set_console_border_color,
     },
     WindowsSettingsDefaultTerminalApplicationGuard,
 };
 use bracoxide::explode;
-use cssh_rs_protocol::{
-    deserialization::deserialize_pid,
-    serialization::{serialize_client_state, serialize_highlight, serialize_input_record_0},
-    ClientState, FRAMED_HIGHLIGHT_LENGTH, FRAMED_INPUT_RECORD_LENGTH, FRAMED_STATE_CHANGE_LENGTH,
-    SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH, TAG_HIGHLIGHT, TAG_INPUT_RECORD,
-    TAG_KEEP_ALIVE, TAG_STATE_CHANGE,
+use cssh_rs_protocol::v1::capability::{
+    check_version, negotiate_capabilities, negotiate_max_frame_len,
 };
+use cssh_rs_protocol::v1::codec::{decode_frames, encode_frame};
+use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
+use cssh_rs_protocol::v1::input::ClientRunState;
+use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
+use cssh_rs_protocol::v1::message::{ClientToDaemon, DaemonToClient};
+use cssh_rs_protocol::v1::version::{ProtocolVersion, Role};
+use cssh_rs_protocol::ClientState;
 use log::{debug, error, warn};
 use tokio::{
-    net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions},
     sync::{
         broadcast::{self, error::RecvError, Receiver, Sender},
         watch,
     },
     task::JoinHandle,
 };
+
+use cssh_rs_platform::ControlChannelServer;
+
+use crate::utils::windows::{control_endpoint, WindowsControlChannelServer};
 use windows::Win32::System::Console::{
     CONSOLE_CHARACTER_ATTRIBUTES, INPUT_RECORD_0, KEY_EVENT_RECORD, LEFT_ALT_PRESSED,
     LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED,
@@ -65,12 +67,55 @@ use self::grid::{grid_dimensions, ClientGrid};
 use self::workspace::WorkspaceArea;
 
 mod grid;
+pub(crate) mod input;
 mod workspace;
 
 /// The capacity of the broadcast channel used
 /// to send the input records read from the console input buffer
 /// to the named pipe servers connected to each client in parallel.
 const SENDER_CAPACITY: usize = 1024 * 1024;
+
+/// The daemon's protocol version, advertised in the handshake.
+const DAEMON_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+
+/// An encoded v1 frame fanned out to every client's pipe-server task.
+///
+/// The frame is CBOR-encoded once by the daemon; each task clones only the
+/// `Arc`. `Gated` frames (input, signals) are delivered only while the client
+/// is [`ClientState::Active`]; `Ungated` frames (terminate) reach every client
+/// regardless of run-state.
+#[derive(Clone, Debug)]
+enum ClientBroadcast {
+    Gated(Arc<[u8]>),
+    Ungated(Arc<[u8]>),
+}
+
+/// Map the daemon's internal two-state model onto the wire run-state.
+fn to_run_state(state: ClientState) -> ClientRunState {
+    match state {
+        ClientState::Active => return ClientRunState::Active,
+        ClientState::Disabled => return ClientRunState::Disabled,
+    }
+}
+
+/// Broadcast a `Terminate` to every connected client, delivered regardless of
+/// run-state so even disabled clients shut down.
+///
+/// # Arguments
+///
+/// * `sender` - The broadcast sender feeding the per-client pipe tasks.
+/// * `reason` - Human-readable shutdown reason forwarded to clients.
+fn broadcast_terminate(sender: &Sender<ClientBroadcast>, reason: &str) {
+    let message = DaemonToClient::Terminate {
+        reason: reason.to_string(),
+    };
+    match encode_frame(&message, DEFAULT_MAX_FRAME_LEN) {
+        Ok(frame) => {
+            let _ = sender.send(ClientBroadcast::Ungated(Arc::from(frame)));
+        }
+        Err(err) => error!("Failed to encode Terminate frame: {}", err),
+    }
+}
 
 /// Bits in `KEY_EVENT_RECORD::dwControlKeyState` that represent
 /// "real" modifier keys (Ctrl / Alt / Shift) as opposed to lock
@@ -346,6 +391,27 @@ impl Clients {
             .pid_index
             .get(&pid)
             .map(|&index| return &self.list[index]);
+    }
+
+    /// Update the window handle of the client with the given process id.
+    ///
+    /// Called when a client reports its own console handle via the v1 `Ready`
+    /// or `WindowChanged` message, refining the launch-time probe.
+    ///
+    /// # Arguments
+    ///
+    /// * `pid`    - Process id of the client to update.
+    /// * `handle` - The client-reported window handle.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a client with `pid` was found and updated.
+    fn set_window_handle_for_pid(&mut self, pid: u32, handle: HWND) -> bool {
+        if let Some(&index) = self.pid_index.get(&pid) {
+            self.list[index].window_handle = handle;
+            return true;
+        }
+        return false;
     }
 
     /// Retains only the clients for which the predicate returns `true`,
@@ -665,8 +731,7 @@ impl<'a> Daemon<'a> {
         clients: &mut Arc<Mutex<Clients>>,
         workspace_area: &workspace::WorkspaceArea,
     ) {
-        let (sender, _) =
-            broadcast::channel::<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>(SENDER_CAPACITY);
+        let (sender, _) = broadcast::channel::<ClientBroadcast>(SENDER_CAPACITY);
 
         let mut servers = Arc::new(Mutex::new(
             self.launch_named_pipe_servers(&sender, Arc::clone(clients)),
@@ -675,6 +740,7 @@ impl<'a> Daemon<'a> {
         // Monitor client processes
         let clients_clone = Arc::clone(clients);
         let windows_api_clone = windows_api.clone();
+        let sender_clone = sender.clone();
         tokio::spawn(async move {
             loop {
                 clients_clone.lock().unwrap().retain(|client| {
@@ -684,7 +750,9 @@ impl<'a> Daemon<'a> {
                     }
                 });
                 if clients_clone.lock().unwrap().is_empty() {
-                    // All clients have exited, exit the daemon as well
+                    // A client still mid-teardown may hold its pipe open past the
+                    // reaper's exit-code read; nudge it to tear down before exit.
+                    broadcast_terminate(&sender_clone, "all clients exited");
                     std::process::exit(0);
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -722,7 +790,7 @@ impl<'a> Daemon<'a> {
     /// Returns a list of [JoinHandle]s, one handle for each thread.
     fn launch_named_pipe_servers(
         &self,
-        sender: &Sender<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>,
+        sender: &Sender<ClientBroadcast>,
         clients: Arc<Mutex<Clients>>,
     ) -> Vec<JoinHandle<()>> {
         let mut servers: Vec<JoinHandle<()>> = Vec::new();
@@ -744,15 +812,15 @@ impl<'a> Daemon<'a> {
     fn launch_named_pipe_server(
         &self,
         servers: &mut Vec<JoinHandle<()>>,
-        sender: &Sender<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>,
+        sender: &Sender<ClientBroadcast>,
         clients: Arc<Mutex<Clients>>,
     ) {
-        let named_pipe_server = ServerOptions::new()
-            .access_inbound(true)
-            .access_outbound(true)
-            .pipe_mode(PipeMode::Message)
-            .create(PIPE_NAME)
-            .unwrap_or_else(|err| {
+        // One server instance per client on this daemon's shared control-channel
+        // name; each client connects with the `--daemon-channel` path derived
+        // from the same daemon pid.
+        let endpoint = control_endpoint(std::process::id());
+        let named_pipe_server =
+            WindowsControlChannelServer::bind(&endpoint).unwrap_or_else(|err| {
                 error!("{}", err);
                 panic!("Failed to create named pipe server",)
             });
@@ -793,7 +861,7 @@ impl<'a> Daemon<'a> {
     async fn handle_input_record<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
-        sender: &Sender<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>,
+        sender: &Sender<ClientBroadcast>,
         input_record: INPUT_RECORD_0,
         clients: &mut Arc<Mutex<Clients>>,
         workspace_area: &workspace::WorkspaceArea,
@@ -947,18 +1015,34 @@ impl<'a> Daemon<'a> {
             }
             return;
         }
-        let error_handler = |err| {
-            error!("{}", err);
-            panic!(
-                "Failed to serialize input recored `{}`",
-                input_record.string_repr()
-            )
+        // Only key-down events produce terminal output; key-up carries no
+        // bytes under the PTY model, so it is not forwarded.
+        let key_event = unsafe { input_record.KeyEvent };
+        if !key_event.bKeyDown.as_bool() {
+            return;
+        }
+
+        // Ctrl+Break has no input-byte encoding, so deliver it as an out-of-band
+        // Signal the client relays to its child's process group; Ctrl+C rides the
+        // input stream as its composed 0x03 byte like any other keystroke.
+        let message = match input::signal_for_key(&key_event) {
+            Some(signal) => DaemonToClient::Signal(signal),
+            None => DaemonToClient::Input {
+                event: input::input_record_to_event(&input_record),
+            },
         };
-        match sender.send(
-            serialize_input_record_0(&input_record)[..]
-                .try_into()
-                .unwrap_or_else(error_handler),
-        ) {
+        let frame = match encode_frame(&message, DEFAULT_MAX_FRAME_LEN) {
+            Ok(frame) => frame,
+            Err(err) => {
+                error!(
+                    "Failed to encode input frame for `{}`: {}",
+                    input_record.string_repr(),
+                    err
+                );
+                return;
+            }
+        };
+        match sender.send(ClientBroadcast::Gated(Arc::from(frame))) {
             Ok(_) => {}
             Err(_) => {
                 thread::sleep(time::Duration::from_nanos(1));
@@ -1249,7 +1333,7 @@ impl<'a> Daemon<'a> {
     ///
     /// Looks the client up by PID and broadcasts the new state through its
     /// [`watch::Sender`]. The pipe-server task subscribed to that sender
-    /// observes the change and forwards a [`cssh_rs_protocol::TAG_STATE_CHANGE`]
+    /// observes the change and forwards a v1 `StateChange`
     /// frame to the client over the named pipe. Called from the
     /// control-mode handlers for `[t]oggle enabled` and `e[n]able all` via
     /// [`Daemon::update_client_states`].
@@ -1601,18 +1685,34 @@ fn launch_client_console<W: WindowsApi>(
 /// A failed pipe write or a dropped [`watch::Sender`] ends the routine
 /// cleanly.
 async fn named_pipe_server_routine(
-    server: NamedPipeServer,
-    receiver: &mut Receiver<[u8; SERIALIZED_INPUT_RECORD_0_LENGTH]>,
+    mut server: WindowsControlChannelServer,
+    receiver: &mut Receiver<ClientBroadcast>,
     clients: Arc<Mutex<Clients>>,
 ) {
     // wait for a client to connect
-    server.connect().await.unwrap_or_else(|err| {
+    server.accept().await.unwrap_or_else(|err| {
         error!("{}", err);
         panic!("Timed out waiting for clients to connect to named pipe server",)
     });
 
-    // Correlate the connecting client by reading its 4 byte PID.
-    let pid = read_client_pid(&server).await;
+    let daemon_caps: Vec<String> = Vec::new();
+    let mut rx_buf: Vec<u8> = Vec::new();
+
+    let hello = match read_client_hello(&server, &mut rx_buf).await {
+        Some(hello) => hello,
+        None => return,
+    };
+    if let Err(mismatch) = check_version(DAEMON_PROTOCOL_VERSION, hello.protocol_version) {
+        error!(
+            "Protocol version mismatch: daemon {} vs client {}",
+            mismatch.local, mismatch.remote
+        );
+        return;
+    }
+    let send_max = negotiate_max_frame_len(DEFAULT_MAX_FRAME_LEN, hello.max_frame_len);
+    let caps = negotiate_capabilities(&daemon_caps, &hello.capabilities);
+    let pid = hello.pid;
+
     let (mut state_receiver, mut highlight_receiver) = match clients.lock().unwrap().get_by_pid(pid)
     {
         Some(client) => (
@@ -1633,19 +1733,59 @@ async fn named_pipe_server_routine(
         }
     };
 
+    // Reply with the daemon Hello (so the client learns our frame cap) then Welcome.
+    let daemon_hello = Hello {
+        protocol_version: DAEMON_PROTOCOL_VERSION,
+        role: Role::Daemon,
+        pid: std::process::id(),
+        capabilities: daemon_caps.clone(),
+        max_frame_len: DEFAULT_MAX_FRAME_LEN,
+    };
+    if !send_message(&server, &daemon_hello, send_max).await {
+        return;
+    }
+    let welcome = Welcome {
+        client_id: u64::from(pid),
+        server_capabilities: caps,
+    };
+    if !send_message(&server, &welcome, send_max).await {
+        return;
+    }
+
+    // Cache the keep-alive frame; also used to probe a disabled client's pipe.
+    let keep_alive = match encode_frame(&DaemonToClient::KeepAlive, send_max) {
+        Ok(frame) => frame,
+        Err(err) => {
+            error!("Failed to encode keep-alive frame: {}", err);
+            return;
+        }
+    };
+
     // Initial state push - see fn docs.
     let initial_state = *state_receiver.borrow_and_update();
-    let initial_state_frame: [u8; FRAMED_STATE_CHANGE_LENGTH] =
-        [TAG_STATE_CHANGE, serialize_client_state(initial_state)];
-    if !write_framed_message(&server, &initial_state_frame).await {
+    if !send_message(
+        &server,
+        &DaemonToClient::StateChange {
+            state: to_run_state(initial_state),
+        },
+        send_max,
+    )
+    .await
+    {
         return;
     }
 
     // Initial highlight push - same rationale as the state push above.
     let initial_highlight = *highlight_receiver.borrow_and_update();
-    let initial_highlight_frame: [u8; FRAMED_HIGHLIGHT_LENGTH] =
-        [TAG_HIGHLIGHT, serialize_highlight(initial_highlight)];
-    if !write_framed_message(&server, &initial_highlight_frame).await {
+    if !send_message(
+        &server,
+        &DaemonToClient::Highlight {
+            on: initial_highlight,
+        },
+        send_max,
+    )
+    .await
+    {
         return;
     }
 
@@ -1654,21 +1794,21 @@ async fn named_pipe_server_routine(
         tokio::select! {
             biased;
             recv_result = receiver.recv() => {
-                let ser_input_record = match recv_result {
+                let broadcast = match recv_result {
                     Ok(val) => val,
                     Err(RecvError::Lagged(skipped)) => {
                         // Slow consumers (typically disabled clients) drop
-                        // records rather than kill the routine; debug-level
+                        // frames rather than kill the routine; debug-level
                         // because this can fire repeatedly under load.
                         debug!(
-                            "Named pipe server routine lagged behind broadcast channel - dropping {} record(s)",
+                            "Named pipe server routine lagged behind broadcast channel - dropping {} frame(s)",
                             skipped
                         );
                         // Probe and yield so sustained lag cannot starve
                         // the keep-alive tick (the `select!` is `biased`
                         // toward `recv`) and so a closed pipe is still
                         // detected promptly under load.
-                        if !probe_pipe_alive(&server) {
+                        if !probe_pipe_alive(&server, &keep_alive) {
                             return;
                         }
                         tokio::task::yield_now().await;
@@ -1679,63 +1819,80 @@ async fn named_pipe_server_routine(
                         panic!("Failed to receive data from the Receiver");
                     }
                 };
-                // Copy out before any `.await` - `watch::Ref` is not `Send`.
-                let current_state = *state_receiver.borrow();
-                match current_state {
-                    ClientState::Active => {}
-                    ClientState::Disabled => {
-                        // Probe the pipe so a disabled client cannot hide a
-                        // disconnect under sustained input - the keep-alive
-                        // tick is starved while recv keeps yielding records.
-                        if !probe_pipe_alive(&server) {
+                match broadcast {
+                    ClientBroadcast::Gated(frame) => {
+                        // Copy out before any `.await` - `watch::Ref` is not `Send`.
+                        let current_state = *state_receiver.borrow();
+                        match current_state {
+                            ClientState::Active => {}
+                            ClientState::Disabled => {
+                                // Probe the pipe so a disabled client cannot hide a
+                                // disconnect under sustained input - the keep-alive
+                                // tick is starved while recv keeps yielding frames.
+                                if !probe_pipe_alive(&server, &keep_alive) {
+                                    return;
+                                }
+                                tokio::task::yield_now().await;
+                                continue;
+                            }
+                        }
+                        if !write_all_framed(&server, &frame).await {
                             return;
                         }
-                        tokio::task::yield_now().await;
-                        continue;
                     }
-                }
-                let mut frame = [0u8; FRAMED_INPUT_RECORD_LENGTH];
-                frame[0] = TAG_INPUT_RECORD;
-                frame[1..].copy_from_slice(&ser_input_record);
-                if !write_framed_message(&server, &frame).await {
-                    return;
+                    ClientBroadcast::Ungated(frame) => {
+                        // An ungated frame is terminal; the write result is moot
+                        // because the routine ends regardless.
+                        let _ = write_all_framed(&server, &frame).await;
+                        return;
+                    }
                 }
             }
             changed_result = state_receiver.changed() => {
                 // Sender dropped - the daemon has removed this client from its
                 // bookkeeping, so there is nothing left to forward.
                 if changed_result.is_err() {
-                    debug!(
-                        "Client state sender dropped, stopping named pipe server routine ({:?})",
-                        server
-                    );
+                    debug!("Client state sender dropped, stopping named pipe server routine");
                     return;
                 }
                 let state = *state_receiver.borrow_and_update();
-                let frame: [u8; FRAMED_STATE_CHANGE_LENGTH] =
-                    [TAG_STATE_CHANGE, serialize_client_state(state)];
-                if !write_framed_message(&server, &frame).await {
+                if !send_message(
+                    &server,
+                    &DaemonToClient::StateChange { state: to_run_state(state) },
+                    send_max,
+                )
+                .await
+                {
                     return;
                 }
             }
             changed_result = highlight_receiver.changed() => {
                 // Sender dropped - same rationale as the `state_receiver` arm.
                 if changed_result.is_err() {
-                    debug!(
-                        "Client highlight sender dropped, stopping named pipe server routine ({:?})",
-                        server
-                    );
+                    debug!("Client highlight sender dropped, stopping named pipe server routine");
                     return;
                 }
                 let highlighted = *highlight_receiver.borrow_and_update();
-                let frame: [u8; FRAMED_HIGHLIGHT_LENGTH] =
-                    [TAG_HIGHLIGHT, serialize_highlight(highlighted)];
-                if !write_framed_message(&server, &frame).await {
+                if !send_message(
+                    &server,
+                    &DaemonToClient::Highlight { on: highlighted },
+                    send_max,
+                )
+                .await
+                {
+                    return;
+                }
+            }
+            readable = server.readable() => {
+                if readable.is_err() {
+                    return;
+                }
+                if !read_client_to_daemon(&server, &mut rx_buf, &clients, pid) {
                     return;
                 }
             }
             _ = tokio::time::sleep(Duration::from_millis(5)) => {
-                if !write_framed_message(&server, &[TAG_KEEP_ALIVE]).await {
+                if !write_all_framed(&server, &keep_alive).await {
                     return;
                 }
             }
@@ -1743,35 +1900,69 @@ async fn named_pipe_server_routine(
     }
 }
 
-/// Best-effort, non-blocking probe of the named pipe.
+/// Best-effort, non-blocking probe of the control channel.
 ///
-/// Returns `true` if a single `TAG_KEEP_ALIVE` byte either wrote
-/// successfully or returned `WouldBlock` (the pipe is still open but
-/// the OS buffer is full); `false` if any other error indicates the
-/// pipe is closed.
-fn probe_pipe_alive(server: &NamedPipeServer) -> bool {
-    match server.try_write(&[TAG_KEEP_ALIVE]) {
+/// Writes the cached keep-alive frame with a single non-blocking `try_write`
+/// (the pipe is message-mode, so the frame is one atomic message). Returns
+/// `true` if it wrote or returned `WouldBlock` (open but the OS buffer is
+/// full); `false` if any other error indicates the pipe is closed.
+///
+/// # Arguments
+///
+/// * `server`     - The connected control-channel server.
+/// * `keep_alive` - The pre-encoded keep-alive frame.
+fn probe_pipe_alive(server: &WindowsControlChannelServer, keep_alive: &[u8]) -> bool {
+    match server.try_write(keep_alive) {
         Ok(_) => return true,
         Err(e) if e.kind() == io::ErrorKind::WouldBlock => return true,
         Err(_) => {
-            debug!(
-                "Named pipe server ({:?}) is closed, stopping named pipe server routine",
-                server
-            );
+            debug!("Named pipe server is closed, stopping named pipe server routine");
             return false;
         }
     }
 }
 
-/// Write all of `frame` to the named pipe server, retrying partial
-/// writes and `WouldBlock` results until the buffer is fully drained.
+/// Encode `message` and write the resulting frame to the control channel.
 ///
-/// Returns `true` on full write, `false` if the pipe is closed.
+/// # Arguments
+///
+/// * `server`  - The connected control-channel server.
+/// * `message` - The message to encode and send.
+/// * `max`     - The negotiated maximum frame length.
+///
+/// # Returns
+///
+/// `true` on a full write, `false` if encoding failed or the pipe is closed.
+async fn send_message<T: serde::Serialize>(
+    server: &WindowsControlChannelServer,
+    message: &T,
+    max: u32,
+) -> bool {
+    match encode_frame(message, max) {
+        Ok(frame) => return write_all_framed(server, &frame).await,
+        Err(err) => {
+            error!("Failed to encode control frame: {}", err);
+            return false;
+        }
+    }
+}
+
+/// Write all of `frame` to the control channel, retrying partial writes and
+/// `WouldBlock` results until the buffer is fully drained.
+///
+/// # Arguments
+///
+/// * `server` - The connected control-channel server.
+/// * `frame`  - The already-framed bytes to write.
+///
+/// # Returns
+///
+/// `true` on a full write, `false` if the pipe is closed.
 ///
 /// # Panics
 ///
 /// Panics if waiting for the pipe to become writable returns an error.
-async fn write_framed_message(server: &NamedPipeServer, frame: &[u8]) -> bool {
+async fn write_all_framed(server: &WindowsControlChannelServer, frame: &[u8]) -> bool {
     let mut written = 0usize;
     while written < frame.len() {
         server.writable().await.unwrap_or_else(|err| {
@@ -1781,76 +1972,133 @@ async fn write_framed_message(server: &NamedPipeServer, frame: &[u8]) -> bool {
         match server.try_write(&frame[written..]) {
             Ok(n) => {
                 written += n;
-                if written < frame.len() {
-                    warn!(
-                        "Partially written data, expected {} but only wrote {} so far",
-                        frame.len(),
-                        written
-                    );
-                }
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // Try again
-                debug!("Writing to named pipe server would have blocked");
                 continue;
             }
             Err(_) => {
-                // Can happen if the pipe is closed because the
-                // client exited
-                debug!(
-                    "Named pipe server ({:?}) is closed, stopping named pipe server routine",
-                    server
-                );
+                debug!("Named pipe server is closed, stopping named pipe server routine");
                 return false;
             }
         }
     }
-    debug!("Successfully written all data");
     return true;
 }
 
-/// Read the connecting client's 4 byte little-endian process id from the pipe.
-///
-/// Reads exactly 4 bytes from `server`, retrying on `WouldBlock`, and decodes
-/// them as a `u32`. Any non-recoverable I/O error panics, as a client that
-/// cannot send its PID cannot be correlated and forwarding would be
-/// impossible.
+/// Read one complete length-prefixed frame from the control channel.
 ///
 /// # Arguments
 ///
-/// * `server` - The connected named pipe server to read from.
+/// * `server` - The connected control-channel server.
+/// * `rx_buf` - Buffer of bytes read but not yet framed; drained in place.
 ///
 /// # Returns
 ///
-/// The process id sent by the client.
-///
-/// # Panics
-///
-/// Panics if the pipe is closed before 4 bytes can be read, or if any
-/// non-`WouldBlock` I/O error occurs.
-async fn read_client_pid(server: &NamedPipeServer) -> u32 {
-    let mut buf = [0u8; SERIALIZED_PID_LENGTH];
-    let mut read = 0usize;
-    while read < SERIALIZED_PID_LENGTH {
-        server.readable().await.unwrap_or_else(|err| {
-            panic!("Named pipe server is not readable for PID handshake: {err}")
-        });
-        match server.try_read(&mut buf[read..]) {
-            Ok(0) => {
-                panic!("Named pipe server closed before PID handshake completed");
+/// The full frame (prefix included), or `None` on EOF/oversized frame/error.
+async fn read_one_frame_server(
+    server: &WindowsControlChannelServer,
+    rx_buf: &mut Vec<u8>,
+) -> Option<Vec<u8>> {
+    let mut buf = [0u8; 4096];
+    loop {
+        if rx_buf.len() >= 4 {
+            let len = u32::from_be_bytes([rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3]]);
+            if len > DEFAULT_MAX_FRAME_LEN {
+                error!("client frame length {} exceeds the maximum", len);
+                return None;
             }
-            Ok(n) => {
-                read += n;
-            }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(e) => {
-                panic!("Failed to read PID from named pipe client: {e}");
+            let total = 4 + len as usize;
+            if rx_buf.len() >= total {
+                return Some(rx_buf.drain(..total).collect());
             }
         }
+        if server.readable().await.is_err() {
+            return None;
+        }
+        match server.try_read(&mut buf) {
+            Ok(0) => return None,
+            Ok(n) => rx_buf.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(_) => return None,
+        }
     }
-    return deserialize_pid(&buf);
+}
+
+/// Read the connecting client's v1 `Hello` from the control channel.
+///
+/// # Arguments
+///
+/// * `server` - The connected control-channel server.
+/// * `rx_buf` - Buffer carrying any bytes read past the frame.
+///
+/// # Returns
+///
+/// The decoded [`Hello`], or `None` if the pipe closed or the frame did not
+/// decode as a `Hello`.
+async fn read_client_hello(
+    server: &WindowsControlChannelServer,
+    rx_buf: &mut Vec<u8>,
+) -> Option<Hello> {
+    let frame = read_one_frame_server(server, rx_buf).await?;
+    let decoded = decode_frames::<Hello>(frame, DEFAULT_MAX_FRAME_LEN).ok()?;
+    return decoded.messages.into_iter().next();
+}
+
+/// Drain any readable client-to-daemon frames and apply them.
+///
+/// `Ready`/`WindowChanged` refine the client's window handle; `ChildExited` is
+/// logged (the reaper drives removal); `KeepAlive`/`Unknown` are ignored.
+///
+/// # Arguments
+///
+/// * `server`  - The connected control-channel server.
+/// * `rx_buf`  - Buffer of bytes read but not yet framed; updated in place.
+/// * `clients` - The shared client collection.
+/// * `pid`     - Process id of the correlated client.
+///
+/// # Returns
+///
+/// `false` on EOF or a fatal read/decode error (the routine should end),
+/// otherwise `true`.
+fn read_client_to_daemon(
+    server: &WindowsControlChannelServer,
+    rx_buf: &mut Vec<u8>,
+    clients: &Arc<Mutex<Clients>>,
+    pid: u32,
+) -> bool {
+    let mut buf = [0u8; 4096];
+    match server.try_read(&mut buf) {
+        Ok(0) => return false,
+        Ok(n) => rx_buf.extend_from_slice(&buf[..n]),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => return true,
+        Err(_) => return false,
+    }
+    let decoded =
+        match decode_frames::<ClientToDaemon>(std::mem::take(rx_buf), DEFAULT_MAX_FRAME_LEN) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                error!("Failed to decode client frame: {}", err);
+                return false;
+            }
+        };
+    *rx_buf = decoded.remainder;
+    for message in decoded.messages {
+        match message {
+            ClientToDaemon::Ready { window, .. } | ClientToDaemon::WindowChanged { window } => {
+                if let Some(hwnd) = window.as_windows_hwnd() {
+                    clients.lock().unwrap().set_window_handle_for_pid(
+                        pid,
+                        HWND(hwnd as usize as *mut std::ffi::c_void),
+                    );
+                }
+            }
+            ClientToDaemon::ChildExited { code } => {
+                debug!("Client {} reported child exit with code {}", pid, code);
+            }
+            ClientToDaemon::KeepAlive | ClientToDaemon::Unknown => {}
+        }
+    }
+    return true;
 }
 
 /// Re-sizes and re-positions the given client window based on the total number of clients,
