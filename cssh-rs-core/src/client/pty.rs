@@ -17,6 +17,10 @@ const DSR_REPLY: &[u8] = b"\x1b[1;1R";
 /// and DSR replies all converge on.
 pub(crate) type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
+/// A shared PTY master handle used to resize the pseudo-terminal when the
+/// console window changes size.
+pub(crate) type SharedMaster = Arc<Mutex<Box<dyn MasterPty + Send>>>;
+
 /// The pieces of a spawned client PTY the run loop drives.
 pub(crate) struct ClientPty {
     /// Shared writer feeding the PTY master.
@@ -28,8 +32,9 @@ pub(crate) struct ClientPty {
     /// Pid of the SSH child, used as the signal target and reported to the
     /// daemon in `Ready`.
     pub(crate) child_pid: u32,
-    /// The master end; held so the PTY is not torn down early.
-    pub(crate) _master: Box<dyn MasterPty + Send>,
+    /// The master end; shared so the input thread can resize the PTY, and held
+    /// so the PTY is not torn down early.
+    pub(crate) master: SharedMaster,
 }
 
 /// Open a PTY, run `program args` on the slave, and return its handles.
@@ -93,8 +98,30 @@ pub(crate) fn spawn_client_pty(
         reader,
         child,
         child_pid,
-        _master: pair.master,
+        master: Arc::new(Mutex::new(pair.master)),
     });
+}
+
+/// Resize the PTY master to `cols` x `rows`.
+///
+/// A poisoned lock or a failed resize is ignored: the child simply keeps its
+/// previous size until the next resize event rather than aborting the session.
+///
+/// # Arguments
+///
+/// * `master` - Shared PTY master handle.
+/// * `cols`   - New column count.
+/// * `rows`   - New row count.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) fn resize_pty(master: &SharedMaster, cols: u16, rows: u16) {
+    if let Ok(master) = master.lock() {
+        let _ = master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        });
+    }
 }
 
 /// Copy the current process environment into `cmd`.

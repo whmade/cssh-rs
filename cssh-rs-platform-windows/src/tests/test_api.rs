@@ -4,9 +4,9 @@
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 
 use crate::api::{
-    clear_screen, is_windows_10, read_console_input, read_keyboard_input, set_console_border_color,
-    set_console_color, set_console_palette, snapshot_console_palette, tinted_palette,
-    utf16_buffer_to_string, ConsolePaletteSnapshot, MockWindowsApi, KEY_EVENT,
+    clear_screen, console_viewport_size, is_windows_10, read_console_input, read_keyboard_input,
+    set_console_border_color, set_console_color, set_console_palette, snapshot_console_palette,
+    tinted_palette, utf16_buffer_to_string, ConsolePaletteSnapshot, MockWindowsApi, KEY_EVENT,
 };
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::System::Console::{
@@ -855,5 +855,65 @@ mod create_process_with_args_test {
             "STARTF_USESHOWWINDOW must not be set when keyboard focus is allowed"
         );
         assert_eq!(startupinfo.wShowWindow, 0);
+    }
+}
+
+/// Tests for deriving the console viewport size that seeds and resizes the PTY.
+mod console_viewport_test {
+    use super::*;
+    use windows::Win32::System::Console::SMALL_RECT;
+
+    /// The viewport size is the inclusive width and height of the window rect.
+    #[test]
+    fn test_console_viewport_size_returns_window_dimensions() {
+        let mut mock = MockWindowsApi::new();
+        mock.expect_get_console_screen_buffer_info_ex()
+            .times(1)
+            .returning(|| {
+                return Ok(CONSOLE_SCREEN_BUFFER_INFOEX {
+                    srWindow: SMALL_RECT {
+                        Left: 0,
+                        Top: 0,
+                        Right: 209,
+                        Bottom: 49,
+                    },
+                    ..Default::default()
+                });
+            });
+
+        assert_eq!(console_viewport_size(&mock), Some((210, 50)));
+    }
+
+    /// A non-zero window origin still yields the inclusive visible span.
+    #[test]
+    fn test_console_viewport_size_accounts_for_window_origin() {
+        let mut mock = MockWindowsApi::new();
+        mock.expect_get_console_screen_buffer_info_ex()
+            .times(1)
+            .returning(|| {
+                return Ok(CONSOLE_SCREEN_BUFFER_INFOEX {
+                    srWindow: SMALL_RECT {
+                        Left: 0,
+                        Top: 186,
+                        Right: 79,
+                        Bottom: 202,
+                    },
+                    ..Default::default()
+                });
+            });
+
+        assert_eq!(console_viewport_size(&mock), Some((80, 17)));
+    }
+
+    /// A buffer-info failure degrades to `None` rather than panicking, so the
+    /// caller falls back to the default dimensions.
+    #[test]
+    fn test_console_viewport_size_error_returns_none() {
+        let mut mock = MockWindowsApi::new();
+        mock.expect_get_console_screen_buffer_info_ex()
+            .times(1)
+            .returning(|| return Err(windows::core::Error::from_thread()));
+
+        assert_eq!(console_viewport_size(&mock), None);
     }
 }

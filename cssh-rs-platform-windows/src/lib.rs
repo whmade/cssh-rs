@@ -45,11 +45,11 @@ pub const MAX_WINDOW_TITLE_LENGTH: usize = 2048;
 
 #[cfg(windows)]
 pub use api::{
-    arrange_console, build_command_line, clear_screen, get_console_input_buffer,
-    get_console_output_buffer, get_console_title, is_windows_10, read_console_input,
-    read_keyboard_input, set_console_border_color, set_console_color, set_console_palette,
-    snapshot_console_palette, tinted_palette, utf16_buffer_to_string, ConsolePaletteSnapshot,
-    DefaultWindowsApi, WindowsApi, KEY_EVENT,
+    arrange_console, build_command_line, clear_screen, console_viewport_size,
+    get_console_input_buffer, get_console_output_buffer, get_console_title, is_windows_10,
+    read_console_input, read_keyboard_input, set_console_border_color, set_console_color,
+    set_console_palette, snapshot_console_palette, tinted_palette, utf16_buffer_to_string,
+    ConsolePaletteSnapshot, DefaultWindowsApi, WindowsApi, KEY_EVENT, WINDOW_BUFFER_SIZE_EVENT,
 };
 
 #[cfg(windows)]
