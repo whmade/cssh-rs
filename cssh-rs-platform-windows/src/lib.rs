@@ -52,5 +52,8 @@ pub use api::{
     DefaultWindowsApi, WindowsApi, KEY_EVENT,
 };
 
+#[cfg(windows)]
+pub use traits::{control_endpoint, WindowsControlChannelClient, WindowsControlChannelServer};
+
 #[cfg(all(windows, any(test, feature = "mock")))]
 pub use api::MockWindowsApi;
