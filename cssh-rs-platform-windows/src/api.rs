@@ -300,6 +300,23 @@ pub trait WindowsApi: Send + Sync {
     /// Result indicating success or failure of the operation
     fn interrupt_console_process_group(&self) -> windows::core::Result<()>;
 
+    /// Send a console control event to a process group.
+    /// <https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent>
+    ///
+    /// # Arguments
+    ///
+    /// * `ctrl_event`       - `CTRL_C_EVENT` or `CTRL_BREAK_EVENT`.
+    /// * `process_group_id` - Process id of the group leader.
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure of the operation
+    fn generate_console_ctrl_event(
+        &self,
+        ctrl_event: u32,
+        process_group_id: u32,
+    ) -> windows::core::Result<()>;
+
     /// Install a console control handler that shields this process from
     /// CTRL+C and CTRL+Break.
     ///
@@ -854,6 +871,16 @@ impl WindowsApi for DefaultWindowsApi {
     fn interrupt_console_process_group(&self) -> windows::core::Result<()> {
         return unsafe {
             windows::Win32::System::Console::GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
+        };
+    }
+
+    fn generate_console_ctrl_event(
+        &self,
+        ctrl_event: u32,
+        process_group_id: u32,
+    ) -> windows::core::Result<()> {
+        return unsafe {
+            windows::Win32::System::Console::GenerateConsoleCtrlEvent(ctrl_event, process_group_id)
         };
     }
 

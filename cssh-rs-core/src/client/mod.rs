@@ -4,74 +4,53 @@
 #![allow(clippy::needless_return, clippy::doc_overindented_list_items)]
 #![warn(missing_docs)]
 
-use log::{error, info, warn};
+mod console_mode;
+mod dispatch;
+mod input_bytes;
+mod pty;
+
+use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::{BufReader, Read, Write};
 use std::path::Path;
-use std::process::ExitStatus;
+use std::sync::Arc;
 use std::time::Duration;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_C, VK_CANCEL};
 
-use crate::utils::config::ClientConfig;
-use crate::utils::windows::{
-    get_console_title, set_console_palette, snapshot_console_palette, tinted_palette,
-    ConsolePaletteSnapshot, WindowsApi,
-};
+use log::{error, info, warn};
 use ssh2_config::{ParseRule, SshConfig};
-use tokio::net::windows::named_pipe::NamedPipeClient;
-use tokio::process::{Child, Command};
-use tokio::sync::watch;
-use tokio::{io::Interest, net::windows::named_pipe::ClientOptions};
-use windows::Win32::System::Console::{
-    CONSOLE_CHARACTER_ATTRIBUTES, ENABLE_PROCESSED_INPUT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
-    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
-    SHIFT_PRESSED, STD_INPUT_HANDLE,
-};
-
-use cssh_rs_protocol::{
-    deserialization::parse_daemon_to_client_messages, serialization::serialize_pid, ClientState,
-    DaemonToClientMessage, SERIALIZED_INPUT_RECORD_0_LENGTH, SERIALIZED_PID_LENGTH,
-};
+use tokio::sync::{oneshot, watch};
+use windows::Win32::System::Console::CONSOLE_CHARACTER_ATTRIBUTES;
 
 use cssh_rs_meta::PACKAGE_NAME;
+use cssh_rs_platform::ControlChannelClient;
+use cssh_rs_protocol::v1::capability::negotiate_max_frame_len;
+use cssh_rs_protocol::v1::codec::{decode_frames, encode_frame};
+use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
+use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
+use cssh_rs_protocol::v1::message::DaemonToClient;
+use cssh_rs_protocol::v1::version::{ProtocolVersion, Role};
+use cssh_rs_protocol::ClientState;
 
-use crate::utils::constants::PIPE_NAME;
+use crate::client::console_mode::ConsoleModeGuard;
+use crate::client::dispatch::dispatch_daemon_message;
+use crate::client::input_bytes::key_event_record_to_bytes;
+use crate::client::pty::{scan_and_answer_dsr, spawn_client_pty, write_to_master, SharedWriter};
+use crate::utils::config::ClientConfig;
+use crate::utils::windows::{
+    get_console_title, read_keyboard_input, set_console_palette, snapshot_console_palette,
+    tinted_palette, ConsolePaletteSnapshot, WindowsApi, WindowsControlChannelClient,
+};
 
-/// Possible results when reading from the named pipe and writing to the
-/// current process's stdinput.
-enum ReadWriteResult {
-    /// We wrote all complete [INPUT_RECORD_0] sequences we read from
-    /// the named pipe to stdin.
-    Success {
-        /// Incomplete [INPUT_RECORD_0] sequence.
-        ///
-        /// What we read from the named pipe is a serialized [INPUT_RECORD_0].`KeyEvent`.
-        /// As this is simply a [`SERIALIZED_INPUT_RECORD_0_LENGTH`] byte long sequence and we try to read from the pipe until we
-        /// have some of the data it can happen that during any one read/write iteration we don't
-        /// read the full sequence so we must keep track of what we read for next iterations
-        /// where we will be able to read the remainder of the sequence.
-        remainder: Vec<u8>,
-        /// List of [KEY_EVENT_RECORD]s we have read from the named pipe.
-        ///
-        /// Used to detect the `Alt + Shift + C` key combination used
-        /// to close the console window after the client process encountered an unexpected error.
-        key_event_records: Vec<KEY_EVENT_RECORD>,
-    },
-    /// Trying to read from the pipe would require us to wait for data.
-    WouldBlock,
-    /// Something went wrong.
-    Err,
-    /// The pipe was closed.
-    Disconnect,
-}
+/// Length in bytes of the big-endian `u32` frame length prefix.
+const LENGTH_PREFIX_LEN: usize = 4;
+
+// Fixed until the PTY follows the console viewport (GitHub #306).
+const PTY_ROWS: u16 = 50;
+const PTY_COLS: u16 = 200;
 
 /// Duration of the action-feedback flash painted on a highlighted client
 /// when the user toggles the state.
 const HIGHLIGHT_FLASH_DURATION: Duration = Duration::from_millis(250);
-
-/// Grace period for the SSH child to exit after the console interrupt before
-/// [`shutdown_child`] force-kills it.
-const CHILD_EXIT_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
 /// A state repaint: `Tint` swaps the console palette so the window background
 /// takes on the state color, `Restore` writes the saved palette back.
@@ -184,85 +163,6 @@ fn paint_console_color(
     *last = Some(target);
 }
 
-/// Write the given [INPUT_RECORD_0] to the console input buffer using the provided API.
-///
-/// # Arguments
-///
-/// * `api` - The Windows API implementation to use.
-/// * `input_record` - The [INPUT_RECORD_0].`KeyEvent` input record to write.
-fn write_console_input(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
-    let buffer: [INPUT_RECORD; 1] = [INPUT_RECORD {
-        EventType: KEY_EVENT as u16,
-        Event: input_record,
-    }];
-    let mut nb_of_events_written = 0u32;
-    match api.write_console_input(&buffer, &mut nb_of_events_written) {
-        Ok(_) => {
-            if nb_of_events_written == 0 {
-                error!("Failed to write console input");
-                error!("{:?}", api.get_last_error());
-            }
-        }
-        Err(_) => {
-            error!("Failed to write console input");
-            error!("{:?}", api.get_last_error());
-        }
-    };
-}
-
-/// Report whether a forwarded key event is Ctrl+C or Ctrl+Break.
-///
-/// # Arguments
-///
-/// * `key_event` - The key event record forwarded by the daemon.
-fn is_console_signal_key(key_event: &KEY_EVENT_RECORD) -> bool {
-    return key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0
-        && matches!(VIRTUAL_KEY(key_event.wVirtualKeyCode), VK_C | VK_CANCEL);
-}
-
-/// Report whether the console input buffer has `ENABLE_PROCESSED_INPUT` set,
-/// treating any query failure as not set.
-///
-/// # Arguments
-///
-/// * `api` - The Windows API implementation to use.
-fn processed_input_enabled(api: &dyn WindowsApi) -> bool {
-    let Ok(handle) = api.get_std_handle(STD_INPUT_HANDLE) else {
-        return false;
-    };
-    return match api.get_console_mode(handle) {
-        Ok(mode) => mode.0 & ENABLE_PROCESSED_INPUT.0 != 0,
-        Err(_) => false,
-    };
-}
-
-/// Replay one daemon-forwarded key event into the client console.
-///
-/// Ctrl+C and Ctrl+Break injected via `WriteConsoleInputW` never raise a
-/// console control signal, so when the input buffer has processed input
-/// enabled they are re-raised via `GenerateConsoleCtrlEvent`; all other
-/// records (and raw-mode consoles) are written verbatim.
-///
-/// # Arguments
-///
-/// * `api`          - The Windows API implementation to use.
-/// * `input_record` - The [INPUT_RECORD_0].`KeyEvent` record to replay.
-fn replay_input_record(api: &dyn WindowsApi, input_record: INPUT_RECORD_0) {
-    let key_event = unsafe { input_record.KeyEvent };
-    if is_console_signal_key(&key_event) && processed_input_enabled(api) {
-        // Re-raise on key-down only, dropping both records so no literal Ctrl+C
-        // reaches the child. Group 0 signals this client too, but the startup
-        // handler shields it.
-        if key_event.bKeyDown.as_bool() {
-            if let Err(err) = api.interrupt_console_process_group() {
-                warn!("Failed to relay console control event: {}", err);
-            }
-        }
-        return;
-    }
-    write_console_input(api, input_record);
-}
-
 /// Resolve the username from the provided value or SSH config.
 ///
 /// # Arguments
@@ -330,204 +230,213 @@ fn build_ssh_arguments(
     return arguments;
 }
 
-/// Launch the SSH process.
-///
-/// The process might overwrite the console title once it launched, so we wait for that
-/// to happen and set the title again.
+/// Connect to the daemon control channel, retrying while the daemon binds it.
 ///
 /// # Arguments
 ///
-/// * `username`    - The username to connect with.
-/// * `host`        - The hostname to connect to.
-/// * `port`        - Optional port number (0-65535).
-/// * `config`      - The client config indicating how to call the SSH program.
+/// * `client`   - The control-channel client to connect.
+/// * `endpoint` - Named-pipe path of the daemon control channel.
 ///
 /// # Returns
 ///
-/// The handle to created [Child] process.
-async fn launch_ssh_process(
-    username: &str,
-    host: &str,
-    port: Option<u16>,
-    config: &ClientConfig,
-) -> Child {
-    let arguments = build_ssh_arguments(username, host, port, config);
-    let child = Command::new(&config.program)
-        .args(arguments.clone())
-        // Backstop for paths that bypass `shutdown_child` (e.g. a panic).
-        .kill_on_drop(true)
-        .spawn()
-        .unwrap_or_else(|err| {
-            let args: String = arguments.join(" ");
-            error!("{}", err);
-            panic!(
-                "Failed to launch process `{}` with arguments `{}`",
-                config.program, args
-            )
-        });
-    return child;
-}
-
-/// Testable view of the SSH child process used by [`shutdown_child`].
-trait ChildProcess {
-    /// Wait until the child exits.
-    ///
-    /// # Returns
-    ///
-    /// The child's [`ExitStatus`], or the error reported while waiting.
-    async fn wait(&mut self) -> io::Result<ExitStatus>;
-
-    /// Force-kill the child and wait until it has terminated.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` once terminated, or the error reported by the kill.
-    async fn kill(&mut self) -> io::Result<()>;
-}
-
-impl ChildProcess for Child {
-    async fn wait(&mut self) -> io::Result<ExitStatus> {
-        return Child::wait(self).await;
+/// `true` once connected, `false` after about 30 seconds of failed attempts.
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn connect_with_retry(client: &mut WindowsControlChannelClient, endpoint: &OsStr) -> bool {
+    for _ in 0..600 {
+        if client.connect(endpoint).await.is_ok() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-
-    async fn kill(&mut self) -> io::Result<()> {
-        Child::start_kill(self)?;
-        Child::wait(self).await?;
-        return Ok(());
-    }
+    return false;
 }
 
-/// Guarantee the SSH child terminates once the client's run loop has ended.
-///
-/// Interrupts the console process group for a graceful exit, then force-kills
-/// after [`CHILD_EXIT_GRACE_PERIOD`]; children that handle the signal themselves
-/// (e.g. cmd.exe) would otherwise keep the client window open forever.
+/// Exchange `Hello`s and receive the `Welcome`.
 ///
 /// # Arguments
 ///
-/// * `api`   - The Windows API implementation to use.
-/// * `child` - Handle to the SSH child process.
-async fn shutdown_child(api: &dyn WindowsApi, child: &mut impl ChildProcess) {
-    // Interrupt the whole group so even a child that ignores Ctrl+C exits; the
-    // startup handler shields this client so it survives to force the kill.
-    if let Err(err) = api.interrupt_console_process_group() {
-        warn!("Failed to interrupt console process group: {}", err);
-    }
-    match tokio::time::timeout(CHILD_EXIT_GRACE_PERIOD, child.wait()).await {
-        Ok(Ok(exit_status)) => {
-            info!("Child exited after console interrupt: {}", exit_status);
-            return;
-        }
-        Ok(Err(err)) => {
-            warn!("Failed to wait for child exit: {}", err);
-        }
-        Err(_) => {
-            warn!(
-                "Child still running {}ms after console interrupt; force-killing it",
-                CHILD_EXIT_GRACE_PERIOD.as_millis()
-            );
-        }
-    }
-    if let Err(err) = child.kill().await {
-        error!("Failed to kill child process: {}", err);
-    }
-    return;
-}
-
-/// Read all available daemon-to-client messages from the named pipe and apply them.
+/// * `client` - The connected control-channel client.
 ///
-/// Input records are written to the console input buffer using the provided API
-/// and their key-event payloads are returned via `ReadWriteResult::Success` so
-/// the caller can detect the Alt+Shift+C close combination. State-change frames
-/// are forwarded via [`watch::Sender::send_replace`] on `state_sender`, making the
-/// authoritative [`ClientState`] visible to every watch subscriber (currently
-/// the visuals task in [`main`]) without coupling this loop to any
-/// state-dependent rendering. Keep-alive frames are ignored. Partial trailing
-/// frames are returned as `remainder` for the next call to prepend.
-///
-/// # Arguments
-///
-/// * `api`                 - The Windows API implementation to use.
-/// * `named_pipe_client`   - The [Windows named pipe][1] client that has successfully connected to
-///                           the named pipe created by the daemon.
-/// * `internal_buffer`     - Vector containing the unconsumed bytes (possibly an
-///                           incomplete trailing frame) from a previous call.
-/// * `state_sender`            - Watch sender used to broadcast every
-///                           [`DaemonToClientMessage::StateChange`] payload as
-///                           the client's authoritative [`ClientState`].
-/// * `highlight_sender`        - Watch sender used to broadcast every
-///                           [`DaemonToClientMessage::Highlight`] payload as
-///                           the client's current highlight flag.
 /// # Returns
 ///
-/// A `ReadWriteResult` indicating whether we were able to read from the named pipe and write the available INPUT_RECORDs
-/// to the console input buffer or not.
+/// The negotiated maximum frame length and the bytes received past the
+/// `Welcome`.
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn client_handshake(client: &mut WindowsControlChannelClient) -> (u32, Vec<u8>) {
+    let hello = Hello {
+        protocol_version: ProtocolVersion::new(1, 0),
+        role: Role::Client,
+        pid: std::process::id(),
+        capabilities: Vec::new(),
+        max_frame_len: DEFAULT_MAX_FRAME_LEN,
+    };
+    if let Ok(frame) = encode_frame(&hello, DEFAULT_MAX_FRAME_LEN) {
+        if let Err(err) = client.send(&frame).await {
+            warn!("Failed to send client Hello: {}", err);
+        }
+    }
+
+    let mut pending = Vec::new();
+    let max_frame_len =
+        match read_message::<Hello>(client, &mut pending, DEFAULT_MAX_FRAME_LEN).await {
+            Some(daemon_hello) => {
+                negotiate_max_frame_len(DEFAULT_MAX_FRAME_LEN, daemon_hello.max_frame_len)
+            }
+            None => DEFAULT_MAX_FRAME_LEN,
+        };
+    let _ = read_message::<Welcome>(client, &mut pending, max_frame_len).await;
+    return (max_frame_len, pending);
+}
+
+/// Receive until `pending` holds a complete frame, then split it off.
 ///
-/// [1]: https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipes
-async fn read_write_loop(
+/// # Arguments
+///
+/// * `client`        - The connected control-channel client.
+/// * `pending`       - Bytes received but not yet returned as a frame.
+/// * `max_frame_len` - Largest frame body to accept.
+///
+/// # Returns
+///
+/// The frame including its length prefix, or `None` on disconnect, error, or
+/// an oversized frame.
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn read_frame(
+    client: &mut WindowsControlChannelClient,
+    pending: &mut Vec<u8>,
+    max_frame_len: u32,
+) -> Option<Vec<u8>> {
+    let mut buffer = [0u8; 8192];
+    loop {
+        if let Some(prefix) = pending.first_chunk::<LENGTH_PREFIX_LEN>() {
+            let body_length = u32::from_be_bytes(*prefix);
+            if body_length > max_frame_len {
+                error!("Control frame length {} exceeds the maximum", body_length);
+                return None;
+            }
+            let frame_length = LENGTH_PREFIX_LEN + body_length as usize;
+            if pending.len() >= frame_length {
+                return Some(pending.drain(..frame_length).collect());
+            }
+        }
+        match client.recv(&mut buffer).await {
+            Ok(0) => return None,
+            Ok(received) => pending.extend_from_slice(&buffer[..received]),
+            Err(err) => {
+                error!("Control channel receive error: {}", err);
+                return None;
+            }
+        }
+    }
+}
+
+/// Read one frame and decode it as `T`.
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn read_message<T: serde::de::DeserializeOwned>(
+    client: &mut WindowsControlChannelClient,
+    pending: &mut Vec<u8>,
+    max_frame_len: u32,
+) -> Option<T> {
+    let frame = read_frame(client, pending, max_frame_len).await?;
+    let decoded = decode_frames::<T>(frame, max_frame_len).ok()?;
+    return decoded.messages.into_iter().next();
+}
+
+/// Dispatch daemon messages until the daemon terminates or disconnects, or the
+/// SSH child exits.
+///
+/// # Arguments
+///
+/// * `api`              - The Windows API implementation to use.
+/// * `client`           - The connected control-channel client.
+/// * `master`           - Shared PTY master writer.
+/// * `child_pid`        - Process id of the SSH child.
+/// * `state_sender`     - Watch sender for the client state.
+/// * `highlight_sender` - Watch sender for the highlight flag.
+/// * `max_frame_len`    - The negotiated maximum frame length.
+/// * `pending`          - Bytes received during the handshake but not consumed.
+/// * `child_exit`       - Receives the SSH child's exit code.
+#[allow(clippy::too_many_arguments)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn run_control_channel(
     api: &dyn WindowsApi,
-    named_pipe_client: &NamedPipeClient,
-    internal_buffer: &mut Vec<u8>,
+    mut client: WindowsControlChannelClient,
+    master: SharedWriter,
+    child_pid: u32,
     state_sender: &watch::Sender<ClientState>,
     highlight_sender: &watch::Sender<bool>,
-) -> ReadWriteResult {
-    let mut buf: [u8; SERIALIZED_INPUT_RECORD_0_LENGTH * 10] =
-        [0; SERIALIZED_INPUT_RECORD_0_LENGTH * 10];
-    match named_pipe_client.try_read(&mut buf) {
-        Ok(0) => {
-            // Seems to only happen if the pipe is closed/server disconnects
-            // indicating that the daemon has been closed.
-            // Exit the client too in that case.
-            return ReadWriteResult::Disconnect;
-        }
-        Ok(n) => {
-            internal_buffer.extend_from_slice(&buf[..n]);
-            let (messages, remainder) = parse_daemon_to_client_messages(internal_buffer);
-            let mut key_event_records: Vec<KEY_EVENT_RECORD> = Vec::new();
-            for message in messages {
-                match message {
-                    DaemonToClientMessage::InputRecord(input_record) => {
-                        replay_input_record(api, input_record);
-                        key_event_records.push(unsafe { input_record.KeyEvent });
+    max_frame_len: u32,
+    mut pending: Vec<u8>,
+    mut child_exit: oneshot::Receiver<i32>,
+) {
+    loop {
+        tokio::select! {
+            frame = read_frame(&mut client, &mut pending, max_frame_len) => {
+                let Some(frame) = frame else {
+                    return;
+                };
+                let Ok(decoded) = decode_frames::<DaemonToClient>(frame, max_frame_len) else {
+                    return;
+                };
+                for message in decoded.messages {
+                    let flow = dispatch_daemon_message(
+                        api,
+                        message,
+                        &*master,
+                        child_pid,
+                        state_sender,
+                        highlight_sender,
+                    );
+                    if flow.is_break() {
+                        return;
                     }
-                    DaemonToClientMessage::StateChange(state) => {
-                        state_sender.send_replace(state);
-                    }
-                    DaemonToClientMessage::Highlight(highlighted) => {
-                        highlight_sender.send_replace(highlighted);
-                    }
-                    DaemonToClientMessage::KeepAlive => {}
                 }
             }
-            return ReadWriteResult::Success {
-                remainder,
-                key_event_records,
-            };
-        }
-        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-            return ReadWriteResult::WouldBlock;
-        }
-        Err(e) => {
-            error!("{}", e);
-            return ReadWriteResult::Err;
+            exit_code = &mut child_exit => {
+                if let Ok(code) = exit_code {
+                    info!("SSH child exited with code {}", code);
+                }
+                return;
+            }
         }
     }
 }
 
-/// Checks if a key event represents the Alt+Shift+C combination.
+/// Render the PTY output to this window from a dedicated thread.
 ///
 /// # Arguments
 ///
-/// * `key_event` - The key event record to check.
+/// * `reader` - Reader over the PTY master.
+/// * `master` - Shared PTY master writer, for the DSR reply.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn spawn_output_reader(mut reader: Box<dyn Read + Send>, master: SharedWriter) {
+    std::thread::spawn(move || {
+        let mut carry = Vec::new();
+        let mut buffer = [0u8; 8192];
+        let mut stdout = std::io::stdout();
+        while let Ok(received @ 1..) = reader.read(&mut buffer) {
+            let rendered = scan_and_answer_dsr(&buffer[..received], &mut carry, &*master);
+            let _ = stdout.write_all(&rendered);
+            let _ = stdout.flush();
+        }
+    });
+}
+
+/// Forward this window's own keystrokes to the PTY master from a dedicated
+/// thread, so a broadcast line stays editable here.
 ///
-/// # Returns
+/// # Arguments
 ///
-/// `true` if the key event represents Alt+Shift+C, `false` otherwise.
-fn is_alt_shift_c_combination(key_event: &KEY_EVENT_RECORD) -> bool {
-    return (key_event.dwControlKeyState & LEFT_ALT_PRESSED >= 1
-        || key_event.dwControlKeyState & RIGHT_ALT_PRESSED == 1)
-        && key_event.dwControlKeyState & SHIFT_PRESSED >= 1
-        && key_event.wVirtualKeyCode == VK_C.0;
+/// * `api`    - The Windows API implementation to use.
+/// * `master` - Shared PTY master writer.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn spawn_local_input<A: WindowsApi + Clone + 'static>(api: A, master: SharedWriter) {
+    std::thread::spawn(move || loop {
+        let key = unsafe { read_keyboard_input(&api).KeyEvent };
+        if key.bKeyDown.as_bool() {
+            write_to_master(&*master, &key_event_record_to_bytes(&key));
+        }
+    });
 }
 
 /// Replaces placeholders in SSH command arguments.
@@ -550,153 +459,6 @@ fn replace_argument_placeholders(
         .iter()
         .map(|arg| return arg.replace(placeholder, replacement))
         .collect();
-}
-
-/// Send this process's id over the pipe to the daemon as a 4 byte
-/// little-endian sequence.
-///
-/// The daemon uses the PID to match the pipe connection to the correct
-/// [`crate::daemon`] `Client` entry. Without this handshake the daemon will
-/// not forward any input records.
-///
-/// # Arguments
-///
-/// * `named_pipe_client` - The connected pipe client to write the PID to.
-///
-/// # Panics
-///
-/// Panics if the pipe write fails in a way that cannot be retried.
-async fn send_pid_handshake(named_pipe_client: &NamedPipeClient) {
-    let pid_bytes = serialize_pid(std::process::id());
-    let mut written = 0usize;
-    while written < SERIALIZED_PID_LENGTH {
-        named_pipe_client.writable().await.unwrap_or_else(|err| {
-            panic!("Named pipe client is not writable for PID handshake: {err}")
-        });
-        match named_pipe_client.try_write(&pid_bytes[written..]) {
-            Ok(0) => {
-                panic!("Named pipe closed before PID handshake could complete");
-            }
-            Ok(n) => {
-                written += n;
-            }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(e) => {
-                panic!("Failed to send PID handshake to daemon: {e}");
-            }
-        }
-    }
-    return;
-}
-
-/// The main run loop of the client.
-///
-/// Connects to the named pipe opened by the daemon, reads all input records from it
-/// and replays them to the console input buffer of the given child process.
-/// Handles the `Alt + Shift + C` key combination used to close the console window
-/// after the child process encountered an unexpected error.
-///
-/// # Arguments
-///
-/// * `api`         - The Windows API implementation to use.
-/// * `child`       - Handle to the running SSH process.
-/// * `state_sender`    - Watch sender used by [`read_write_loop`] to broadcast the
-///                   client's authoritative [`ClientState`] to subscribers
-///                   such as the visuals task in [`main`].
-/// * `highlight_sender`- Watch sender used by [`read_write_loop`] to broadcast the
-///                   client's current highlight flag.
-async fn run(
-    api: &dyn WindowsApi,
-    child: &mut Child,
-    state_sender: &watch::Sender<ClientState>,
-    highlight_sender: &watch::Sender<bool>,
-) {
-    // Many clients trying to open the pipe at the same time can cause
-    // a file not found error, so keep trying until we managed to open it
-    let named_pipe_client: NamedPipeClient = loop {
-        match ClientOptions::new().open(PIPE_NAME) {
-            Ok(named_pipe_client) => {
-                break named_pipe_client;
-            }
-            Err(_) => {
-                continue;
-            }
-        }
-    };
-    // Identify ourselves to the daemon's pipe server by sending our PID.
-    // The daemon uses this to correlate this pipe connection to the corresponding
-    // client in its internal bookkeeping.
-    send_pid_handshake(&named_pipe_client).await;
-    let mut child_error = false;
-    let mut internal_buffer: Vec<u8> = Vec::new();
-    loop {
-        named_pipe_client
-            .ready(Interest::READABLE)
-            .await
-            .unwrap_or_else(|err| {
-                error!("{}", err);
-                panic!("Named client pipe is not ready to be read",)
-            });
-
-        match read_write_loop(
-            api,
-            &named_pipe_client,
-            &mut internal_buffer,
-            state_sender,
-            highlight_sender,
-        )
-        .await
-        {
-            ReadWriteResult::Success {
-                remainder,
-                key_event_records,
-            } => {
-                internal_buffer = remainder;
-                if child_error {
-                    for key_event in key_event_records.into_iter() {
-                        if is_alt_shift_c_combination(&key_event) {
-                            return;
-                        }
-                    }
-                }
-            }
-            ReadWriteResult::WouldBlock | ReadWriteResult::Err => {
-                // Sleep some time to avoid hogging 100% CPU usage.
-                tokio::time::sleep(Duration::from_nanos(5)).await;
-            }
-            ReadWriteResult::Disconnect => {
-                warn!("Encountered disconnect when trying to read from named pipe");
-                break;
-            }
-        }
-        match child.try_wait() {
-            Ok(Some(exit_status)) => match exit_status.code().unwrap() {
-                0 | 1 | 130 => {
-                    // 0 -> last command successful
-                    // 1 -> last command unsuccessful
-                    // 130 -> last command cancelled (Ctrl + C)
-                    info!(
-                        "Application terminated, last exit code: {}",
-                        exit_status.code().unwrap()
-                    );
-                    break;
-                }
-                _ => {
-                    if !child_error {
-                        println!("Failed to establish SSH connection: {exit_status}");
-                        println!("Shift-Alt-C to exit");
-                        child_error = true;
-                    }
-                }
-            },
-            Ok(None) => (
-                // child is still running
-            ),
-            Err(e) => panic!("{}", e),
-        }
-    }
 }
 
 /// Splits `host` on its trailing `:port` suffix (if any) and parses
@@ -833,25 +595,24 @@ async fn run_visuals_loop(
 
 /// The entrypoint for the `client` subcommand with API dependency injection.
 ///
-/// Spawns a tokio background thread to ensure the console window title is not replaced
-/// by the name of the child process once its launched.
-/// Starts the SSH process as child process.
-/// Executes the main run loop.
+/// Runs `ssh` inside a ConPTY that receives both the daemon-broadcast and this
+/// window's own keystrokes, and renders its output to this window.
 ///
 /// # Arguments
 ///
-/// * `api`         - The Windows API implementation to use.
-/// * `host`        - The name of the host to connect to, optionally with `:port` suffix.
-/// * `username`    - The username to be used.
-///                   Will try to resolve the correct username from the ssh config
-///                   if none is given.
-/// * `cli_port`    - Optional port from CLI option. Inline port takes precedence.
-/// * `config`      - A reference to the `ClientConfig`.
-pub async fn main(
-    api: &dyn WindowsApi,
+/// * `api`            - The Windows API implementation to use.
+/// * `host`           - The name of the host to connect to, optionally with `:port` suffix.
+/// * `username`       - The username to be used. Resolved from the SSH config if `None`.
+/// * `cli_port`       - Optional port from CLI option. Inline port takes precedence.
+/// * `daemon_channel` - Named-pipe path of the daemon control channel.
+/// * `config`         - A reference to the `ClientConfig`.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub async fn main<A: WindowsApi + Clone + 'static>(
+    api: &A,
     host: String,
     username: Option<String>,
     cli_port: Option<u16>,
+    daemon_channel: Option<String>,
     config: &ClientConfig,
 ) {
     // Shield this client from relayed CTRL+C/CTRL+Break so only the SSH child reacts.
@@ -859,26 +620,66 @@ pub async fn main(
         warn!("Failed to install console control handler: {}", err);
     }
 
+    let Some(daemon_channel) = daemon_channel else {
+        error!("The client requires --daemon-channel");
+        return;
+    };
+
     // Snapshot the palette before the SSH child writes, so a later tint restores
     // the pristine colors and reads the true default attribute rather than one
     // the child may have changed.
     let base_palette = snapshot_console_palette(api);
+    let _console_mode_guard = ConsoleModeGuard::apply(api);
 
     let (state_sender, state_receiver) = watch::channel(ClientState::Active);
     let (highlight_sender, highlight_receiver) = watch::channel(false);
 
     let (host, inline_port) = split_host_and_inline_port(&host);
     let port = inline_port.or(cli_port);
-
     let resolved_username = resolve_username(username, host, config);
     let console_title = build_console_title(&resolved_username, host, port);
 
-    let title_task = run_title_loop(api, console_title);
-    let child_task = async {
-        let mut child = launch_ssh_process(&resolved_username, host, port, config).await;
-        run(api, &mut child, &state_sender, &highlight_sender).await;
-        return child;
+    let mut control_channel = WindowsControlChannelClient::new();
+    if !connect_with_retry(&mut control_channel, OsStr::new(&daemon_channel)).await {
+        error!("Failed to connect to the daemon control channel");
+        return;
+    }
+    let (max_frame_len, pending) = client_handshake(&mut control_channel).await;
+
+    let ssh_arguments = build_ssh_arguments(&resolved_username, host, port, config);
+    let mut pty = match spawn_client_pty(&config.program, &ssh_arguments, PTY_ROWS, PTY_COLS) {
+        Ok(pty) => pty,
+        Err(err) => {
+            error!("Failed to spawn `{}` under a PTY: {}", config.program, err);
+            return;
+        }
     };
+
+    spawn_output_reader(pty.reader, Arc::clone(&pty.writer));
+    spawn_local_input(api.clone(), Arc::clone(&pty.writer));
+
+    let mut child_killer = pty.child.clone_killer();
+    let (child_exit_sender, child_exit_receiver) = oneshot::channel();
+    tokio::task::spawn_blocking(move || {
+        let exit_code = pty
+            .child
+            .wait()
+            .map_or(1, |status| return status.exit_code() as i32);
+        let _ = child_exit_sender.send(exit_code);
+    });
+
+    let control_task = run_control_channel(
+        api,
+        control_channel,
+        pty.writer,
+        pty.child_pid,
+        &state_sender,
+        &highlight_sender,
+        max_frame_len,
+        pending,
+        child_exit_receiver,
+    );
+    let title_task = run_title_loop(api, console_title);
     let visuals_task = run_visuals_loop(
         api,
         state_receiver,
@@ -890,17 +691,19 @@ pub async fn main(
 
     // The title and visuals tasks are infinite by construction; if either
     // ever completes, that is a logic bug, not a shutdown path.
-    let mut child = tokio::select! {
-        child = child_task => child,
+    tokio::select! {
+        _ = control_task => {}
         _ = title_task => {
             panic!("Title task should never complete");
         }
         _ = visuals_task => {
             panic!("Visuals task should never complete");
         }
-    };
+    }
 
-    shutdown_child(api, &mut child).await;
+    if let Err(err) = child_killer.kill() {
+        warn!("Failed to kill SSH child on shutdown: {}", err);
+    }
 }
 
 #[cfg(test)]
