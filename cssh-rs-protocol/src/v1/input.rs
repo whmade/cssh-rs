@@ -45,9 +45,8 @@ pub enum ClientRunState {
 
 /// An out-of-band control signal delivered to a client's process group.
 ///
-/// These cannot ride the input stream: Ctrl+Break has no input-byte
-/// encoding, and Ctrl+C is delivered as a process-group signal rather than a
-/// `0x03` byte.
+/// Ctrl+Break has no input-byte encoding, so it can only travel here; the
+/// daemon sends Ctrl+C inline as its `0x03` byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalKind {

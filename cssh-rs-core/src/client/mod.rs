@@ -6,7 +6,7 @@
 
 mod console_mode;
 mod dispatch;
-mod input_bytes;
+pub(crate) mod input_bytes;
 mod pty;
 
 use std::ffi::OsStr;
@@ -262,7 +262,7 @@ async fn connect_with_retry(client: &mut WindowsControlChannelClient, endpoint: 
 /// The negotiated maximum frame length and the bytes received past the
 /// `Welcome`.
 #[cfg_attr(coverage_nightly, coverage(off))]
-async fn client_handshake(client: &mut WindowsControlChannelClient) -> (u32, Vec<u8>) {
+pub(crate) async fn client_handshake(client: &mut WindowsControlChannelClient) -> (u32, Vec<u8>) {
     let hello = Hello {
         protocol_version: ProtocolVersion::new(1, 0),
         role: Role::Client,
@@ -332,7 +332,7 @@ async fn read_frame(
 
 /// Read one frame and decode it as `T`.
 #[cfg_attr(coverage_nightly, coverage(off))]
-async fn read_message<T: serde::de::DeserializeOwned>(
+pub(crate) async fn read_message<T: serde::de::DeserializeOwned>(
     client: &mut WindowsControlChannelClient,
     pending: &mut Vec<u8>,
     max_frame_len: u32,

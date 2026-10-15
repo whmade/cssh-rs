@@ -205,6 +205,17 @@ impl WindowsControlChannelServer {
         let ready = self.pipe.ready(Interest::READABLE).await?;
         return Ok(ready.is_readable());
     }
+
+    /// Write `frame` without waiting for the pipe to become writable.
+    ///
+    /// # Arguments
+    /// * `frame` - Bytes to write.
+    ///
+    /// # Returns
+    /// The number of bytes written, or the I/O error (`WouldBlock` when full).
+    pub fn try_write(&self, frame: &[u8]) -> io::Result<usize> {
+        return self.pipe.try_write(frame);
+    }
 }
 
 impl ControlChannelServer for WindowsControlChannelServer {
