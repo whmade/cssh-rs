@@ -17,9 +17,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::{error, info, warn};
+use portable_pty::MasterPty;
 use ssh2_config::{ParseRule, SshConfig};
 use tokio::sync::{oneshot, watch};
-use windows::Win32::System::Console::CONSOLE_CHARACTER_ATTRIBUTES;
+use windows::Win32::System::Console::{
+    CONSOLE_CHARACTER_ATTRIBUTES, KEY_EVENT, WINDOW_BUFFER_SIZE_EVENT,
+};
 
 use cssh_rs_meta::PACKAGE_NAME;
 use cssh_rs_platform::ControlChannelClient;
@@ -34,19 +37,17 @@ use cssh_rs_protocol::ClientState;
 use crate::client::console_mode::ConsoleModeGuard;
 use crate::client::dispatch::dispatch_daemon_message;
 use crate::client::input_bytes::key_event_record_to_bytes;
-use crate::client::pty::{scan_and_answer_dsr, spawn_client_pty, write_to_master, SharedWriter};
+use crate::client::pty::{
+    console_viewport_size, scan_and_answer_dsr, spawn_client_pty, write_to_master, SharedWriter,
+};
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::{
-    get_console_title, read_keyboard_input, set_console_palette, snapshot_console_palette,
+    get_console_title, read_console_input, set_console_palette, snapshot_console_palette,
     tinted_palette, ConsolePaletteSnapshot, WindowsApi, WindowsControlChannelClient,
 };
 
 /// Length in bytes of the big-endian `u32` frame length prefix.
 const LENGTH_PREFIX_LEN: usize = 4;
-
-// Fixed until the PTY follows the console viewport (GitHub #306).
-const PTY_ROWS: u16 = 50;
-const PTY_COLS: u16 = 200;
 
 /// Duration of the action-feedback flash painted on a highlighted client
 /// when the user toggles the state.
@@ -423,18 +424,38 @@ fn spawn_output_reader(mut reader: Box<dyn Read + Send>, master: SharedWriter) {
 }
 
 /// Forward this window's own keystrokes to the PTY master from a dedicated
-/// thread, so a broadcast line stays editable here.
+/// thread, so a broadcast line stays editable here, and resize the PTY with
+/// the console window.
 ///
 /// # Arguments
 ///
 /// * `api`    - The Windows API implementation to use.
-/// * `master` - Shared PTY master writer.
+/// * `writer` - Shared PTY master writer.
+/// * `master` - PTY master to resize.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn spawn_local_input<A: WindowsApi + Clone + 'static>(api: A, master: SharedWriter) {
+fn spawn_local_input<A: WindowsApi + Clone + 'static>(
+    api: A,
+    writer: SharedWriter,
+    master: Box<dyn MasterPty + Send>,
+) {
     std::thread::spawn(move || loop {
-        let key = unsafe { read_keyboard_input(&api).KeyEvent };
-        if key.bKeyDown.as_bool() {
-            write_to_master(&*master, &key_event_record_to_bytes(&key));
+        let record = read_console_input(&api);
+        match u32::from(record.EventType) {
+            KEY_EVENT => {
+                let key = unsafe { record.Event.KeyEvent };
+                if key.bKeyDown.as_bool() {
+                    write_to_master(&*writer, &key_event_record_to_bytes(&key));
+                }
+            }
+            // The event reports the buffer size; the PTY follows the visible window.
+            WINDOW_BUFFER_SIZE_EVENT => {
+                if let Some(size) = console_viewport_size(&api) {
+                    if let Err(err) = master.resize(size) {
+                        warn!("Failed to resize the PTY: {}", err);
+                    }
+                }
+            }
+            _ => {}
         }
     });
 }
@@ -647,7 +668,8 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
     let (max_frame_len, pending) = client_handshake(&mut control_channel).await;
 
     let ssh_arguments = build_ssh_arguments(&resolved_username, host, port, config);
-    let mut pty = match spawn_client_pty(&config.program, &ssh_arguments, PTY_ROWS, PTY_COLS) {
+    let pty_size = console_viewport_size(api).unwrap_or_default();
+    let mut pty = match spawn_client_pty(&config.program, &ssh_arguments, pty_size) {
         Ok(pty) => pty,
         Err(err) => {
             error!("Failed to spawn `{}` under a PTY: {}", config.program, err);
@@ -656,7 +678,7 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
     };
 
     spawn_output_reader(pty.reader, Arc::clone(&pty.writer));
-    spawn_local_input(api.clone(), Arc::clone(&pty.writer));
+    spawn_local_input(api.clone(), Arc::clone(&pty.writer), pty.master);
 
     let mut child_killer = pty.child.clone_killer();
     let (child_exit_sender, child_exit_receiver) = oneshot::channel();

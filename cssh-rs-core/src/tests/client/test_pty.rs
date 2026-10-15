@@ -1,8 +1,11 @@
-//! Unit tests for the DSR responder.
+//! Unit tests for the DSR responder and PTY sizing.
 
 use std::sync::Mutex;
 
-use crate::client::pty::scan_and_answer_dsr;
+use windows::Win32::System::Console::{CONSOLE_SCREEN_BUFFER_INFOEX, SMALL_RECT};
+
+use crate::client::pty::{console_viewport_size, scan_and_answer_dsr};
+use crate::utils::windows::MockWindowsApi;
 
 #[test]
 fn test_answers_and_strips_dsr_query() {
@@ -42,4 +45,25 @@ fn test_renders_held_prefix_that_is_not_a_query() {
     assert_eq!(second, b"\x1b[A");
     assert!(master.into_inner().unwrap().is_empty());
     assert!(carry.is_empty());
+}
+
+#[test]
+fn test_console_viewport_size_is_the_inclusive_window_rectangle() {
+    let mut api = MockWindowsApi::new();
+    api.expect_get_console_screen_buffer_info_ex()
+        .returning(|| {
+            return Ok(CONSOLE_SCREEN_BUFFER_INFOEX {
+                srWindow: SMALL_RECT {
+                    Left: 10,
+                    Top: 186,
+                    Right: 89,
+                    Bottom: 202,
+                },
+                ..Default::default()
+            });
+        });
+
+    let size = console_viewport_size(&api).unwrap();
+
+    assert_eq!((size.cols, size.rows), (80, 17));
 }

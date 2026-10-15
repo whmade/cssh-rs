@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use log::error;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+use crate::utils::windows::WindowsApi;
+
 /// Device Status Report query conhost sends at startup, blocking until answered.
 const DSR_QUERY: &[u8] = b"\x1b[6n";
 /// Cursor position report answering [`DSR_QUERY`]: row 1, column 1.
@@ -21,7 +23,7 @@ pub(crate) struct ClientPty {
     pub(crate) child: Box<dyn Child + Send + Sync>,
     pub(crate) child_pid: u32,
     /// Keeps the pseudoconsole open.
-    pub(crate) _master: Box<dyn MasterPty + Send>,
+    pub(crate) master: Box<dyn MasterPty + Send>,
 }
 
 /// Run `program` with `arguments` on a new PTY.
@@ -30,8 +32,7 @@ pub(crate) struct ClientPty {
 ///
 /// * `program`   - The SSH program to run.
 /// * `arguments` - Arguments passed to `program`.
-/// * `rows`      - PTY row count.
-/// * `columns`   - PTY column count.
+/// * `size`      - Initial PTY size.
 ///
 /// # Returns
 ///
@@ -40,16 +41,10 @@ pub(crate) struct ClientPty {
 pub(crate) fn spawn_client_pty(
     program: &str,
     arguments: &[String],
-    rows: u16,
-    columns: u16,
+    size: PtySize,
 ) -> io::Result<ClientPty> {
     let pair = native_pty_system()
-        .openpty(PtySize {
-            rows,
-            cols: columns,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
+        .openpty(size)
         .map_err(|err| return io::Error::other(err.to_string()))?;
 
     let mut command = CommandBuilder::new(program);
@@ -79,7 +74,25 @@ pub(crate) fn spawn_client_pty(
         reader,
         child,
         child_pid,
-        _master: pair.master,
+        master: pair.master,
+    });
+}
+
+/// Return the size of the visible console window.
+///
+/// # Arguments
+///
+/// * `api` - The Windows API implementation to use.
+///
+/// # Returns
+///
+/// The size, or `None` if the console cannot be queried.
+pub(crate) fn console_viewport_size(api: &dyn WindowsApi) -> Option<PtySize> {
+    let window = api.get_console_screen_buffer_info_ex().ok()?.srWindow;
+    return Some(PtySize {
+        rows: (window.Bottom - window.Top + 1) as u16,
+        cols: (window.Right - window.Left + 1) as u16,
+        ..PtySize::default()
     });
 }
 
