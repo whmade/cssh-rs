@@ -6,7 +6,8 @@ use log::warn;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
     CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_INPUT_HANDLE,
+    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, ENABLE_WINDOW_INPUT,
+    STD_INPUT_HANDLE,
 };
 
 use crate::utils::windows::WindowsApi;
@@ -22,7 +23,8 @@ pub(crate) struct ConsoleModeGuard<'a> {
 impl<'a> ConsoleModeGuard<'a> {
     /// Switch stdin to raw input and stdout to VT processing.
     ///
-    /// Raw input leaves echo to the SSH child and delivers Ctrl+C as `0x03`.
+    /// Raw input leaves echo to the SSH child and delivers Ctrl+C as `0x03`;
+    /// window input reports console resizes.
     ///
     /// # Arguments
     ///
@@ -34,7 +36,8 @@ impl<'a> ConsoleModeGuard<'a> {
     pub(crate) fn apply(api: &'a dyn WindowsApi) -> Self {
         let stdin = api.get_std_handle(STD_INPUT_HANDLE).and_then(|handle| {
             return change_mode(api, handle, |mode| {
-                return mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+                return mode & !(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT)
+                    | ENABLE_WINDOW_INPUT;
             });
         });
         let stdout = api.get_stdout_handle().and_then(|handle| {

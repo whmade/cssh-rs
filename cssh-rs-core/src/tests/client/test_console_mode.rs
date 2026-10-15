@@ -3,7 +3,7 @@
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
     CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+    ENABLE_PROCESSED_OUTPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING, ENABLE_WINDOW_INPUT,
 };
 
 use crate::client::console_mode::ConsoleModeGuard;
@@ -37,7 +37,7 @@ fn test_applies_raw_input_and_vt_output_then_restores() {
         }
         return Ok(stdout_original);
     });
-    expect_set_console_mode(&mut api, STDIN, CONSOLE_MODE(0));
+    expect_set_console_mode(&mut api, STDIN, ENABLE_WINDOW_INPUT);
     expect_set_console_mode(
         &mut api,
         STDOUT,
