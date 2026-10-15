@@ -17,8 +17,9 @@ use windows::Win32::System::Threading::PROCESS_INFORMATION;
 
 use crate::api::MockWindowsApi;
 use crate::traits::{
-    SendHwnd, SendProcessInformation, WindowsControlChannelClient, WindowsControlChannelServer,
-    WindowsLaunchContext, WindowsProcessSpawner, WindowsWindowHandleProbe,
+    control_endpoint, SendHwnd, SendProcessInformation, WindowsControlChannelClient,
+    WindowsControlChannelServer, WindowsLaunchContext, WindowsProcessSpawner,
+    WindowsWindowHandleProbe,
 };
 
 /// Construct a unique named-pipe endpoint per test invocation so concurrent
@@ -186,6 +187,14 @@ mod window_handle_probe_tests {
 
 mod control_channel_tests {
     use super::*;
+
+    #[test]
+    fn control_endpoint_format() {
+        assert_eq!(
+            control_endpoint(1234),
+            OsString::from(r"\\.\pipe\cssh-rs-1234-control")
+        );
+    }
 
     /// End-to-end round trip: server binds, client connects, both sides
     /// exchange bytes. Covers `bind`, `accept`, `send`, `recv`,

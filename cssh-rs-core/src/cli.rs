@@ -69,6 +69,9 @@ enum Commands {
     Client {
         /// Host to connect to
         host: String,
+        /// Named-pipe path of the daemon control channel
+        #[clap(long)]
+        daemon_channel: Option<String>,
     },
     /// Subcommand that will launch the daemon window.
     ///
@@ -680,7 +683,7 @@ pub async fn main<
 
     match &args.command {
         Some(Commands::GenerateConfig { .. }) => unreachable!("handled before config load"),
-        Some(Commands::Client { host }) => {
+        Some(Commands::Client { host, .. }) => {
             if args.debug {
                 logger_initializer.init_logger(&format!("cssh-rs_client_{host}"));
             }
