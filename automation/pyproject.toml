@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "Shared desktop-automation library for cssh-rs, used by the E2E suites and the demo recorder."
 requires-python = ">=3.14"
 dependencies = [
-    "robotframework==7.5",
+    "robotframework==7.5.1",
     "pyautogui==0.9.54",
     "pywinctl==0.4.1",
     "pyperclip==1.11.0",
     "cryptography==50.0.2",
     "mss==10.2.0",
     "imageio==2.38.1",
-    "imageio-ffmpeg==0.6.0",
+    "imageio-ffmpeg==0.7.0",
     "pillow==13.0.0",
 ]
 
@@ -23,7 +23,7 @@ dependencies = [
 dev = [
     "ruff==0.17.3",
     "pyrefly==1.4.0",
-    "pytest==9.1.1",
+    "pytest==9.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
