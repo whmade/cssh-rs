@@ -15,14 +15,14 @@ dependencies = [
     "cryptography==50.0.2",
     "mss==10.2.0",
     "imageio==2.38.1",
-    "imageio-ffmpeg==0.7.0",
+    "imageio-ffmpeg==0.8.1",
     "pillow==13.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.17.3",
-    "pyrefly==1.4.0",
+    "ruff==0.17.4",
+    "pyrefly==1.4.1",
     "pytest==9.2.0",
 ]
 
