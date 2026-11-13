@@ -103,7 +103,7 @@ jobs:
         run: Copy-Item target/demo/cssh-rs.gif "demo-assets/${{ steps.asset.outputs.name }}" -Force
 
       - name: Open a review PR on demo-assets
-        uses: peter-evans/create-pull-request@v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.2
         with:
           path: demo-assets
           base: demo-assets
