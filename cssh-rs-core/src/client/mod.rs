@@ -190,10 +190,7 @@ fn resolve_username(username: Option<String>, host: &str, config: &ClientConfig)
             .parse(&mut reader, ParseRule::ALLOW_UNKNOWN_FIELDS)
             .expect("Failed to parse SSH configuration file");
     }
-    return ssh_config
-        .query(<&str>::clone(&host))
-        .user
-        .unwrap_or_default();
+    return ssh_config.query(host).user.unwrap_or_default();
 }
 
 /// Build the SSH arguments from the username, host, port, and config.
