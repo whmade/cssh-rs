@@ -9,9 +9,8 @@ name: News Fragment Check
 on:
   pull_request:
     types: [opened, synchronize, labeled, unlabeled]
-    branches:
-      - main
-      - "*-maintenance"
+
+# No `branches` filter: the CI gate requires this check, so it must also report for PRs targeting another PR's branch (e.g. before they are linked into a stack), or it stays pending forever.
 
 # No `concurrency` cancellation: superseded runs leave `cancelled` check runs the required-check gate never clears, so let all runs complete (each is ~4s and reads live PR state).
 
@@ -34,12 +33,11 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           echo "🔍 Checking for news fragments in PR..."
 
-          # Check if PR adds any news fragments. Diff against the PR's
-          # actual base so this works for both `main` and `*-maintenance`.
-          FRAGMENTS=$(git diff --name-only --diff-filter=A "origin/${{ github.base_ref }}...HEAD" | \
+          FRAGMENTS=$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD" | \
             grep -E '${{ env.NEWS_FRAGMENT_PATTERN }}' || true)
 
           if [ -n "$FRAGMENTS" ]; then
