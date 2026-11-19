@@ -8,7 +8,8 @@ name: News Fragment Check
 
 on:
   pull_request:
-    types: [opened, synchronize, labeled, unlabeled]
+    # `stacked` is undocumented: GitHub sends it when a PR joins a stack, after an `opened` that a stack-unaware base filter may have dropped.
+    types: [opened, synchronize, labeled, unlabeled, stacked]
     branches:
       - main
       - "*-maintenance"
@@ -28,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: Check for news fragments
         id: check
@@ -36,10 +37,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "🔍 Checking for news fragments in PR..."
+          echo "EXPERIMENT action=${{ github.event.action }} base_ref=${{ github.base_ref }}"
 
-          # Check if PR adds any news fragments. Diff against the PR's
-          # actual base so this works for both `main` and `*-maintenance`.
-          FRAGMENTS=$(git diff --name-only --diff-filter=A "origin/${{ github.base_ref }}...HEAD" | \
+          # HEAD merges the PR into its own base, but for a stacked PR
+          # `github.base_ref` is the stack base, so diff against HEAD's
+          # first parent to count only this PR's fragments.
+          FRAGMENTS=$(git diff --name-only --diff-filter=A HEAD^1 HEAD | \
             grep -E '${{ env.NEWS_FRAGMENT_PATTERN }}' || true)
 
           if [ -n "$FRAGMENTS" ]; then

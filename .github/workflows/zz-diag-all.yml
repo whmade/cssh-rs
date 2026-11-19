@@ -1,0 +1,14 @@
+# experiment exp3 - throwaway, never merge
+name: "zz diag all-types no-filter"
+run-name: "all-nofilter | ${{ github.event.action }} #${{ github.event.number }} base=${{ github.base_ref }} stack=${{ github.event.pull_request.stack.number || 'none' }}"
+on:
+  pull_request:
+    types: [assigned, unassigned, labeled, unlabeled, opened, edited, closed, reopened, synchronize, converted_to_draft, locked, unlocked, enqueued, dequeued, milestoned, demilestoned, ready_for_review, review_requested, review_request_removed, auto_merge_enabled, auto_merge_disabled, stacked]
+permissions: {}
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          jq -c '{action, number, base: .pull_request.base.ref, head: .pull_request.head.ref, head_sha: .pull_request.head.sha, stack: .pull_request.stack, changes}' "$GITHUB_EVENT_PATH"
+          echo "GITHUB_BASE_REF=$GITHUB_BASE_REF GITHUB_SHA=$GITHUB_SHA GITHUB_REF=$GITHUB_REF"
