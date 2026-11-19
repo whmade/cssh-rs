@@ -61,6 +61,41 @@ skills come from the `workflows@whmade` marketplace plugin, enabled in
 conventions documented below (`## Code style`, `## Testing`,
 `## Commit conventions`, `## Pull requests`).
 
+## Agent skills
+
+Configuration for the `mattpocock-skills` plugin, enabled in
+`.claude/settings.json`.
+
+### Issue tracker
+
+GitHub issues on `whmade/cssh-rs`. Every text a skill writes there
+(issue, comment, body or title edit) is drafted under `.scratch/` and
+published only once the user approves it. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default role labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See
+`docs/agents/domain.md`.
+
+### Repo overrides
+
+These replace the matching step of any plugin skill:
+
+- **Commit**: write every message with `/workflows:commit`, including
+  the commit `/implement` makes.
+- **PR body**: the commit message, via `/workflows:github-pr`, in place
+  of the `pr` skill.
+- **Review**: a skill's "code-review" step is
+  `mattpocock-skills:code-review` against `origin/main`; run the
+  Completion Checklist before committing.
+- **Research findings**: one comment on the related issue, as described
+  in `docs/agents/issue-tracker.md`; that comment is the only artifact.
+
 ## Code style
 
 Do NOT use decorative or "smart" Unicode punctuation anywhere in the

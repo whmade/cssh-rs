@@ -5,5 +5,8 @@
       "autoUpdate": true
     }
   },
-  "enabledPlugins": { "workflows@whmade": true }
+  "enabledPlugins": {
+    "workflows@whmade": true,
+    "mattpocock-skills@claude-plugins-official": true
+  }
 }
