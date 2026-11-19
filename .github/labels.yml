@@ -106,3 +106,43 @@
 - name: "risk:gate"
   color: "e11d21"
   description: "Explicit GO/NO-GO gate"
+
+# --- Agent skills (mattpocock-skills) ---------------------------------------
+# Triage roles (docs/agents/triage-labels.md; wontfix is above) and wayfinder
+# ticket types (docs/agents/issue-tracker.md).
+
+- name: "needs-triage"
+  color: "fbca04"
+  description: "Maintainer needs to evaluate this issue"
+
+- name: "needs-info"
+  color: "d876e3"
+  description: "Waiting on reporter for more information"
+
+- name: "ready-for-agent"
+  color: "0e8a16"
+  description: "Fully specified, ready for an AFK agent"
+
+- name: "ready-for-human"
+  color: "1d76db"
+  description: "Requires human implementation"
+
+- name: "wayfinder:map"
+  color: "5319e7"
+  description: "Wayfinder map: index of decisions for a foggy effort"
+
+- name: "wayfinder:research"
+  color: "c5def5"
+  description: "Wayfinder ticket resolved by reading primary sources (AFK)"
+
+- name: "wayfinder:prototype"
+  color: "c5def5"
+  description: "Wayfinder ticket resolved by a throwaway prototype (HITL)"
+
+- name: "wayfinder:grilling"
+  color: "c5def5"
+  description: "Wayfinder ticket resolved by a grilling session (HITL)"
+
+- name: "wayfinder:task"
+  color: "c5def5"
+  description: "Wayfinder ticket: manual work that unblocks a decision"
