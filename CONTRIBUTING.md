@@ -239,7 +239,7 @@ snapshot in the repo, not just the protocol fixtures.
 
 - Use clear, descriptive commit messages
 - Start with a verb in present tense (e.g., "Add", "Fix", "Update")
-- Keep the first line under 50 characters
+- Keep the first line under about 72 characters
 - Provide additional details in the body
 
 ## Development Tools and Automation
