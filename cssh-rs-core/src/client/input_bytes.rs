@@ -2,6 +2,7 @@
 
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
+use log::warn;
 use windows::Win32::System::Console::KEY_EVENT_RECORD;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4,
@@ -30,25 +31,27 @@ pub(crate) fn input_event_to_bytes(event: &InputEvent) -> Vec<u8> {
     }
 }
 
-/// Encode a keystroke typed at this window.
+/// Encode every keystroke a key-event record read at this window holds.
 ///
 /// # Arguments
 ///
-/// * `key` - The key-down event.
+/// * `key` - The key-down record.
 ///
 /// # Returns
 ///
-/// The composed character, else the encoding of the virtual key, else nothing.
+/// The bytes of one keystroke, repeated [`keystroke_count`] times: the
+/// composed character, else the encoding of the virtual key, else nothing.
 pub(crate) fn key_event_record_to_bytes(key: &KEY_EVENT_RECORD) -> Vec<u8> {
     let unicode_char = unsafe { key.uChar.UnicodeChar };
-    if let Some(character) =
-        char::from_u32(u32::from(unicode_char)).filter(|character| return *character != '\0')
+    let keystroke = match char::from_u32(u32::from(unicode_char))
+        .filter(|character| return *character != '\0')
     {
-        return character.to_string().into_bytes();
-    }
-    return virtual_key_to_keycode(VIRTUAL_KEY(key.wVirtualKeyCode))
-        .map(|code| return key_to_bytes(&code, Modifiers::NONE, None))
-        .unwrap_or_default();
+        Some(character) => character.to_string().into_bytes(),
+        None => virtual_key_to_keycode(VIRTUAL_KEY(key.wVirtualKeyCode))
+            .map(|code| return key_to_bytes(&code, Modifiers::NONE, None))
+            .unwrap_or_default(),
+    };
+    return keystroke.repeat(keystroke_count(key));
 }
 
 /// Encode a key with its modifiers and optional composed text.
@@ -116,6 +119,27 @@ fn function_key_bytes(number: u8) -> Vec<u8> {
         12 => return b"\x1b[24~".to_vec(),
         _ => return Vec::new(),
     }
+}
+
+/// Return the number of keystrokes a key-event record holds.
+///
+/// The console host merges unread auto-repeats of a held key into one record:
+/// <https://learn.microsoft.com/en-us/windows/console/key-event-record-str>.
+/// Only programs that inject input send a repeat count of 0, so it logs a warning.
+///
+/// # Arguments
+///
+/// * `key` - The key-event record.
+///
+/// # Returns
+///
+/// `wRepeatCount`, or 1 if it is 0.
+pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
+    if key.wRepeatCount == 0 {
+        warn!("Key-event record has a repeat count of 0; treating it as one keystroke");
+        return 1;
+    }
+    return usize::from(key.wRepeatCount);
 }
 
 pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
