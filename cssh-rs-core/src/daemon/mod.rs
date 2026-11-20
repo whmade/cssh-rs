@@ -1110,7 +1110,7 @@ impl<'a> Daemon<'a> {
         }
     }
 
-    /// Dispatches a key press received while the daemon is in the
+    /// Dispatch a keystroke received while the daemon is in the
     /// [`ControlModeState::EnableDisableSubmenu`] state. `[e]/[d]/[t]`
     /// act on the currently selected client; `Navigate` moves the
     /// selection and redraws the prompt. The submenu is left via
@@ -1315,10 +1315,10 @@ impl<'a> Daemon<'a> {
 
 /// The processed console input mode controls whether special key combinations
 /// such as `Ctrl + c` or `Ctrl + BREAK` receive special handling or are treated
-/// as simple key presses.
+/// as simple keystrokes.
 ///
 /// By default processed input mode is enabled, meaning `Ctrl + c` is treated as
-/// a signal, not key presses.
+/// a signal, not keystrokes.
 ///
 /// <https://learn.microsoft.com/en-us/windows/console/ctrl-c-and-ctrl-break-signals>
 ///

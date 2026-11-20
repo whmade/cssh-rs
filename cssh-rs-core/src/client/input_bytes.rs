@@ -30,7 +30,7 @@ pub(crate) fn input_event_to_bytes(event: &InputEvent) -> Vec<u8> {
     }
 }
 
-/// Encode a key event typed at this window.
+/// Encode a keystroke typed at this window.
 ///
 /// # Arguments
 ///

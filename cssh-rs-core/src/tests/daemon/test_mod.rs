@@ -1101,7 +1101,7 @@ mod daemon_test {
     /// in-flight anchor column. A prior vertical snap into a gap can
     /// leave `anchor_col` pointing at a different column than the
     /// current cell; re-aligning the anchor to the current cell on a
-    /// clamped Left/Right keypress would silently break the "anchor
+    /// clamped Left/Right keystroke would silently break the "anchor
     /// carried across vertical moves" invariant the next Up/Down
     /// relies on.
     #[test]

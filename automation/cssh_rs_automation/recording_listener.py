@@ -57,7 +57,7 @@ class RecordingListener:
     def start_library_keyword(
         self, _data: RunningKeyword, implementation: LibraryKeyword, _result: ResultKeyword
     ) -> None:
-        """Feed the running keystroke driver's key events into the keycast overlay.
+        """Feed the running keystroke driver's delivered actions into the keycast overlay.
 
         The instance that runs keywords differs from the one Robot exposes at
         import, so wiring waits for a keyword and guards to run once per instance.

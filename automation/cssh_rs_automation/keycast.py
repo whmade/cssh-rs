@@ -1,4 +1,4 @@
-"""On-screen keypress overlay for screen recordings.
+"""On-screen keystroke overlay for screen recordings.
 
 A ``Keycast`` buffers the labels the keystroke driver emits; the paired
 ``KeycastOverlay`` draws the still-visible ones in a corner as a

@@ -1,4 +1,4 @@
-//! Key codes and modifier flags for a decoded keypress.
+//! Key codes and modifier flags for a decoded keystroke.
 
 use std::ops::BitOr;
 
@@ -11,7 +11,7 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "k", content = "v", rename_all = "snake_case")]
 pub enum KeyCode {
-    /// The composed character(s) produced by a single keypress.
+    /// The composed character(s) produced by a single keystroke.
     Char(String),
     /// The Enter / Return key.
     Enter,
@@ -53,7 +53,7 @@ pub enum KeyCode {
 /// A modifier key pressed on its own, distinguishing the left and right sides.
 ///
 /// Mirrors `crossterm::event::ModifierKeyCode`. `Modifiers` reports which
-/// modifiers were held during another keypress; this reports the modifier key
+/// modifiers were held during another keystroke; this reports the modifier key
 /// itself being pressed or released.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,7 +79,7 @@ pub enum ModifierKeyCode {
     Unknown,
 }
 
-/// Bitflags of the keyboard modifiers held during a keypress.
+/// Bitflags of the keyboard modifiers held during a keystroke.
 ///
 /// Encodes on the wire as a single CBOR unsigned integer (the raw bits), so
 /// modifier bits added in a later minor version round-trip unchanged.
