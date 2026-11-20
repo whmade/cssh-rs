@@ -2,7 +2,7 @@
 #   News Fragment Check
 #
 # Ensures PRs either include news fragments or explicitly acknowledge they don't need them.
-# Runs on PR events and label changes.
+# Runs on PR events and label changes; skipped for Dependabot PRs.
 
 name: News Fragment Check
 
@@ -22,6 +22,8 @@ env:
 
 jobs:
   news-fragment-check:
+    # Job-level `if`, not an `on:` filter: a skipped job satisfies the required check, a never-started workflow leaves it pending (https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions).
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read

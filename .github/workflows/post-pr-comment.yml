@@ -29,7 +29,9 @@ jobs:
               && fromJSON('["comment"]')
               || fromJSON('["comment", "coverage-comment", "diff-cover-comment"]') }}
       fail-fast: false
-    if: github.event.workflow_run.event == 'pull_request'
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'skipped'
     permissions:
       pull-requests: write
       actions: read
