@@ -12,6 +12,7 @@ use std::{
 };
 use std::{thread, time};
 
+use crate::client::input_bytes::keystroke_count;
 use crate::get_console_window_handle;
 use crate::utils::config::{Cluster, DaemonConfig, EdgeBehavior};
 use crate::utils::windows::{clear_screen, set_console_color, WindowsApi};
@@ -108,7 +109,7 @@ const MODIFIER_MASK: u32 =
 
 /// Top-level control-mode action a keystroke classifies into.
 ///
-/// Extracted from [`Daemon::handle_input_record`]'s dispatch match
+/// Extracted from [`Daemon::handle_keystroke`]'s dispatch match
 /// so the classification - including the [`MODIFIER_MASK`] step -
 /// can be regression tested without instantiating a full
 /// [`Daemon`].
@@ -785,15 +786,12 @@ impl<'a> Daemon<'a> {
         }));
     }
 
-    /// Handle the given input record.
-    ///
-    /// Input records are being forwarded to all clients.
-    /// If a sequence of input records matches the control mode
-    /// key combination, forwarding is temporarily interrupted,
-    /// until control mode is exited.
+    /// Handle each of the [`keystroke_count`] keystrokes a console input
+    /// record holds as if it had arrived in its own record.
     ///
     /// # Arguments
     ///
+    /// * `windows_api`                     - The Windows API implementation to use.
     /// * `sender`                          - The sender end of the broadcast channel
     ///                                       through which we will send the input records
     ///                                       that are being forwarded to the clients
@@ -814,6 +812,32 @@ impl<'a> Daemon<'a> {
     ///                                       The list will be extended if additional clients are being added
     ///                                       through control mode `[c]reate window(s)`.
     async fn handle_input_record<W: WindowsApi + Clone + 'static>(
+        &mut self,
+        windows_api: &W,
+        sender: &Sender<ClientBroadcast>,
+        input_record: INPUT_RECORD_0,
+        clients: &mut Arc<Mutex<Clients>>,
+        workspace_area: &workspace::WorkspaceArea,
+        servers: &mut Arc<Mutex<Vec<JoinHandle<()>>>>,
+    ) {
+        // SAFETY: `read_keyboard_input` only returns key-event records.
+        let key_event = unsafe { input_record.KeyEvent };
+        for _ in 0..keystroke_count(&key_event) {
+            self.handle_keystroke(
+                windows_api,
+                sender,
+                input_record,
+                clients,
+                workspace_area,
+                servers,
+            )
+            .await;
+        }
+        return;
+    }
+
+    /// Broadcast one keystroke of `input_record` to the clients unless control mode consumes it.
+    async fn handle_keystroke<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
         sender: &Sender<ClientBroadcast>,
@@ -1123,7 +1147,7 @@ impl<'a> Daemon<'a> {
     /// * `clients`     - Shared client collection. Empty lists are a
     ///                   no-op for every action.
     /// * `key_event`   - The key-down [`KEY_EVENT_RECORD`] dispatched
-    ///                   from `handle_input_record`.
+    ///                   from `handle_keystroke`.
     fn handle_enable_disable_submenu_key<W: WindowsApi>(
         &mut self,
         windows_api: &W,
