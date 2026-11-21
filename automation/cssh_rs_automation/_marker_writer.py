@@ -34,9 +34,13 @@ def main() -> int:
     marker_path = sys.argv[1]
     stdin_fd = sys.stdin.fileno()
     try:
-        with Path(marker_path).open("ab") as marker:
+        # os.read reads a console in its code page, not UTF-8: https://peps.python.org/pep-0528/
+        with (
+            Path(marker_path).open("ab") as marker,
+            os.fdopen(stdin_fd, "rb", buffering=0, closefd=False) as stdin,
+        ):
             while True:
-                chunk = os.read(stdin_fd, _READ_CHUNK_BYTES)
+                chunk = stdin.read(_READ_CHUNK_BYTES)
                 if not chunk or _CTRL_C in chunk:
                     break
                 marker.write(chunk)
