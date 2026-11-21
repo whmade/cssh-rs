@@ -8,17 +8,12 @@ on:
       - completed
 
 jobs:
-  build-and-deploy:
+  build:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: windows-latest
     permissions:
       contents: read
       actions: read
-      id-token: write
-      pages: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -56,6 +51,17 @@ jobs:
           retention-days: 1
           path: unified_site/
 
+  # Separate job so re-runs reuse build's artifact; deploy-pages rejects duplicates.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
