@@ -1012,7 +1012,8 @@ impl<'a> Daemon<'a> {
     ///
     /// Entering control mode requires this function to be called twice
     /// because the activating chord `Ctrl + A` produces two input
-    /// records (the modifier press and the `A` key). Once active, every
+    /// records (the modifier press and the `A` key). `Ctrl + A` with any
+    /// Alt held does not activate it. Once active, every
     /// subsequent key - including the `Esc` that exits control mode -
     /// is reported as consumed so callers do not forward it to clients.
     ///
@@ -1057,8 +1058,11 @@ impl<'a> Daemon<'a> {
             }
             return true;
         }
-        if (key_event.dwControlKeyState & LEFT_CTRL_PRESSED >= 1
-            || key_event.dwControlKeyState & RIGHT_CTRL_PRESSED >= 1)
+        // AltGr arrives as Ctrl+Alt, so any Alt rules Ctrl+A out, even with no
+        // composed text (German AltGr+A, Ctrl+Alt+A for GH #366):
+        // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-vkkeyscanw#remarks
+        if key_event.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0
+            && key_event.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED) == 0
             && key_event.wVirtualKeyCode == VK_A.0
         {
             self.control_mode_state = ControlModeState::Initiated;
