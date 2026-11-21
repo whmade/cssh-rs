@@ -4,12 +4,31 @@ use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, ModifierKeyCode, Modifiers};
 use windows::Win32::System::Console::{KEY_EVENT_RECORD, KEY_EVENT_RECORD_0};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VIRTUAL_KEY, VK_C, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3,
-    VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT, VK_PRIOR,
-    VK_RIGHT, VK_UP,
+    VIRTUAL_KEY, VK_A, VK_C, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
+    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT,
+    VK_PRIOR, VK_RIGHT, VK_UP,
 };
 
-use crate::client::input_bytes::{input_event_to_bytes, key_event_record_to_bytes};
+use crate::client::input_bytes::{
+    input_event_to_bytes, key_event_record_to_bytes, keystroke_count,
+};
+
+fn key_event_record(
+    unicode_char: u16,
+    virtual_key: VIRTUAL_KEY,
+    repeat_count: u16,
+) -> KEY_EVENT_RECORD {
+    return KEY_EVENT_RECORD {
+        bKeyDown: true.into(),
+        wRepeatCount: repeat_count,
+        wVirtualKeyCode: virtual_key.0,
+        wVirtualScanCode: 0,
+        uChar: KEY_EVENT_RECORD_0 {
+            UnicodeChar: unicode_char,
+        },
+        dwControlKeyState: 0,
+    };
+}
 
 fn key(code: KeyCode, modifiers: Modifiers, text: Option<&str>) -> InputEvent {
     return InputEvent::Key {
@@ -93,21 +112,39 @@ fn test_key_event_record_to_bytes() {
         (0, VK_F12, b"\x1b[24~"),
     ];
     for (unicode_char, virtual_key, expected) in cases {
-        let record = KEY_EVENT_RECORD {
-            bKeyDown: true.into(),
-            wRepeatCount: 1,
-            wVirtualKeyCode: virtual_key.0,
-            wVirtualScanCode: 0,
-            uChar: KEY_EVENT_RECORD_0 {
-                UnicodeChar: unicode_char,
-            },
-            dwControlKeyState: 0,
-        };
+        let record = key_event_record(unicode_char, virtual_key, 1);
         assert_eq!(
             key_event_record_to_bytes(&record),
             expected,
             "{unicode_char:#x} {:#x}",
             virtual_key.0
         );
+    }
+}
+
+#[test]
+fn test_key_event_record_to_bytes_encodes_every_keystroke() {
+    let cases: [(u16, VIRTUAL_KEY, u16, &[u8]); 3] = [
+        (u16::from(b'a'), VK_A, 3, b"aaa"),
+        (u16::from(b'a'), VK_A, 0, b"a"),
+        (0, VK_UP, 2, b"\x1b[A\x1b[A"),
+    ];
+    for (unicode_char, virtual_key, repeat_count, expected) in cases {
+        let record = key_event_record(unicode_char, virtual_key, repeat_count);
+        assert_eq!(
+            key_event_record_to_bytes(&record),
+            expected,
+            "{unicode_char:#x} {:#x} x{repeat_count}",
+            virtual_key.0
+        );
+    }
+}
+
+#[test]
+fn test_keystroke_count() {
+    let cases: [(u16, usize); 4] = [(0, 1), (1, 1), (2, 2), (u16::MAX, 65535)];
+    for (repeat_count, expected) in cases {
+        let record = key_event_record(u16::from(b'a'), VK_A, repeat_count);
+        assert_eq!(keystroke_count(&record), expected, "{repeat_count}");
     }
 }
