@@ -53,6 +53,19 @@ cargo xtask check-typography # ASCII-punctuation lint
 
 Always run `cargo fmt`, `cargo lint`, and both test commands before considering any task complete.
 
+## Code navigation
+
+Use the LSP tool (rust-analyzer, from the `rust-analyzer-lsp@whmade`
+plugin) for references, implementations, and types of Rust symbols. It
+has two blind spots:
+
+- **Other platforms**: it sees only code compiled for the host OS, so
+  items behind `#[cfg(target_os = ...)]` for another OS, such as the
+  `cssh-rs-platform-linux` and `cssh-rs-platform-macos` impls, are
+  missing from its results. Answer cross-platform questions with Grep.
+- **Indexing**: for the first seconds of a session it returns no
+  references and no hover. Retry before trusting an empty result.
+
 ## Workflow skills
 
 The `/workflows:commit`, `/workflows:github-pr`, and `/workflows:scrutinize`
