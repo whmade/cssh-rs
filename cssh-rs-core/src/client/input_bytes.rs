@@ -1,14 +1,23 @@
-//! Encoding of keystrokes into the terminal bytes written to the PTY master.
+//! Encoding of keystrokes into the terminal bytes written to the PTY master,
+//! and the key-event record helpers the daemon shares.
 
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
 use log::warn;
-use windows::Win32::System::Console::KEY_EVENT_RECORD;
+use windows::Win32::System::Console::{
+    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4,
     VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT,
     VK_UP,
 };
+
+/// The `dwControlKeyState` flags of either Ctrl key.
+pub(crate) const CTRL_PRESSED: u32 = LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED;
+
+/// The `dwControlKeyState` flags of either Alt key.
+pub(crate) const ALT_PRESSED: u32 = LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED;
 
 /// Encode a daemon-delivered input event.
 ///
@@ -140,6 +149,29 @@ pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
         return 1;
     }
     return usize::from(key.wRepeatCount);
+}
+
+/// Return whether a key-event record's Ctrl and Alt only selected an AltGr character.
+///
+/// Windows reports AltGr as Ctrl+Alt and treats any Ctrl+Alt as AltGr, so
+/// this follows Windows Terminal's rule:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L390>.
+///
+/// # Arguments
+///
+/// * `key` - The key-event record.
+///
+/// # Returns
+///
+/// `true` if a Ctrl and an Alt are held and the composed text is a
+/// character above `U+0020` other than `U+007F`.
+pub(crate) fn is_altgr_character(key: &KEY_EVENT_RECORD) -> bool {
+    let state = key.dwControlKeyState;
+    let unicode_char = unsafe { key.uChar.UnicodeChar };
+    return state & CTRL_PRESSED != 0
+        && state & ALT_PRESSED != 0
+        && char::from_u32(u32::from(unicode_char))
+            .is_some_and(|character| return character > ' ' && character != '\u{7f}');
 }
 
 pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
