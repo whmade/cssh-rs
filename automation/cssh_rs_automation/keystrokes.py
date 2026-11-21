@@ -43,7 +43,7 @@ class Keystrokes:
         """Register a callback invoked with each delivered action's label and kind.
 
         Labels are human-readable (``"echo hello"``, ``"Enter"``, ``"Ctrl+A"``),
-        intended for an on-screen keypress overlay. The kind is ``"text"`` for
+        intended for an on-screen keystroke overlay. The kind is ``"text"`` for
         literal typed characters or ``"key"`` for named keys and chords.
 
         Args:

@@ -8,14 +8,14 @@ use crate::v1::keycode::{KeyCode, Modifiers};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c", rename_all = "snake_case")]
 pub enum InputEvent {
-    /// A decoded keypress.
+    /// A decoded keystroke.
     Key {
         /// The logical key pressed.
         code: KeyCode,
-        /// The modifier bits held during the keypress.
+        /// The modifier bits held during the keystroke.
         modifiers: Modifiers,
         /// Composed Unicode text for IME and dead-key input, when the
-        /// keypress produced any; omitted from the wire when absent.
+        /// keystroke produced any; omitted from the wire when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },
