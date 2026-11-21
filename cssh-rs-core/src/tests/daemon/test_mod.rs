@@ -18,8 +18,8 @@ mod daemon_test {
         SCROLLLOCK_ON, SHIFT_PRESSED,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VIRTUAL_KEY, VK_A, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_H, VK_J, VK_K, VK_L, VK_LEFT,
-        VK_N, VK_R, VK_RIGHT, VK_T, VK_UP, VK_X,
+        VIRTUAL_KEY, VK_7, VK_A, VK_BACK, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_ESCAPE, VK_H,
+        VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T, VK_UP, VK_X,
     };
 
     use cssh_rs_platform::ControlChannelClient;
@@ -246,10 +246,14 @@ mod daemon_test {
     }
 
     fn keystroke(text: &str) -> DaemonToClient {
+        return keystroke_with_modifiers(text, Modifiers::NONE);
+    }
+
+    fn keystroke_with_modifiers(text: &str, modifiers: Modifiers) -> DaemonToClient {
         return DaemonToClient::Input {
             event: InputEvent::Key {
                 code: KeyCode::Char(text.to_string()),
-                modifiers: Modifiers::NONE,
+                modifiers,
                 text: Some(text.to_string()),
             },
         };
@@ -1909,5 +1913,69 @@ mod daemon_test {
         );
         assert_eq!(daemon.control_mode_state, ControlModeState::Inactive);
         assert_eq!(broadcasts, vec![keystroke("t"), keystroke("t")]);
+    }
+
+    /// Feed `input_record` to a daemon outside control mode and return what it broadcast.
+    async fn broadcasts_outside_control_mode(input_record: INPUT_RECORD_0) -> Vec<DaemonToClient> {
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
+        return handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_no_calls(),
+            &mut Arc::new(Mutex::new(Clients::new())),
+            input_record,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_drops_only_the_ctrl_alt_that_selected_altgr_text() {
+        let altgr = RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED;
+        let ctrl_alt = LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED;
+        let ctrl_alt_modifiers = Modifiers::CTRL | Modifiers::ALT;
+        let cases = [
+            (VK_E, '€', altgr, Modifiers::NONE),
+            (VK_7, '{', altgr, Modifiers::NONE),
+            (VK_Q, '@', altgr, Modifiers::NONE),
+            (VK_Q, '@', ctrl_alt, Modifiers::NONE),
+            (VK_E, 'É', SHIFT_PRESSED | altgr, Modifiers::SHIFT),
+            (VK_X, 'x', LEFT_ALT_PRESSED, Modifiers::ALT),
+            (VK_C, '\u{3}', LEFT_CTRL_PRESSED, Modifiers::CTRL),
+            (VK_ESCAPE, '\u{1b}', ctrl_alt, ctrl_alt_modifiers),
+            (VK_SPACE, ' ', ctrl_alt, ctrl_alt_modifiers),
+            (VK_BACK, '\u{7f}', ctrl_alt, ctrl_alt_modifiers),
+        ];
+        for (virtual_key, character, control_key_state, modifiers) in cases {
+            let broadcasts = broadcasts_outside_control_mode(key_down_record(
+                virtual_key,
+                character,
+                control_key_state,
+                1,
+            ))
+            .await;
+
+            assert_eq!(
+                broadcasts,
+                vec![keystroke_with_modifiers(&character.to_string(), modifiers)],
+                "{character:?} {control_key_state:#06x}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_every_repeated_altgr_keystroke() {
+        let broadcasts = broadcasts_outside_control_mode(key_down_record(
+            VK_E,
+            '€',
+            RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED,
+            3,
+        ))
+        .await;
+
+        assert_eq!(
+            broadcasts,
+            vec![keystroke("€"), keystroke("€"), keystroke("€")]
+        );
     }
 }
