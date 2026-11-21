@@ -53,11 +53,14 @@ def test_write_authorized_keys_dispatches_by_mode(
         return path.read_text(encoding="utf-8").rstrip("\n"), homes
 
     marker_line, marker_homes = write(sshd_fixture.MarkerMode(), "marker")
+    raw_line, _ = write(sshd_fixture.MarkerMode(raw_input=True), "raw")
     shell_line, shell_homes = write(sshd_fixture.ShellMode(), "shell")
     scripted_line, scripted_homes = write(sshd_fixture.ScriptedShellMode(), "scripted")
 
     assert marker_line.startswith('command="') and "_marker_writer" in marker_line
+    assert "--raw-input" not in marker_line
     assert marker_homes == {}
+    assert "_marker_writer --raw-input " in raw_line
     assert shell_line.startswith(f"{_OPTIONS} ") and "command=" not in shell_line
     assert shell_homes == {}
     assert scripted_line.startswith('command="') and " --rcfile " in scripted_line

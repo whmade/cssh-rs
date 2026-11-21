@@ -63,7 +63,14 @@ class SshdFixtureError(RuntimeError):
 
 @dataclass(frozen=True)
 class MarkerMode:
-    """Force a command piping each session's stdin into its marker file (default)."""
+    """Force a command piping each session's stdin into its marker file (default).
+
+    Args:
+        raw_input: Read each session's console as raw virtual terminal input,
+            so line editing cannot consume ESC and other control bytes.
+    """
+
+    raw_input: bool = False
 
 
 @dataclass(frozen=True)
@@ -401,8 +408,10 @@ def _write_authorized_keys(
                     forced_command = _build_bash_command(resolve_bash_path(), bash_rc)
                 case ShellMode():
                     forced_command = None
-                case MarkerMode():
-                    forced_command = _build_forced_command(sys.executable, str(marker_path))
+                case MarkerMode(raw_input=raw_input):
+                    forced_command = _build_forced_command(
+                        sys.executable, str(marker_path), raw_input=raw_input
+                    )
             handle.write(_authorized_keys_line(pubkey, forced_command))
     return homes
 
@@ -420,13 +429,15 @@ def _authorized_keys_line(pubkey: str, forced_command: str | None) -> str:
     return f'command="{forced_command}",{options} {pubkey}\n'
 
 
-def _build_forced_command(executable: str, marker: str) -> str:
+def _build_forced_command(executable: str, marker: str, *, raw_input: bool = False) -> str:
     """Return the authorized_keys ``command="..."`` payload (without the outer
-    quotes) that runs ``<executable> -m cssh_rs_automation._marker_writer <marker>``.
+    quotes) that runs ``<executable> -m cssh_rs_automation._marker_writer
+    [--raw-input] <marker>``.
     """
+    flag = "--raw-input " if raw_input else ""
     return (
         f"{_quote_authorized_keys_arg(executable)} -m cssh_rs_automation._marker_writer "
-        f"{_quote_authorized_keys_arg(marker)}"
+        f"{flag}{_quote_authorized_keys_arg(marker)}"
     )
 
 
