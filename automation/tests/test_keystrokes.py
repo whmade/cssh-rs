@@ -2,20 +2,80 @@
 
 A fake pyautogui module is injected into ``sys.modules`` so the tests never
 import the real library, which fails to load on a headless Linux dev box.
+``press_keys_with_scan_codes`` talks to user32 directly, so a fake user32
+stands in for it and records the ``INPUT`` records it would have injected.
 """
 
 from __future__ import annotations
 
+import ctypes
 import sys
 import types
 from typing import TYPE_CHECKING
 
 import pytest
 
+from cssh_rs_automation import keystrokes
 from cssh_rs_automation.keystrokes import Keystrokes, KeystrokesError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+# SendInput constants, from the INPUT and KEYBDINPUT reference on MS Learn.
+_INPUT_KEYBOARD = 1
+_KEYEVENTF_EXTENDEDKEY = 0x0001
+_KEYEVENTF_KEYUP = 0x0002
+_KEYEVENTF_SCANCODE = 0x0008
+# sizeof(INPUT) on 64-bit Windows; SendInput rejects any other cbSize.
+_INPUT_SIZE_64_BIT = 40
+
+
+class _FakeSendInput:
+    """Stands in for user32's ``SendInput``; accepts ``argtypes``/``restype`` like it.
+
+    ``inserted`` holds one result per call: how many events that call reports
+    inserted. Calls past the end of the list insert every event.
+    """
+
+    def __init__(self, inserted: list[int]) -> None:
+        self.calls: list[list[tuple[int, int, int, int]]] = []
+        self.sizes: list[int] = []
+        self._inserted = list(inserted)
+
+    @property
+    def events(self) -> list[tuple[int, int, int, int]]:
+        return [event for call in self.calls for event in call]
+
+    def __call__(self, count: int, inputs: ctypes.Array, size: int) -> int:
+        self.calls.append(
+            [
+                (inputs[i].type, inputs[i].ki.wVk, inputs[i].ki.wScan, inputs[i].ki.dwFlags)
+                for i in range(count)
+            ]
+        )
+        self.sizes.append(size)
+        return self._inserted.pop(0) if self._inserted else count
+
+
+def _patch_user32(monkeypatch: pytest.MonkeyPatch, *inserted: int) -> _FakeSendInput:
+    send_input = _FakeSendInput(list(inserted))
+    monkeypatch.setattr(keystrokes, "_user32", lambda: types.SimpleNamespace(SendInput=send_input))
+    return send_input
+
+
+@pytest.fixture
+def fake_send_input(monkeypatch: pytest.MonkeyPatch) -> _FakeSendInput:
+    return _patch_user32(monkeypatch)
+
+
+def _down(scan: int, extended: bool = False) -> tuple[int, int, int, int]:
+    flags = _KEYEVENTF_SCANCODE | (_KEYEVENTF_EXTENDEDKEY if extended else 0)
+    return (_INPUT_KEYBOARD, 0, scan, flags)
+
+
+def _up(scan: int, extended: bool = False) -> tuple[int, int, int, int]:
+    kind, vk, _, flags = _down(scan, extended)
+    return (kind, vk, scan, flags | _KEYEVENTF_KEYUP)
 
 
 class _FakePyAutoGui(types.SimpleNamespace):
@@ -205,3 +265,146 @@ def test_key_listener_error_does_not_break_delivery(fake_pyautogui: _FakePyAutoG
 
     # A failing listener is swallowed; the keystroke is still delivered.
     assert fake_pyautogui.calls == [("write", ("hello",), {"interval": 0.0})]
+
+
+def test_scan_code_keys_press_right_alt_as_an_extended_key(
+    fake_send_input: _FakeSendInput,
+) -> None:
+    Keystrokes().press_keys_with_scan_codes("altgr", "e")
+
+    # Scan 1 make codes from MS Learn: right Alt is 0xE0 0x38, E is 0x12.
+    assert fake_send_input.events == [_down(0x38, True), _down(0x12), _up(0x12), _up(0x38, True)]
+
+
+@pytest.mark.skipif(ctypes.sizeof(ctypes.c_void_p) != 8, reason="INPUT size is for 64-bit")
+def test_scan_code_keys_pass_the_64_bit_input_size(fake_send_input: _FakeSendInput) -> None:
+    Keystrokes().press_keys_with_scan_codes("altgr", "4")
+
+    assert fake_send_input.sizes == [_INPUT_SIZE_64_BIT]
+
+
+def test_scan_code_keys_are_released_in_reverse_order(fake_send_input: _FakeSendInput) -> None:
+    Keystrokes().press_keys_with_scan_codes("shiftleft", "altgr", "4")
+
+    # Left Shift is 0x2A and 4 is 0x05 in the MS Learn scan code table.
+    assert fake_send_input.events == [
+        _down(0x2A),
+        _down(0x38, True),
+        _down(0x05),
+        _up(0x05),
+        _up(0x38, True),
+        _up(0x2A),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "scan", "extended"),
+    [
+        # MS Learn scan code table: Dash and Underscore, Right Brace,
+        # Non-US Backslash and Pipe.
+        pytest.param("-", 0x0C, False, id="dash"),
+        pytest.param("]", 0x1B, False, id="right-brace"),
+        pytest.param("nonusbackslash", 0x56, False, id="non-us-backslash"),
+    ],
+)
+def test_scan_code_keys_cover_the_keys_european_layouts_move(
+    fake_send_input: _FakeSendInput, key: str, scan: int, extended: bool
+) -> None:
+    Keystrokes().press_keys_with_scan_codes(key)
+
+    assert fake_send_input.events == [_down(scan, extended), _up(scan, extended)]
+
+
+def test_scan_code_keys_repeat_the_last_key_down_like_a_held_key(
+    fake_send_input: _FakeSendInput,
+) -> None:
+    Keystrokes().press_keys_with_scan_codes("altgr", "e", repeat=3)
+
+    assert fake_send_input.events == [
+        _down(0x38, True),
+        _down(0x12),
+        _down(0x12),
+        _down(0x12),
+        _up(0x12),
+        _up(0x38, True),
+    ]
+
+
+def test_scan_code_keys_reject_a_repeat_below_one(fake_send_input: _FakeSendInput) -> None:
+    with pytest.raises(KeystrokesError, match="repeat must be at least 1"):
+        Keystrokes().press_keys_with_scan_codes("e", repeat=0)
+
+    assert fake_send_input.events == []
+
+
+def test_scan_code_keys_reject_an_unknown_key(fake_send_input: _FakeSendInput) -> None:
+    with pytest.raises(KeystrokesError, match="no scan code for 'f13'"):
+        Keystrokes().press_keys_with_scan_codes("altgr", "f13")
+
+    assert fake_send_input.events == []
+
+
+def test_scan_code_keys_reject_no_keys(fake_send_input: _FakeSendInput) -> None:
+    with pytest.raises(KeystrokesError, match="at least one key"):
+        Keystrokes().press_keys_with_scan_codes()
+
+    assert fake_send_input.events == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="GetLastError capture is Windows-only")
+def test_scan_code_keys_raise_when_input_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    send_input = _patch_user32(monkeypatch, 0)
+
+    with pytest.raises(KeystrokesError, match="inserted 0 of 4") as raised:
+        Keystrokes().press_keys_with_scan_codes("altgr", "a")
+
+    # Nothing went down, so there is nothing to release.
+    assert len(send_input.calls) == 1
+    assert not getattr(raised.value, "ROBOT_EXIT_ON_FAILURE", False)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="GetLastError capture is Windows-only")
+@pytest.mark.parametrize(
+    ("inserted", "released"),
+    [
+        pytest.param(1, [_up(0x38, True)], id="right-alt-down"),
+        pytest.param(2, [_up(0x1E), _up(0x38, True)], id="both-down"),
+        pytest.param(3, [_up(0x38, True)], id="a-released"),
+    ],
+)
+def test_scan_code_keys_release_what_a_partial_insert_left_down(
+    monkeypatch: pytest.MonkeyPatch,
+    inserted: int,
+    released: list[tuple[int, int, int, int]],
+) -> None:
+    send_input = _patch_user32(monkeypatch, inserted)
+
+    with pytest.raises(KeystrokesError, match=f"inserted {inserted} of 4") as raised:
+        Keystrokes().press_keys_with_scan_codes("altgr", "a")
+
+    assert send_input.calls[1] == released
+    assert not getattr(raised.value, "ROBOT_EXIT_ON_FAILURE", False)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="GetLastError capture is Windows-only")
+def test_scan_code_keys_stop_the_run_when_stuck_keys_cannot_be_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_user32(monkeypatch, 1, 0)
+
+    with pytest.raises(KeystrokesError, match="still held down: altgr") as raised:
+        Keystrokes().press_keys_with_scan_codes("altgr", "a")
+
+    assert getattr(raised.value, "ROBOT_EXIT_ON_FAILURE", False) is True
+
+
+def test_key_listener_reports_scan_code_keys(fake_send_input: _FakeSendInput) -> None:  # noqa: ARG001
+    events: list[tuple[str, str]] = []
+    keys = Keystrokes()
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
+
+    keys.press_keys_with_scan_codes("altgr", "e")
+    keys.press_keys_with_scan_codes("altleft", "altgr", "e")
+    keys.press_keys_with_scan_codes("ctrlleft", "altleft", "q")
+
+    assert events == [("AltGr+E", "key"), ("Alt+AltGr+E", "key"), ("Ctrl+Alt+Q", "key")]
