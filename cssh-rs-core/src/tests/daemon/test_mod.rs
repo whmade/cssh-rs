@@ -13,17 +13,18 @@ mod daemon_test {
     };
     use windows::Win32::Foundation::{HANDLE, HWND};
     use windows::Win32::System::Console::{
-        CAPSLOCK_ON, ENHANCED_KEY, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, LEFT_ALT_PRESSED,
-        LEFT_CTRL_PRESSED, NUMLOCK_ON, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SCROLLLOCK_ON,
-        SHIFT_PRESSED,
+        CAPSLOCK_ON, ENHANCED_KEY, INPUT_RECORD_0, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
+        LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, NUMLOCK_ON, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
+        SCROLLLOCK_ON, SHIFT_PRESSED,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VIRTUAL_KEY, VK_C, VK_D, VK_DOWN, VK_E, VK_H, VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_R,
-        VK_RIGHT, VK_T, VK_UP, VK_X,
+        VIRTUAL_KEY, VK_A, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_H, VK_J, VK_K, VK_L, VK_LEFT,
+        VK_N, VK_R, VK_RIGHT, VK_T, VK_UP, VK_X,
     };
 
     use cssh_rs_platform::ControlChannelClient;
-    use cssh_rs_protocol::v1::input::{ClientRunState, InputEvent};
+    use cssh_rs_protocol::v1::codec::decode_frames;
+    use cssh_rs_protocol::v1::input::{ClientRunState, InputEvent, SignalKind};
     use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
     use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
     use cssh_rs_protocol::v1::message::DaemonToClient;
@@ -1726,5 +1727,187 @@ mod daemon_test {
             vec![true],
             "the surviving client must receive the highlight after re-anchor",
         );
+    }
+
+    fn key_down_record(
+        virtual_key: VIRTUAL_KEY,
+        character: char,
+        control_key_state: u32,
+        repeat_count: u16,
+    ) -> INPUT_RECORD_0 {
+        return INPUT_RECORD_0 {
+            KeyEvent: KEY_EVENT_RECORD {
+                bKeyDown: true.into(),
+                wRepeatCount: repeat_count,
+                wVirtualKeyCode: virtual_key.0,
+                wVirtualScanCode: 0,
+                uChar: KEY_EVENT_RECORD_0 {
+                    UnicodeChar: character as u16,
+                },
+                dwControlKeyState: control_key_state,
+            },
+        };
+    }
+
+    /// Feed `input_record` to `daemon` and return the keystroke frames it broadcast, decoded.
+    async fn handle_input_record_broadcasts(
+        daemon: &mut Daemon<'_>,
+        windows_api: &crate::utils::windows::MockWindowsApi,
+        clients: &mut Arc<Mutex<Clients>>,
+        input_record: INPUT_RECORD_0,
+    ) -> Vec<DaemonToClient> {
+        let (sender, mut receiver) = broadcast::channel(16);
+        daemon
+            .handle_input_record(
+                windows_api,
+                &sender,
+                input_record,
+                clients,
+                &test_workspace_area(),
+                &mut Arc::new(Mutex::new(Vec::new())),
+            )
+            .await;
+        let mut messages = Vec::new();
+        while let Ok(broadcast) = receiver.try_recv() {
+            let ClientBroadcast::Keystroke(frame) = broadcast else {
+                panic!("expected only keystroke frames, got {broadcast:?}");
+            };
+            messages.extend(
+                decode_frames::<DaemonToClient>(frame.to_vec(), DEFAULT_MAX_FRAME_LEN)
+                    .expect("decodable frame")
+                    .messages,
+            );
+        }
+        return messages;
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_every_repeated_keystroke() {
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
+        let mut clients = Arc::new(Mutex::new(Clients::new()));
+
+        let broadcasts = handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_no_calls(),
+            &mut clients,
+            key_down_record(VK_A, 'a', 0, 3),
+        )
+        .await;
+
+        assert_eq!(
+            broadcasts,
+            vec![keystroke("a"), keystroke("a"), keystroke("a")]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_one_keystroke_for_repeat_count_zero() {
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
+        let mut clients = Arc::new(Mutex::new(Clients::new()));
+
+        let broadcasts = handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_no_calls(),
+            &mut clients,
+            key_down_record(VK_A, 'a', 0, 0),
+        )
+        .await;
+
+        assert_eq!(broadcasts, vec![keystroke("a")]);
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_every_repeated_ctrl_break() {
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
+        let mut clients = Arc::new(Mutex::new(Clients::new()));
+
+        let broadcasts = handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_no_calls(),
+            &mut clients,
+            key_down_record(VK_CANCEL, '\0', LEFT_CTRL_PRESSED, 2),
+        )
+        .await;
+
+        assert_eq!(
+            broadcasts,
+            vec![
+                DaemonToClient::Signal(SignalKind::Break),
+                DaemonToClient::Signal(SignalKind::Break),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_moves_submenu_highlight_once_per_repeat() {
+        let mut clients = Clients::new();
+        clients.push(make_client_with_state(1, ClientState::Active));
+        clients.push(make_client_with_state(2, ClientState::Active));
+        clients.push(make_client_with_state(3, ClientState::Active));
+        clients.first().unwrap().highlight_sender.send_replace(true);
+        let mut clients = Arc::new(Mutex::new(clients));
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(
+            &config,
+            &clusters,
+            ControlModeState::EnableDisableSubmenu {
+                highlighted_pid: Some(1),
+                anchor_col: Some(0),
+            },
+        );
+
+        let broadcasts = handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_with_clear_screen(),
+            &mut clients,
+            key_down_record(VK_DOWN, '\0', 0, 2),
+        )
+        .await;
+
+        assert_eq!(
+            daemon.control_mode_state,
+            ControlModeState::EnableDisableSubmenu {
+                highlighted_pid: Some(3),
+                anchor_col: Some(0),
+            }
+        );
+        assert_eq!(
+            snapshot_highlights(&clients.lock().unwrap()),
+            vec![false, false, true]
+        );
+        assert_eq!(broadcasts, Vec::new());
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_toggles_once_then_broadcasts_remaining_repeats() {
+        let mut clients = Clients::new();
+        clients.push(make_client_with_state(1, ClientState::Active));
+        clients.push(make_client_with_state(2, ClientState::Disabled));
+        let mut clients = Arc::new(Mutex::new(clients));
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Active);
+
+        let broadcasts = handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_with_clear_screen(),
+            &mut clients,
+            key_down_record(VK_T, 't', 0, 3),
+        )
+        .await;
+
+        assert_eq!(
+            snapshot_states(&clients.lock().unwrap()),
+            vec![ClientState::Disabled, ClientState::Active]
+        );
+        assert_eq!(daemon.control_mode_state, ControlModeState::Inactive);
+        assert_eq!(broadcasts, vec![keystroke("t"), keystroke("t")]);
     }
 }
