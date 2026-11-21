@@ -12,7 +12,7 @@ from cssh_rs_automation import _marker_writer
 
 
 def _run_with_stdin(monkeypatch: pytest.MonkeyPatch, marker: Path, data: bytes) -> int:
-    """Run ``main`` with ``data`` fed via a pipe it reads with ``os.read`` on the stdin fd."""
+    """Run ``main`` with ``data`` fed via a pipe on the stdin fd."""
     read_fd, write_fd = os.pipe()
     os.write(write_fd, data)
     os.close(write_fd)
