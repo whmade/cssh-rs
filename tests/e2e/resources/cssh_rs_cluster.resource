@@ -29,12 +29,13 @@ Start Cssh Cluster
     ...                Cluster. ${cluster_aliases} are the hosts the cluster launches;
     ...                ${sshd_aliases} are the aliases sshd serves and defaults to
     ...                ${cluster_aliases}. Pass a superset as ${sshd_aliases} to leave
-    ...                spare hosts a test can add at runtime.
-    [Arguments]    ${cluster_aliases}=${ALIASES}    ${sshd_aliases}=${NONE}
+    ...                spare hosts a test can add at runtime. ${sshd_mode} is the sshd
+    ...                fixture's session mode and defaults to its plain marker mode.
+    [Arguments]    ${cluster_aliases}=${ALIASES}    ${sshd_aliases}=${NONE}    ${sshd_mode}=${NONE}
     IF    $sshd_aliases is None
         ${sshd_aliases}=    Set Variable    ${cluster_aliases}
     END
-    ${sshd}=    Start Sshd    ${sshd_aliases}
+    ${sshd}=    Start Sshd    ${sshd_aliases}    mode=${sshd_mode}
     Set Suite Variable    ${SSHD}    ${sshd}
     ${binary_dir}=    Evaluate    os.path.dirname(os.path.abspath(r"${CSSH_RS_BINARY}"))    modules=os
     ${config_path}=    Generate Config    ${CSSH_RS_BINARY}    ${binary_dir}
@@ -115,6 +116,16 @@ Focus Client And Type
     [Arguments]    ${target}    ${message}
     Focus Window    @${target}    substring
     Type Line    ${message}
+
+Paste Into Daemon
+    [Documentation]    Stage ${payload} on the clipboard and paste it into the daemon, then
+    ...                press Enter to flush the line to every marker.
+    [Arguments]    ${payload}
+    Set Clipboard    ${payload}
+    Focus Window    ${DAEMON_TITLE}
+    # conhost pastes the clipboard on a right-click (QuickEdit mode); it has no Ctrl+V paste.
+    Right Click Window    ${DAEMON_TITLE}
+    Press Key    enter
 
 Assert Every Host Received
     [Documentation]    Assert ${message} arrived as a complete line (exact, not substring)
