@@ -169,6 +169,49 @@ pub(crate) fn is_altgr_character(key: &KEY_EVENT_RECORD) -> bool {
         && unicode_char != 0x7f;
 }
 
+/// Return the Ctrl and Alt flags of a key-event record that only selected an AltGr character.
+///
+/// Holding the right Ctrl key with AltGr's right Alt, or both Ctrl keys,
+/// keeps Ctrl; holding both Alt keys keeps Alt. Windows Terminal, whose
+/// rule [`is_altgr_character`] follows, keeps Ctrl only when both Ctrl
+/// flags are set. But AltGr only ever fakes the left Ctrl, and when right
+/// Ctrl is pressed first Windows reports no left Ctrl at all, as this
+/// `ReadConsoleInputW` capture of right Ctrl, then AltGr + sharp-s on a
+/// German layout shows:
+///
+/// ```text
+/// down  vk=0x11 (CONTROL)  scan=0x1d  char=U+0000  state=0x0104 RIGHT_CTRL|ENHANCED
+/// down  vk=0x12 (MENU)     scan=0x38  char=U+0000  state=0x0105 RIGHT_ALT|RIGHT_CTRL|ENHANCED
+/// down  vk=0xdb (OEM_4)    scan=0x0c  char=U+005C '\\'  state=0x0005 RIGHT_ALT|RIGHT_CTRL
+/// ```
+///
+/// # Arguments
+///
+/// * `key` - The key-event record.
+///
+/// # Returns
+///
+/// The `dwControlKeyState` flags to leave out of the keystroke's modifiers,
+/// or `0` unless [`is_altgr_character`] matches.
+pub(crate) fn altgr_selector_flags(key: &KEY_EVENT_RECORD) -> u32 {
+    if !is_altgr_character(key) {
+        return 0;
+    }
+    let state = key.dwControlKeyState;
+    let holds = |flags: u32| return state & flags == flags;
+    let keeps_ctrl = holds(RIGHT_CTRL_PRESSED | RIGHT_ALT_PRESSED)
+        || holds(LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
+    let keeps_alt = holds(LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
+    let mut flags = 0;
+    if !keeps_ctrl {
+        flags |= LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED;
+    }
+    if !keeps_alt {
+        flags |= LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED;
+    }
+    return flags;
+}
+
 pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
     match virtual_key {
         VK_UP => return Some(KeyCode::Up),
