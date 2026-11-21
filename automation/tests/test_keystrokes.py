@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cssh_rs_automation import keystrokes
+from cssh_rs_automation.keyboard_layout import KeyboardLayoutError
 from cssh_rs_automation.keystrokes import Keystrokes, KeystrokesError
 
 if TYPE_CHECKING:
@@ -66,6 +67,15 @@ def _patch_user32(monkeypatch: pytest.MonkeyPatch, *inserted: int) -> _FakeSendI
 @pytest.fixture
 def fake_send_input(monkeypatch: pytest.MonkeyPatch) -> _FakeSendInput:
     return _patch_user32(monkeypatch)
+
+
+_LAYOUT_CHARACTER = keystrokes._layout_character
+
+
+@pytest.fixture(autouse=True)
+def _no_layout_characters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep overlay labels independent of this machine's keyboard layout."""
+    monkeypatch.setattr(keystrokes, "_layout_character", lambda _scan: None)
 
 
 def _down(scan: int, extended: bool = False) -> tuple[int, int, int, int]:
@@ -408,3 +418,86 @@ def test_key_listener_reports_scan_code_keys(fake_send_input: _FakeSendInput) ->
     keys.press_keys_with_scan_codes("ctrlleft", "altleft", "q")
 
     assert events == [("AltGr+E", "key"), ("Alt+AltGr+E", "key"), ("Ctrl+Alt+Q", "key")]
+
+
+def test_key_listener_shows_scan_code_keys_as_the_layout_types_them(
+    fake_send_input: _FakeSendInput,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    german = {0x0C: "ß", 0x1B: "+", 0x56: "<", 0x10: "q"}
+    monkeypatch.setattr(keystrokes, "_layout_character", german.get)
+    events: list[tuple[str, str]] = []
+    keys = Keystrokes()
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
+
+    keys.press_keys_with_scan_codes("altgr", "-")
+    keys.press_keys_with_scan_codes("altgr", "]")
+    keys.press_keys_with_scan_codes("altgr", "nonusbackslash")
+    keys.press_keys_with_scan_codes("ctrlleft", "altleft", "q")
+
+    assert events == [
+        ("AltGr+ß", "key"),
+        ("AltGr++", "key"),
+        ("AltGr+<", "key"),
+        ("Ctrl+Alt+Q", "key"),
+    ]
+
+
+class _FakeLayoutUser32:
+    """Stands in for user32's ``MapVirtualKeyExW`` and ``ToUnicodeEx`` on one layout."""
+
+    def __init__(self, typed: str, count: int) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+        def map_virtual_key(scan: int, map_type: int, layout: int) -> int:
+            self.calls.append(("MapVirtualKeyExW", scan, map_type, layout))
+            return 0xDB
+
+        def to_unicode(
+            virtual_key: int,
+            scan: int,
+            _state: object,
+            buffer: ctypes.Array[ctypes.c_wchar],
+            _size: int,
+            flags: int,
+            layout: int,
+        ) -> int:
+            self.calls.append(("ToUnicodeEx", virtual_key, scan, flags, layout))
+            buffer.value = typed
+            return count
+
+        self.MapVirtualKeyExW = map_virtual_key
+        self.ToUnicodeEx = to_unicode
+
+
+def test_layout_character_reads_what_the_foreground_layout_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLayoutUser32("ß", 1)
+    monkeypatch.setattr(keystrokes, "_user32", lambda: fake)
+    monkeypatch.setattr(keystrokes, "foreground_keyboard_layout", lambda: 0x04070407)
+
+    assert _LAYOUT_CHARACTER(0x0C) == "ß"
+    # MAPVK_VSC_TO_VK_EX is 3; ToUnicodeEx flag 0x4 leaves the keyboard state alone.
+    assert fake.calls == [
+        ("MapVirtualKeyExW", 0x0C, 3, 0x04070407),
+        ("ToUnicodeEx", 0xDB, 0x0C, 0x4, 0x04070407),
+    ]
+
+
+def test_layout_character_is_none_for_a_dead_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(keystrokes, "_user32", lambda: _FakeLayoutUser32(chr(0xB4), -1))
+    monkeypatch.setattr(keystrokes, "foreground_keyboard_layout", lambda: 0x04070407)
+
+    assert _LAYOUT_CHARACTER(0x0D) is None
+
+
+def test_layout_character_is_none_without_a_foreground_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_foreground_window() -> int:
+        raise KeyboardLayoutError("no window is in the foreground")
+
+    monkeypatch.setattr(keystrokes, "foreground_keyboard_layout", no_foreground_window)
+
+    assert _LAYOUT_CHARACTER(0x0C) is None

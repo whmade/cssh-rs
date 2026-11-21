@@ -88,6 +88,10 @@ def test_keycast_text_concatenates_text_and_uppercases_keys() -> None:
     assert _keycast_text(events) == "echo hi ENTER CTRL+C"
 
 
+def test_keycast_text_keeps_a_key_without_a_single_capital() -> None:
+    assert _keycast_text([("AltGr+ß", "key"), ("Ctrl+ä", "key")]) == "ALTGR+ß CTRL+Ä"
+
+
 def test_overlay_passes_frame_through_when_idle() -> None:
     frame = np.full((10, 10, 3), 5, dtype=np.uint8)
 

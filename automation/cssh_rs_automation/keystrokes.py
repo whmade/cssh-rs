@@ -13,6 +13,9 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
+from cssh_rs_automation.keyboard_layout import KeyboardLayoutError, foreground_keyboard_layout
+from cssh_rs_automation.keycast import keycap_upper
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -24,6 +27,14 @@ _INPUT_KEYBOARD = 1
 _KEYEVENTF_EXTENDEDKEY = 0x0001
 _KEYEVENTF_KEYUP = 0x0002
 _KEYEVENTF_SCANCODE = 0x0008
+
+# MapVirtualKeyExW maps a scan code to a virtual key with MAPVK_VSC_TO_VK_EX:
+# https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-mapvirtualkeyexw
+_MAPVK_VSC_TO_VK_EX = 3
+# ToUnicodeEx leaves the keyboard state, such as a pending dead key, alone
+# with this flag (Windows 10 version 1607 and later):
+# https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-tounicodeex
+_TOUNICODEEX_KEEP_KEYBOARD_STATE = 0x4
 
 
 class _Default:
@@ -179,7 +190,7 @@ class Keystrokes:
         unknown = [key for key in keys if key not in _SCAN_CODES]
         if unknown:
             raise KeystrokesError(f"no scan code for {unknown[0]!r}")
-        self._notify("+".join(_key_label(key) for key in keys), "key")
+        self._notify("+".join(_scan_code_key_label(key) for key in keys), "key")
         presses = [(key, False) for key in keys]
         presses += presses[-1:] * (repeat - 1)
         releases = [(key, True) for key in reversed(keys)]
@@ -342,6 +353,52 @@ def _user32() -> Any:
 
     # ctypes.WinDLL exists only in the Windows typeshed stub; guarded above.
     return ctypes.WinDLL("user32", use_last_error=True)  # pyrefly: ignore[missing-attribute]
+
+
+def _scan_code_key_label(key: str) -> str:
+    """Return the overlay label of a ``press_keys_with_scan_codes`` key.
+
+    A modifier shows its name; any other key shows what the foreground
+    window's layout types for it, so ``-`` shows as ``ß`` on German. The key's
+    name is the fallback when the layout cannot be read.
+    """
+    if key in _KEY_LABELS:
+        return _KEY_LABELS[key]
+    character = _layout_character(_SCAN_CODES[key][0])
+    return keycap_upper(character) if character else _key_label(key)
+
+
+def _layout_character(scan: int) -> str | None:
+    """Return what the foreground window's layout types for scan code ``scan`` alone, or None."""
+    try:
+        layout = foreground_keyboard_layout()
+    except KeyboardLayoutError:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _user32()
+    user32.MapVirtualKeyExW.argtypes = [wintypes.UINT, wintypes.UINT, wintypes.HKL]
+    user32.MapVirtualKeyExW.restype = wintypes.UINT
+    user32.ToUnicodeEx.argtypes = [
+        wintypes.UINT,
+        wintypes.UINT,
+        ctypes.POINTER(ctypes.c_ubyte),
+        wintypes.LPWSTR,
+        ctypes.c_int,
+        wintypes.UINT,
+        wintypes.HKL,
+    ]
+    user32.ToUnicodeEx.restype = ctypes.c_int
+    virtual_key = user32.MapVirtualKeyExW(scan, _MAPVK_VSC_TO_VK_EX, layout)
+    if not virtual_key:
+        return None
+    no_modifiers = (ctypes.c_ubyte * 256)()
+    typed = ctypes.create_unicode_buffer(8)
+    count = user32.ToUnicodeEx(
+        virtual_key, scan, no_modifiers, typed, len(typed), _TOUNICODEEX_KEEP_KEYBOARD_STATE, layout
+    )
+    return typed.value[:count] if count > 0 else None
 
 
 def _key_label(key: str) -> str:
