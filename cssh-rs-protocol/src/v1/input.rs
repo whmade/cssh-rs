@@ -14,8 +14,8 @@ pub enum InputEvent {
         code: KeyCode,
         /// The modifier bits held during the keystroke.
         modifiers: Modifiers,
-        /// Composed Unicode text for IME and dead-key input, when the
-        /// keystroke produced any; omitted from the wire when absent.
+        /// The keystroke's composed text, when it produced any; omitted from
+        /// the wire when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },

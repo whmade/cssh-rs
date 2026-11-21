@@ -454,11 +454,11 @@ fn get_foreground_window_wrapper(api: &dyn WindowsApi) -> HWNDWrapper {
 enum ControlModeState {
     /// Controle mode is inactive.
     Inactive,
-    /// One of the keys required for the control mode key combination
-    /// is currently being pressed.
+    /// One of the keys required for the control mode chord is currently
+    /// being pressed.
     Initiated,
-    /// All required keys for the control mode key combination were pressed
-    /// and control mode is now active.
+    /// All required keys for the control mode chord were pressed and
+    /// control mode is now active.
     ///
     /// Active control mode prevents any input records from being sent to clients.
     Active,
@@ -1337,9 +1337,9 @@ impl<'a> Daemon<'a> {
     }
 }
 
-/// The processed console input mode controls whether special key combinations
-/// such as `Ctrl + c` or `Ctrl + BREAK` receive special handling or are treated
-/// as simple keystrokes.
+/// The processed console input mode controls whether chords such as
+/// `Ctrl + c` or `Ctrl + BREAK` receive special handling or are treated as
+/// simple keystrokes.
 ///
 /// By default processed input mode is enabled, meaning `Ctrl + c` is treated as
 /// a signal, not keystrokes.

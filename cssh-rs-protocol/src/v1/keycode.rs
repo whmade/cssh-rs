@@ -11,7 +11,7 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "k", content = "v", rename_all = "snake_case")]
 pub enum KeyCode {
-    /// The composed character(s) produced by a single keystroke.
+    /// The composed text of a single keystroke.
     Char(String),
     /// The Enter / Return key.
     Enter,
