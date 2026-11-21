@@ -12,10 +12,12 @@ pub enum InputEvent {
     Key {
         /// The logical key pressed.
         code: KeyCode,
-        /// The modifier bits held during the keystroke.
+        /// The modifier bits held during the keystroke, minus a Ctrl and Alt
+        /// that only selected an AltGr character in `text`. Shift is always
+        /// reported, because whether composing `text` used it up is unknown.
         modifiers: Modifiers,
-        /// Composed Unicode text for IME and dead-key input, when the
-        /// keystroke produced any; omitted from the wire when absent.
+        /// The keystroke's composed text, when it produced any; omitted from
+        /// the wire when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },

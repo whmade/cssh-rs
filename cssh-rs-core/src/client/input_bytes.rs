@@ -3,7 +3,9 @@
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
 use log::warn;
-use windows::Win32::System::Console::KEY_EVENT_RECORD;
+use windows::Win32::System::Console::{
+    KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4,
     VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT,
@@ -140,6 +142,31 @@ pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
         return 1;
     }
     return usize::from(key.wRepeatCount);
+}
+
+/// Return whether a key-event record's Ctrl and Alt only selected an AltGr character.
+///
+/// Windows reports AltGr as Ctrl+Alt, treats any Ctrl+Alt as AltGr, and
+/// presses AltGr for each pasted character that needs it on the active
+/// layout. The rule matches Windows Terminal's and leaves Alt+x,
+/// Ctrl+letter and Ctrl+Alt+Esc as chords:
+/// <https://github.com/microsoft/terminal/blob/main/src/terminal/input/terminalInput.cpp>.
+///
+/// # Arguments
+///
+/// * `key` - The key-event record.
+///
+/// # Returns
+///
+/// `true` if a Ctrl and an Alt are held and the composed text is a code
+/// point above `0x20` other than `0x7F`.
+pub(crate) fn is_altgr_character(key: &KEY_EVENT_RECORD) -> bool {
+    let state = key.dwControlKeyState;
+    let unicode_char = unsafe { key.uChar.UnicodeChar };
+    return state & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED) != 0
+        && state & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED) != 0
+        && unicode_char > 0x20
+        && unicode_char != 0x7f;
 }
 
 pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
