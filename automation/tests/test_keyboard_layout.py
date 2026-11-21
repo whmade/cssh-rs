@@ -9,6 +9,7 @@ change a real layout or open a real window.
 from __future__ import annotations
 
 import logging
+import types
 
 import pytest
 import pywinctl
@@ -216,6 +217,36 @@ def test_restore_after_a_switch_that_never_took_effect_still_restores(
     layout.restore_keyboard_layout()
 
     assert keyboard.layouts[keyboard.console_hwnd()] == _US
+
+
+def _patch_foreground_window(monkeypatch: pytest.MonkeyPatch, hwnd: int | None) -> None:
+    def get_foreground_window() -> int | None:
+        return hwnd
+
+    monkeypatch.setattr(
+        keyboard_layout,
+        "_user32",
+        lambda: types.SimpleNamespace(GetForegroundWindow=get_foreground_window),
+    )
+
+
+def test_foreground_keyboard_layout_reads_the_foreground_window(
+    keyboard: _FakeKeyboard, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keyboard.layouts[0x4242] = _UK
+    _patch_foreground_window(monkeypatch, 0x4242)
+
+    assert keyboard_layout.foreground_keyboard_layout() == _UK
+
+
+def test_foreground_keyboard_layout_raises_without_a_foreground_window(
+    keyboard: _FakeKeyboard,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_foreground_window(monkeypatch, None)
+
+    with pytest.raises(KeyboardLayoutError, match="no window is in the foreground"):
+        keyboard_layout.foreground_keyboard_layout()
 
 
 def test_restore_without_a_switch_does_nothing(keyboard: _FakeKeyboard) -> None:
