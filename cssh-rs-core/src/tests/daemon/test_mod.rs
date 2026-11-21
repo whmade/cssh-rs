@@ -1997,4 +1997,58 @@ mod daemon_test {
             vec![keystroke("€"), keystroke("€"), keystroke("€")]
         );
     }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_ctrl_a_with_alt_held() {
+        let unknown_ctrl_alt_key = DaemonToClient::Input {
+            event: InputEvent::Key {
+                code: KeyCode::Unknown,
+                modifiers: Modifiers::CTRL | Modifiers::ALT,
+                text: None,
+            },
+        };
+        let altgr = RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED;
+        let ctrl_alt = LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED;
+        let cases = [
+            ('á', altgr, keystroke("á")),
+            ('\0', altgr, unknown_ctrl_alt_key.clone()),
+            ('\0', ctrl_alt, unknown_ctrl_alt_key),
+        ];
+        for (character, control_key_state, expected) in cases {
+            let (control_mode_state, broadcasts) = handle_input_record_outside_control_mode(
+                key_down_record(VK_A, character, control_key_state, 1),
+            )
+            .await;
+
+            assert_eq!(
+                control_mode_state,
+                ControlModeState::Inactive,
+                "{character:?} {control_key_state:#06x}"
+            );
+            assert_eq!(
+                broadcasts,
+                vec![expected],
+                "{character:?} {control_key_state:#06x}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_enters_control_mode_on_ctrl_a() {
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
+        let mut clients = Arc::new(Mutex::new(Clients::new()));
+
+        let broadcasts = handle_input_record_broadcasts(
+            &mut daemon,
+            &mock_with_clear_screen(),
+            &mut clients,
+            key_down_record(VK_A, '\u{1}', LEFT_CTRL_PRESSED, 1),
+        )
+        .await;
+
+        assert_eq!(daemon.control_mode_state, ControlModeState::Active);
+        assert_eq!(broadcasts, Vec::new());
+    }
 }
