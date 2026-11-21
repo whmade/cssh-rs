@@ -9,7 +9,7 @@ use windows::Win32::System::Console::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_CANCEL};
 
-use crate::client::input_bytes::{is_altgr_character, virtual_key_to_keycode};
+use crate::client::input_bytes::{altgr_selector_flags, virtual_key_to_keycode};
 
 /// Return the message that broadcasts a key-down event to the clients.
 ///
@@ -18,7 +18,7 @@ use crate::client::input_bytes::{is_altgr_character, virtual_key_to_keycode};
 ///
 /// # Returns
 /// A `Break` signal for Ctrl+Break, which has no input byte, otherwise the
-/// key, without the Ctrl and Alt of an [`is_altgr_character`] keystroke.
+/// key, without its [`altgr_selector_flags`].
 pub fn key_event_to_message(key: &KEY_EVENT_RECORD) -> DaemonToClient {
     let virtual_key = VIRTUAL_KEY(key.wVirtualKeyCode);
     if virtual_key == VK_CANCEL {
@@ -32,14 +32,10 @@ pub fn key_event_to_message(key: &KEY_EVENT_RECORD) -> DaemonToClient {
         Some(text) => KeyCode::Char(text.clone()),
         None => virtual_key_to_keycode(virtual_key).unwrap_or(KeyCode::Unknown),
     };
-    let mut state = key.dwControlKeyState;
-    if is_altgr_character(key) {
-        state &= !(LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED | LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
-    }
     return DaemonToClient::Input {
         event: InputEvent::Key {
             code,
-            modifiers: modifiers_from_state(state),
+            modifiers: modifiers_from_state(key.dwControlKeyState & !altgr_selector_flags(key)),
             text,
         },
     };

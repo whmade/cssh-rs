@@ -19,7 +19,8 @@ mod daemon_test {
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         VIRTUAL_KEY, VK_7, VK_A, VK_BACK, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_ESCAPE, VK_H,
-        VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T, VK_UP, VK_X,
+        VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_OEM_4, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T, VK_UP,
+        VK_X,
     };
 
     use cssh_rs_platform::ControlChannelClient;
@@ -1934,6 +1935,7 @@ mod daemon_test {
         let altgr = RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED;
         let ctrl_alt = LEFT_ALT_PRESSED | LEFT_CTRL_PRESSED;
         let ctrl_alt_modifiers = Modifiers::CTRL | Modifiers::ALT;
+        let right_ctrl_then_altgr = RIGHT_ALT_PRESSED | RIGHT_CTRL_PRESSED;
         let cases = [
             (VK_E, '€', altgr, Modifiers::NONE),
             (VK_7, '{', altgr, Modifiers::NONE),
@@ -1945,6 +1947,16 @@ mod daemon_test {
             (VK_ESCAPE, '\u{1b}', ctrl_alt, ctrl_alt_modifiers),
             (VK_SPACE, ' ', ctrl_alt, ctrl_alt_modifiers),
             (VK_BACK, '\u{7f}', ctrl_alt, ctrl_alt_modifiers),
+            (VK_OEM_4, '\\', right_ctrl_then_altgr, Modifiers::CTRL),
+            (VK_OEM_4, '\\', altgr | RIGHT_CTRL_PRESSED, Modifiers::CTRL),
+            (VK_Q, '@', ctrl_alt | RIGHT_CTRL_PRESSED, Modifiers::CTRL),
+            (
+                VK_Q,
+                '@',
+                LEFT_ALT_PRESSED | RIGHT_CTRL_PRESSED,
+                Modifiers::NONE,
+            ),
+            (VK_E, '€', altgr | LEFT_ALT_PRESSED, Modifiers::ALT),
         ];
         for (virtual_key, character, control_key_state, modifiers) in cases {
             let broadcasts = broadcasts_outside_control_mode(key_down_record(
