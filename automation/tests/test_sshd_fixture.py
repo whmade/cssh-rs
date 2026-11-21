@@ -26,6 +26,17 @@ def test_build_forced_command_invokes_marker_module() -> None:
     )
 
 
+def test_build_forced_command_passes_raw_input_to_the_marker_writer() -> None:
+    forced = sshd_fixture._build_forced_command(
+        "/usr/bin/python3", "/tmp/markers/h1.log", raw_input=True
+    )
+
+    assert forced == (
+        r"\"/usr/bin/python3\" -m cssh_rs_automation._marker_writer --raw-input"
+        r" \"/tmp/markers/h1.log\""
+    )
+
+
 _OPTIONS = "no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-user-rc"
 
 
@@ -53,11 +64,14 @@ def test_write_authorized_keys_dispatches_by_mode(
         return path.read_text(encoding="utf-8").rstrip("\n"), homes
 
     marker_line, marker_homes = write(sshd_fixture.MarkerMode(), "marker")
+    raw_line, _ = write(sshd_fixture.MarkerMode(raw_input=True), "raw")
     shell_line, shell_homes = write(sshd_fixture.ShellMode(), "shell")
     scripted_line, scripted_homes = write(sshd_fixture.ScriptedShellMode(), "scripted")
 
     assert marker_line.startswith('command="') and "_marker_writer" in marker_line
+    assert "--raw-input" not in marker_line
     assert marker_homes == {}
+    assert "_marker_writer --raw-input " in raw_line
     assert shell_line.startswith(f"{_OPTIONS} ") and "command=" not in shell_line
     assert shell_homes == {}
     assert scripted_line.startswith('command="') and " --rcfile " in scripted_line
