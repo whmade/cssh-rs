@@ -156,6 +156,29 @@ pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
 /// Windows reports AltGr as Ctrl+Alt and treats any Ctrl+Alt as AltGr, so
 /// this follows Windows Terminal's rule:
 /// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L390>.
+fn is_altgr_character(key: &KEY_EVENT_RECORD) -> bool {
+    let state = key.dwControlKeyState;
+    let unicode_char = unsafe { key.uChar.UnicodeChar };
+    return state & CTRL_PRESSED != 0
+        && state & ALT_PRESSED != 0
+        && char::from_u32(u32::from(unicode_char))
+            .is_some_and(|character| return character > ' ' && character != '\u{7f}');
+}
+
+/// Return `dwControlKeyState` without a Ctrl and Alt that only selected an AltGr character.
+///
+/// As in Windows Terminal, whose rule [`is_altgr_character`] follows,
+/// holding both Ctrl keys keeps Ctrl and holding both Alt keys keeps Alt.
+/// Unlike it, right Ctrl with AltGr's right Alt keeps Ctrl too: AltGr only
+/// ever fakes the left Ctrl, and when right Ctrl is pressed first Windows
+/// reports no left Ctrl at all, as this `ReadConsoleInputW` capture of
+/// right Ctrl, then AltGr + sharp-s on a German layout shows:
+///
+/// ```text
+/// down  vk=0x11 (CONTROL)  scan=0x1d  char=U+0000  state=0x0104 RIGHT_CTRL|ENHANCED
+/// down  vk=0x12 (MENU)     scan=0x38  char=U+0000  state=0x0105 RIGHT_ALT|RIGHT_CTRL|ENHANCED
+/// down  vk=0xdb (OEM_4)    scan=0x0c  char=U+005C '\\'  state=0x0005 RIGHT_ALT|RIGHT_CTRL
+/// ```
 ///
 /// # Arguments
 ///
@@ -163,15 +186,25 @@ pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
 ///
 /// # Returns
 ///
-/// `true` if a Ctrl and an Alt are held and the composed text is a
-/// character above `U+0020` other than `U+007F`.
-pub(crate) fn is_altgr_character(key: &KEY_EVENT_RECORD) -> bool {
+/// The record's `dwControlKeyState`, minus its Ctrl and Alt flags if
+/// [`is_altgr_character`] matches, except a Ctrl or Alt kept as above.
+pub(crate) fn control_key_state_without_altgr(key: &KEY_EVENT_RECORD) -> u32 {
     let state = key.dwControlKeyState;
-    let unicode_char = unsafe { key.uChar.UnicodeChar };
-    return state & CTRL_PRESSED != 0
-        && state & ALT_PRESSED != 0
-        && char::from_u32(u32::from(unicode_char))
-            .is_some_and(|character| return character > ' ' && character != '\u{7f}');
+    if !is_altgr_character(key) {
+        return state;
+    }
+    let holds = |flags: u32| return state & flags == flags;
+    let keeps_ctrl = holds(RIGHT_CTRL_PRESSED | RIGHT_ALT_PRESSED)
+        || holds(LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
+    let keeps_alt = holds(LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
+    let mut kept = state;
+    if !keeps_ctrl {
+        kept &= !CTRL_PRESSED;
+    }
+    if !keeps_alt {
+        kept &= !ALT_PRESSED;
+    }
+    return kept;
 }
 
 pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
