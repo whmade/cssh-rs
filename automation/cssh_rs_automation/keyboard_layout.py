@@ -212,6 +212,24 @@ def _request_keyboard_layout(hwnd: int, hkl: int) -> None:
         )
 
 
+def foreground_keyboard_layout() -> int:
+    """Return the active layout of the foreground window.
+
+    Returns:
+        The foreground window's input locale identifier, a console window's
+        included.
+    """
+    from ctypes import wintypes
+
+    user32 = _user32()
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        raise KeyboardLayoutError("no window is in the foreground")
+    return _window_keyboard_layout(int(hwnd))
+
+
 def _window_keyboard_layout(hwnd: int) -> int:
     """Return the active layout of the thread that really owns ``hwnd``.
 

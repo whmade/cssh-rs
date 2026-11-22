@@ -7,6 +7,7 @@ window, so the tests never change a real layout or open a real window.
 from __future__ import annotations
 
 import logging
+import types
 
 import pytest
 import pywinctl
@@ -237,3 +238,26 @@ def test_restore_raises_and_closes_the_console_when_the_layout_never_comes_back(
 
     assert [console.killed for console in keyboard.consoles] == [True]
     assert keyboard.unloaded == []
+
+
+def _patch_foreground_window(monkeypatch: pytest.MonkeyPatch, hwnd: int | None) -> None:
+    user32 = types.SimpleNamespace(GetForegroundWindow=lambda: hwnd)
+    monkeypatch.setattr(keyboard_layout, "_user32", lambda: user32)
+
+
+def test_foreground_keyboard_layout_reads_the_foreground_window(
+    keyboard: _FakeKeyboard, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keyboard.layouts[0x4242] = _UK
+    _patch_foreground_window(monkeypatch, 0x4242)
+
+    assert keyboard_layout.foreground_keyboard_layout() == _UK
+
+
+def test_foreground_keyboard_layout_raises_without_a_foreground_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_foreground_window(monkeypatch, None)
+
+    with pytest.raises(KeyboardLayoutError, match="no window is in the foreground"):
+        keyboard_layout.foreground_keyboard_layout()

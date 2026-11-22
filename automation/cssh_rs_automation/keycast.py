@@ -86,9 +86,24 @@ class KeycastOverlay:
         return _draw_keycast(frame, events)
 
 
+def keycap_upper(label: str) -> str:
+    """Upper-case ``label`` like a keycap.
+
+    Args:
+        label: A key label such as ``AltGr+ß``.
+
+    Returns:
+        ``label`` upper-cased, except characters such as ``ß`` that have no
+        single-character capital and would otherwise turn into ``SS``.
+    """
+    return "".join(
+        character.upper() if len(character.upper()) == 1 else character for character in label
+    )
+
+
 def _keycast_text(events: list[tuple[str, str]]) -> str:
     """Return the overlay line: text tokens verbatim, key tokens upper-cased, space-joined."""
-    return " ".join(label.upper() if kind == "key" else label for label, kind in events)
+    return " ".join(keycap_upper(label) if kind == "key" else label for label, kind in events)
 
 
 def _draw_keycast(frame: object, events: list[tuple[str, str]]) -> object:
