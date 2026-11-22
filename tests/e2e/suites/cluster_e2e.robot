@@ -84,16 +84,6 @@ Large Payload
     ${payload}=    Evaluate    $prefix + "x" * ($PAYLOAD_LENGTH - len($prefix))
     RETURN    ${payload}
 
-Paste Into Daemon
-    [Documentation]    Stage ${payload} on the clipboard and paste it into the daemon, then
-    ...                press Enter to flush the line to every marker.
-    [Arguments]    ${payload}
-    Set Clipboard    ${payload}
-    Focus Window    ${DAEMON_TITLE}
-    # conhost pastes the clipboard on a right-click (QuickEdit mode); it has no Ctrl+V paste.
-    Right Click Window    ${DAEMON_TITLE}
-    Press Key    enter
-
 Assert All Client Windows Present
     [Documentation]    Assert each client window still exists after the paste - a client that
     ...                died on the pipe would be gone.
