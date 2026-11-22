@@ -12,7 +12,7 @@ use std::{
 };
 use std::{thread, time};
 
-use crate::client::input_bytes::keystroke_count;
+use crate::client::input_bytes::{keystroke_count, ALT_PRESSED, CTRL_PRESSED};
 use crate::get_console_window_handle;
 use crate::utils::config::{Cluster, DaemonConfig, EdgeBehavior};
 use crate::utils::windows::{clear_screen, set_console_color, WindowsApi};
@@ -1057,8 +1057,10 @@ impl<'a> Daemon<'a> {
             }
             return true;
         }
-        if (key_event.dwControlKeyState & LEFT_CTRL_PRESSED >= 1
-            || key_event.dwControlKeyState & RIGHT_CTRL_PRESSED >= 1)
+        // AltGr arrives as Ctrl+Alt, so any Alt rules out Ctrl+A, composed text or not:
+        // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-vkkeyscanw#remarks
+        if key_event.dwControlKeyState & CTRL_PRESSED != 0
+            && key_event.dwControlKeyState & ALT_PRESSED == 0
             && key_event.wVirtualKeyCode == VK_A.0
         {
             self.control_mode_state = ControlModeState::Initiated;
