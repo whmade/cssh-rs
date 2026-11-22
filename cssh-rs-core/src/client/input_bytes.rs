@@ -40,7 +40,7 @@ pub(crate) fn input_event_to_bytes(event: &InputEvent) -> Vec<u8> {
 /// # Returns
 ///
 /// The bytes of one keystroke, repeated [`keystroke_count`] times: the
-/// composed character, else the encoding of the virtual key, else nothing.
+/// composed text, else the encoding of the virtual key, else nothing.
 pub(crate) fn key_event_record_to_bytes(key: &KEY_EVENT_RECORD) -> Vec<u8> {
     let unicode_char = unsafe { key.uChar.UnicodeChar };
     let keystroke = match char::from_u32(u32::from(unicode_char))
