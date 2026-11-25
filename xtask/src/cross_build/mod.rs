@@ -5,10 +5,11 @@
 //! supported host. The xtask owns the toolchain selection so the
 //! developer experience does not drift over time.
 //!
-//! [`run_cross_build`] orchestrates the workflow: host detection,
-//! Rust target install, helper-tool install, and the final build
-//! subprocess. Per-target details (strategy + I/O) live in the
-//! [`strategy`] and [`system`] submodules.
+//! [`run_cross_build`] orchestrates the workflow. [`prepare_toolchain`]
+//! has the per-target [`strategy`] pick the [`Toolchain`] that reaches the
+//! target from this host and install what it needs; [`run_cargo_for`]
+//! turns a cargo subcommand into that toolchain's command line. All I/O
+//! goes through the [`system`] traits.
 
 pub mod strategy;
 pub mod system;
@@ -19,6 +20,7 @@ use anyhow::Result;
 use clap::ValueEnum;
 use cssh_rs_meta::PACKAGE_NAME;
 
+use system::windows_msvc::WindowsMsvcSystem;
 pub use system::{CrossBuildSystem, RealSystem};
 
 static X86_64_PC_WINDOWS_MSVC_BINARY: LazyLock<String> =
@@ -29,8 +31,8 @@ static X86_64_PC_WINDOWS_MSVC_BINARY: LazyLock<String> =
 /// v1 supports one target, `x86_64-pc-windows-msvc` (the only target
 /// cssh-rs currently ships). Adding a target later is additive: extend
 /// this enum, extend [`Target::triple`] / [`Target::binary_filename`],
-/// add a `strategy::<target>` submodule with a `build` entry point,
-/// and add a dispatch arm in [`run_cross_build`].
+/// add a `strategy::<target>` submodule with a `prepare` entry point,
+/// and add a dispatch arm in [`prepare_toolchain`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Target {
     /// `x86_64-pc-windows-msvc` (production Windows target).
@@ -58,6 +60,102 @@ impl Target {
     }
 }
 
+/// How cargo reaches a target from the current host.
+///
+/// Only [`prepare_toolchain`] returns one, after installing what it needs,
+/// so no cargo run can skip that setup or run for another target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Toolchain {
+    target: Target,
+    kind: ToolchainKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolchainKind {
+    /// The host is the target, so plain `cargo` builds it.
+    Host,
+    /// Host cargo builds the target with `--target`.
+    HostWithTarget,
+    /// cargo-xwin builds the target from a Linux or macOS host.
+    CargoXwin,
+}
+
+impl Toolchain {
+    /// Return where cargo puts the target's binary for `profile`.
+    fn binary_path(self, profile: &str) -> String {
+        let dir = match self.kind {
+            ToolchainKind::Host => format!("target/{profile}"),
+            ToolchainKind::HostWithTarget | ToolchainKind::CargoXwin => {
+                format!("target/{}/{profile}", self.target.triple())
+            }
+        };
+        format!("{dir}/{}", self.target.binary_filename())
+    }
+}
+
+/// Install what the host needs to build for `target`.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - The user-selected target.
+///
+/// # Returns
+/// How cargo reaches `target` from this host.
+///
+/// # Errors
+/// Returns an error if the (host, target) pair is unsupported or a
+/// toolchain install fails.
+pub fn prepare_toolchain<S: WindowsMsvcSystem>(system: &S, target: Target) -> Result<Toolchain> {
+    let kind = match target {
+        Target::X86_64PcWindowsMsvc => strategy::windows_msvc::prepare(system)?,
+    };
+    Ok(Toolchain { target, kind })
+}
+
+/// Run `cargo <subcommand> <args>` for a target through its `toolchain`.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `toolchain` - How cargo reaches the target, from [`prepare_toolchain`].
+/// * `subcommand` - Cargo subcommand, such as `build`.
+/// * `args` - Arguments after the subcommand.
+/// * `envs` - Extra environment variables for cargo.
+///
+/// # Returns
+/// `Ok(())` once cargo succeeds.
+///
+/// # Errors
+/// Returns an error if cargo fails.
+pub fn run_cargo_for<S: CrossBuildSystem>(
+    system: &S,
+    toolchain: Toolchain,
+    subcommand: &str,
+    args: &[String],
+    envs: &[(String, String)],
+) -> Result<()> {
+    let mut cargo_args = Vec::new();
+    let mut cargo_envs = envs.to_vec();
+    if toolchain.kind == ToolchainKind::CargoXwin {
+        cargo_args.push("xwin".to_owned());
+        // cargo-xwin fetches the MSVC CRT and Windows SDK only once their
+        // license is accepted: https://github.com/Jake-Shadle/xwin#common
+        log::info!(
+            "Invoking cargo-xwin with XWIN_ACCEPT_LICENSE=1 to accept the \
+             Microsoft Software License Terms for the MSVC CRT and Windows SDK. \
+             cargo-xwin downloads them into your local cache on first use; \
+             nothing is checked into this repository."
+        );
+        cargo_envs.push(("XWIN_ACCEPT_LICENSE".to_owned(), "1".to_owned()));
+    }
+    cargo_args.push(subcommand.to_owned());
+    if toolchain.kind != ToolchainKind::Host {
+        cargo_args.extend(["--target".to_owned(), toolchain.target.triple().to_owned()]);
+    }
+    cargo_args.extend_from_slice(args);
+    log::info!("Running `cargo {}`", cargo_args.join(" "));
+    system.run_cargo(&cargo_args, &cargo_envs)
+}
+
 /// Cross-build cssh-rs for the given target.
 ///
 /// # Arguments
@@ -68,23 +166,27 @@ impl Target {
 /// # Errors
 /// Returns an error if the (host, target) pair is unsupported, a
 /// toolchain install fails, or the build subprocess fails.
-pub fn run_cross_build<S>(system: &S, target: Target, release: bool) -> Result<()>
-where
-    S: system::windows_msvc::WindowsMsvcSystem,
-{
-    let host = system.host_os();
+pub fn run_cross_build<S: WindowsMsvcSystem>(
+    system: &S,
+    target: Target,
+    release: bool,
+) -> Result<()> {
     let triple = target.triple();
     let profile = if release { "release" } else { "debug" };
-    log::info!("Cross-building {triple} from {host} host ({profile} profile)");
-
-    match target {
-        Target::X86_64PcWindowsMsvc => strategy::windows_msvc::build(system, release)?,
-    }
-
     log::info!(
-        "Binary built: target/{triple}/{profile}/{}",
-        target.binary_filename()
+        "Cross-building {triple} from {} host ({profile} profile)",
+        system.host_os()
     );
+    let toolchain = prepare_toolchain(system, target)?;
+    // When the host is the target, a workspace build would relink this
+    // running xtask.exe, and Windows cannot delete a mapped file:
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
+    let mut args = vec!["--package".to_owned(), PACKAGE_NAME.to_owned()];
+    if release {
+        args.push("--release".to_owned());
+    }
+    run_cargo_for(system, toolchain, "build", &args, &[])?;
+    log::info!("Binary built: {}", toolchain.binary_path(profile));
     Ok(())
 }
 
