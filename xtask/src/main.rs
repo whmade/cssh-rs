@@ -137,8 +137,9 @@ enum Command {
         /// supported targets.
         #[arg(value_enum)]
         target: cross_build::Target,
-        /// Start the test VM for this run and stop it afterwards. A VM
-        /// that is already running is reused and left running.
+        /// Start the test VM if it is not running. Once up, a VM started
+        /// this way stops after the last cross-test using it finishes; one
+        /// started with `cargo xtask vm start` keeps running.
         #[arg(long)]
         with_vm: bool,
         /// Arguments for `cargo test`, after `--`, for example
@@ -186,6 +187,9 @@ enum VmAction {
         /// Target whose tests the VM runs.
         #[arg(value_enum)]
         target: cross_build::Target,
+        /// Stop the VM even while a cross-test uses it; that run fails.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -269,7 +273,7 @@ fn run() -> Result<()> {
             VmAction::Start { target } => {
                 vm::start(&cross_build::RealSystem, target)?;
             }
-            VmAction::Stop { target } => vm::stop(&cross_build::RealSystem, target)?,
+            VmAction::Stop { target, force } => vm::stop(&cross_build::RealSystem, target, force)?,
         },
         Command::RecordDemo => {
             record_demo::record_demo(&record_demo::RealSystem)?;

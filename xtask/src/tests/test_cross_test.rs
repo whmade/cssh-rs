@@ -5,9 +5,15 @@ use std::time::Instant;
 
 use crate::cross_build::Target;
 use crate::cross_test::{run_cross_test, run_test_binary};
-use crate::mock_system::{strings, FakeDocker, FakeFiles, FakeSsh, MockSystem, KEY, PUBLIC_KEY};
+use crate::mock_system::{
+    refuse_ssh, strings, vm_in_use, FakeDocker, FakeFiles, FakeSsh, MockSystem, AUTO_STOP, KEY,
+    LAUNCH_LOCK, PUBLIC_KEY, VM_LOCK,
+};
 
 const TRIPLE: &str = "x86_64-pc-windows-msvc";
+const ROOT: &str = "/work";
+/// The VM directory that mirrors the worktree at [`ROOT`].
+const MIRROR: &str = r"C:\cssh-rs\workspaces\1f92008dc8753ba3";
 const RUNNER: &str = "/work/target/debug/xtask cross-test-runner x86_64-pc-windows-msvc";
 const BINARY: &str = "/work/target/x86_64-pc-windows-msvc/debug/deps/core-abc.exe";
 
@@ -90,24 +96,65 @@ fn test_cross_test_macos_host_errors_before_any_work() {
     );
 }
 
-/// Build a Linux-host mock on top of [`runner_mock`] with every
-/// prerequisite present, the files faked, and a VM that accepts SSH. It
-/// answers no toolchain probe; tests that get past the VM checks add
-/// [`toolchain_ready`].
-fn linux_mock(docker: &FakeDocker, files: &FakeFiles, ssh: &FakeSsh) -> MockSystem {
-    let mut mock = runner_mock(docker, ssh, &[], |_| 0);
+/// Build a Linux-host mock on top of [`runner_mock_at`] for a run in the
+/// worktree at `root`, with every prerequisite present, the files faked,
+/// and the worktree lock and a lease on the VM free. It answers no launch
+/// lock, disk, SSH, toolchain or VM-in-use probe; tests add those.
+fn linux_host(
+    root: &'static str,
+    docker: &FakeDocker,
+    files: &FakeFiles,
+    ssh: &FakeSsh,
+) -> MockSystem {
+    let mut mock = runner_mock_at(root, root, docker, ssh, &[], |_| 0);
     mock.expect_host_os().returning(|| "linux");
     mock.expect_host_arch().returning(|| "x86_64");
     mock.expect_is_executable_in_path().returning(|_| true);
     mock.expect_docker_daemon_reachable().returning(|| true);
-    mock.expect_volume_exists().returning(|_| true);
-    mock.expect_ssh_ready().returning(|_| true);
-    mock.expect_now().returning(Instant::now);
+    mock.expect_lock_shared()
+        .withf(|path| path == Path::new(VM_LOCK))
+        .returning(|_| Ok(()));
+    let worktree_lock = worktree_lock(root);
+    mock.expect_try_lock_exclusive()
+        .withf(move |path| path == worktree_lock)
+        .returning(|_| Ok(Some(())));
     mock.expect_current_exe()
-        .returning(|| Ok(PathBuf::from("/work/target/debug/xtask")));
+        .returning(move || Ok(PathBuf::from(format!("{root}/target/debug/xtask"))));
     mock.expect_pack_workspace().returning(|_, _| Ok(()));
     files.install(&mut mock);
     mock
+}
+
+/// Build a [`linux_host`] mock in [`ROOT`] whose launch lock is free and
+/// whose installed VM accepts SSH. `vm_in_use_at_end` says whether another
+/// run holds the VM when this one ends.
+fn linux_mock(
+    docker: &FakeDocker,
+    files: &FakeFiles,
+    ssh: &FakeSsh,
+    vm_in_use_at_end: bool,
+) -> MockSystem {
+    let mut mock = linux_host(ROOT, docker, files, ssh);
+    mock.expect_volume_exists().returning(|_| true);
+    free_launch_lock(&mut mock);
+    accept_ssh(&mut mock);
+    vm_in_use(&mut mock, vm_in_use_at_end);
+    mock
+}
+
+fn worktree_lock(root: &str) -> PathBuf {
+    Path::new(root).join("target/cross-test/worktree.lock")
+}
+
+fn free_launch_lock(mock: &mut MockSystem) {
+    mock.expect_lock_exclusive()
+        .withf(|path| path == Path::new(LAUNCH_LOCK))
+        .returning(|_| Ok(()));
+}
+
+fn accept_ssh(mock: &mut MockSystem) {
+    mock.expect_ssh_ready().returning(|_| true);
+    mock.expect_now().returning(Instant::now);
 }
 
 fn toolchain_ready(mock: &mut MockSystem) {
@@ -126,7 +173,7 @@ fn test_cross_test_linux_host_runs_cargo_xwin_test_through_the_vm_runner() {
     // Arrange
     let docker = FakeDocker::new(Some("running"));
     let ssh = FakeSsh::default();
-    let mut mock = linux_mock(&docker, &installed_vm(), &ssh);
+    let mut mock = linux_mock(&docker, &installed_vm(), &ssh, false);
     toolchain_ready(&mut mock);
     mock.expect_run_cargo()
         .withf(|args, envs| {
@@ -159,11 +206,11 @@ fn test_cross_test_linux_host_runs_cargo_xwin_test_through_the_vm_runner() {
 }
 
 #[test]
-fn test_cross_test_mirrors_the_workspace_into_the_vm_at_the_same_path() {
+fn test_cross_test_mirrors_the_workspace_into_a_directory_of_the_worktree_in_the_vm() {
     // Arrange
     let docker = FakeDocker::new(Some("running"));
     let ssh = FakeSsh::default();
-    let mut mock = linux_mock(&docker, &installed_vm(), &ssh);
+    let mut mock = linux_mock(&docker, &installed_vm(), &ssh, false);
     toolchain_ready(&mut mock);
     mock.expect_run_cargo().returning(|_, _| Ok(()));
 
@@ -182,9 +229,47 @@ fn test_cross_test_mirrors_the_workspace_into_the_vm_at_the_same_path() {
     assert_eq!(
         ssh.commands(),
         [
-            r#"(if exist "C:\work" rmdir /s /q "C:\work") && mkdir "C:\work" && (if not exist "C:\cssh-rs\cross-test" mkdir "C:\cssh-rs\cross-test")"#,
-            r#"tar -xf "C:\cssh-rs\cross-test\workspace-7.tar" -C "C:\work" && del "C:\cssh-rs\cross-test\workspace-7.tar""#,
+            format!(
+                r#"(if exist "{MIRROR}" rmdir /s /q "{MIRROR}") && mkdir "{MIRROR}" && (if not exist "C:\cssh-rs\cross-test" mkdir "C:\cssh-rs\cross-test")"#
+            ),
+            format!(
+                r#"tar -xf "C:\cssh-rs\cross-test\workspace-7.tar" -C "{MIRROR}" && del "C:\cssh-rs\cross-test\workspace-7.tar""#
+            ),
         ]
+    );
+}
+
+#[test]
+fn test_cross_test_mirrors_a_nested_worktree_outside_the_mirror_of_the_outer_one() {
+    // Arrange
+    let docker = FakeDocker::new(Some("running"));
+    let ssh = FakeSsh::default();
+    let mut mock = linux_host(
+        "/work/.claude/worktrees/feature",
+        &docker,
+        &installed_vm(),
+        &ssh,
+    );
+    free_launch_lock(&mut mock);
+    accept_ssh(&mut mock);
+    vm_in_use(&mut mock, false);
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().returning(|_, _| Ok(()));
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    let nested = r"C:\cssh-rs\workspaces\2b79c7e0ed46dd10";
+    let commands = ssh.commands();
+    assert!(
+        commands[0].starts_with(&format!(r#"(if exist "{nested}" rmdir /s /q "{nested}")"#)),
+        "the nested worktree does not replace its own mirror beside {MIRROR}: {commands:?}"
+    );
+    assert!(
+        commands.iter().all(|command| !command.contains(MIRROR)),
+        "the nested worktree mirrors inside {MIRROR}, which runs in /work replace: {commands:?}"
     );
 }
 
@@ -194,7 +279,7 @@ fn test_cross_test_errors_before_building_when_the_vm_is_not_running() {
         // Arrange
         let docker = FakeDocker::new(vm_state);
         let ssh = FakeSsh::default();
-        let mut mock = linux_mock(&docker, &installed_vm(), &ssh);
+        let mut mock = linux_mock(&docker, &installed_vm(), &ssh, false);
         forbid_build(&mut mock);
 
         // Act
@@ -218,21 +303,36 @@ fn test_cross_test_errors_before_building_when_the_vm_is_not_running() {
     }
 }
 
+/// Build a Linux-host mock for a run in the worktree at `root`, whose
+/// worktree lock is free unless `worktree_busy`, and that must neither
+/// touch the VM nor build.
+fn worktree_mock(root: &'static str, worktree_busy: bool) -> MockSystem {
+    let mut mock = MockSystem::new();
+    mock.expect_host_os().returning(|| "linux");
+    mock.expect_workspace_root()
+        .returning(move || Ok(PathBuf::from(root)));
+    mock.expect_create_dir_all().returning(|_| Ok(()));
+    let worktree_lock = worktree_lock(root);
+    mock.expect_try_lock_exclusive()
+        .withf(move |path| path == worktree_lock)
+        .returning(move |_| Ok((!worktree_busy).then_some(())));
+    mock.expect_current_exe()
+        .returning(move || Ok(PathBuf::from(format!("{root}/target/debug/xtask"))));
+    forbid_vm(&mut mock);
+    forbid_build(&mut mock);
+    mock
+}
+
 #[test]
 fn test_cross_test_names_missing_host_prerequisites_before_building() {
     for with_vm in [false, true] {
         // Arrange
-        let mut mock = MockSystem::new();
-        mock.expect_host_os().returning(|| "linux");
-        mock.expect_current_exe()
-            .returning(|| Ok(PathBuf::from("/work/target/debug/xtask")));
+        let mut mock = worktree_mock(ROOT, false);
         mock.expect_is_executable_in_path()
             .returning(|name| name != "docker");
         mock.expect_path_exists()
             .withf(|path| path == Path::new("/dev/kvm"))
             .returning(|_| false);
-        forbid_vm(&mut mock);
-        forbid_build(&mut mock);
 
         // Act
         let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, with_vm, &[]);
@@ -253,12 +353,7 @@ fn test_cross_test_names_missing_host_prerequisites_before_building() {
 #[test]
 fn test_cross_test_errors_before_building_when_the_runner_path_holds_whitespace() {
     // Arrange
-    let mut mock = MockSystem::new();
-    mock.expect_host_os().returning(|| "linux");
-    mock.expect_current_exe()
-        .returning(|| Ok(PathBuf::from("/home/dev/my work/target/debug/xtask")));
-    forbid_vm(&mut mock);
-    forbid_build(&mut mock);
+    let mock = worktree_mock("/home/dev/my work", false);
 
     // Act
     let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
@@ -273,12 +368,33 @@ fn test_cross_test_errors_before_building_when_the_runner_path_holds_whitespace(
 }
 
 #[test]
+fn test_cross_test_refuses_a_second_run_in_the_same_worktree() {
+    // Arrange
+    let mut mock = worktree_mock(ROOT, true);
+    mock.expect_lock_shared().never();
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
+
+    // Assert
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("already running in this worktree"),
+        "error did not name the conflict: {err}"
+    );
+    assert!(
+        err.contains("/work"),
+        "error did not name the worktree: {err}"
+    );
+}
+
+#[test]
 fn test_cross_test_with_vm_starts_the_vm_and_stops_it_after_the_run() {
     // Arrange
     let docker = FakeDocker::new(None);
     let files = installed_vm();
     let ssh = FakeSsh::default();
-    let mut mock = linux_mock(&docker, &files, &ssh);
+    let mut mock = linux_mock(&docker, &files, &ssh, false);
     toolchain_ready(&mut mock);
     mock.expect_run_cargo().times(1).returning(|_, _| Ok(()));
 
@@ -288,6 +404,7 @@ fn test_cross_test_with_vm_starts_the_vm_and_stops_it_after_the_run() {
     // Assert
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(docker.subcommands(), ["run", "stop", "rm"]);
+    assert_eq!(files.get(AUTO_STOP), None);
 }
 
 #[test]
@@ -295,7 +412,7 @@ fn test_cross_test_with_vm_stops_the_vm_when_the_tests_fail() {
     // Arrange
     let docker = FakeDocker::new(None);
     let ssh = FakeSsh::default();
-    let mut mock = linux_mock(&docker, &installed_vm(), &ssh);
+    let mut mock = linux_mock(&docker, &installed_vm(), &ssh, false);
     toolchain_ready(&mut mock);
     mock.expect_run_cargo()
         .returning(|_, _| anyhow::bail!("`cargo xwin test` failed with status 101"));
@@ -310,11 +427,116 @@ fn test_cross_test_with_vm_stops_the_vm_when_the_tests_fail() {
 }
 
 #[test]
+fn test_cross_test_with_vm_reuses_a_vm_another_run_launched_while_it_waited() {
+    // Arrange
+    let docker = FakeDocker::new(None);
+    let ssh = FakeSsh::default();
+    let mut mock = linux_host(ROOT, &docker, &installed_vm(), &ssh);
+    let other_run = docker.clone();
+    mock.expect_lock_exclusive()
+        .withf(|path| path == Path::new(LAUNCH_LOCK))
+        .returning(move |_| {
+            other_run.set_state(Some("running"));
+            Ok(())
+        });
+    accept_ssh(&mut mock);
+    vm_in_use(&mut mock, true);
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().returning(|_, _| Ok(()));
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    assert!(
+        docker.calls().is_empty(),
+        "launched a second VM: {:?}",
+        docker.calls()
+    );
+}
+
+#[test]
+fn test_cross_test_with_vm_leaves_a_first_install_running_when_it_times_out() {
+    // Arrange
+    let docker = FakeDocker::new(None);
+    let files = FakeFiles::new(&[]);
+    let ssh = FakeSsh::default();
+    let mut mock = linux_host(ROOT, &docker, &files, &ssh);
+    mock.expect_volume_exists().returning(|_| false);
+    free_launch_lock(&mut mock);
+    refuse_ssh(&mut mock);
+    vm_in_use(&mut mock, false);
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().never();
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
+
+    // Assert
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("within 120 minutes"),
+        "error did not report the install timeout: {err}"
+    );
+    assert!(
+        err.contains(&format!("`cargo xtask vm start {TRIPLE}` again")),
+        "error did not say how to keep waiting: {err}"
+    );
+    assert_eq!(docker.subcommands(), ["run"], "the install was stopped");
+    assert_eq!(files.get(AUTO_STOP), None);
+}
+
+#[test]
+fn test_cross_test_with_vm_leaves_a_vm_that_does_not_come_up_for_inspection() {
+    // Arrange
+    let docker = FakeDocker::new(Some("exited"));
+    let files = FakeFiles::new(&[
+        (KEY, "PRIVATE"),
+        (PUBLIC_KEY, "ssh-ed25519 KEY"),
+        (AUTO_STOP, ""),
+    ]);
+    let ssh = FakeSsh::default();
+    let mut mock = linux_host(ROOT, &docker, &files, &ssh);
+    mock.expect_volume_exists().returning(|_| true);
+    free_launch_lock(&mut mock);
+    let crashing = docker.clone();
+    mock.expect_ssh_ready().returning(move |_| {
+        crashing.set_state(Some("exited"));
+        false
+    });
+    mock.expect_now().returning(Instant::now);
+    vm_in_use(&mut mock, false);
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().never();
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
+
+    // Assert
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("docker logs cssh-rs-windows-vm"),
+        "error did not point at the container logs: {err}"
+    );
+    assert_eq!(
+        docker.subcommands(),
+        ["rm", "run"],
+        "the container whose logs the error names was removed"
+    );
+    assert_eq!(
+        files.get(AUTO_STOP),
+        None,
+        "the marker of the VM that went away would stop the next one"
+    );
+}
+
+#[test]
 fn test_cross_test_with_vm_leaves_a_vm_started_by_vm_start_running() {
     // Arrange
     let docker = FakeDocker::new(Some("running"));
     let ssh = FakeSsh::default();
-    let mut mock = linux_mock(&docker, &installed_vm(), &ssh);
+    let mut mock = linux_mock(&docker, &installed_vm(), &ssh, false);
     toolchain_ready(&mut mock);
     mock.expect_run_cargo().returning(|_, _| Ok(()));
 
@@ -326,9 +548,92 @@ fn test_cross_test_with_vm_leaves_a_vm_started_by_vm_start_running() {
     assert!(docker.calls().is_empty(), "{:?}", docker.calls());
 }
 
-/// Build a mock for the runner whose host sets `HOME` and `host_env`, and
-/// whose VM commands exit with the code `respond` picks.
+#[test]
+fn test_cross_test_with_vm_leaves_the_vm_to_another_run_still_using_it() {
+    // Arrange
+    let docker = FakeDocker::new(None);
+    let files = installed_vm();
+    let ssh = FakeSsh::default();
+    let mut mock = linux_mock(&docker, &files, &ssh, true);
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().returning(|_, _| Ok(()));
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(docker.subcommands(), ["run"]);
+    assert_eq!(
+        files.get(AUTO_STOP).as_deref(),
+        Some(""),
+        "the run still using the VM would not stop it"
+    );
+}
+
+#[test]
+fn test_cross_test_last_run_leaves_a_vm_that_vm_start_claimed_while_it_waited() {
+    // Arrange
+    let docker = FakeDocker::new(Some("running"));
+    let files = FakeFiles::new(&[(KEY, "PRIVATE"), (AUTO_STOP, "")]);
+    let ssh = FakeSsh::default();
+    let mut mock = linux_host(ROOT, &docker, &files, &ssh);
+    free_launch_lock(&mut mock);
+    accept_ssh(&mut mock);
+    let vm_start = files.clone();
+    mock.expect_try_lock_exclusive()
+        .withf(|path| path == Path::new(VM_LOCK))
+        .returning(move |_| {
+            vm_start.remove(AUTO_STOP);
+            Ok(Some(()))
+        });
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().returning(|_, _| Ok(()));
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    assert!(docker.calls().is_empty(), "{:?}", docker.calls());
+}
+
+#[test]
+fn test_cross_test_last_run_stops_a_vm_another_run_started_with_vm() {
+    // Arrange
+    let docker = FakeDocker::new(Some("running"));
+    let files = FakeFiles::new(&[(KEY, "PRIVATE"), (AUTO_STOP, "")]);
+    let ssh = FakeSsh::default();
+    let mut mock = linux_mock(&docker, &files, &ssh, false);
+    toolchain_ready(&mut mock);
+    mock.expect_run_cargo().returning(|_, _| Ok(()));
+
+    // Act
+    let result = run_cross_test(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(docker.subcommands(), ["stop", "rm"]);
+    assert_eq!(files.get(AUTO_STOP), None);
+}
+
+/// Build a [`runner_mock_at`] mock that cargo runs in the `cssh-rs-core`
+/// package of the worktree at [`ROOT`].
 fn runner_mock(
+    docker: &FakeDocker,
+    ssh: &FakeSsh,
+    host_env: &'static [(&'static str, &'static str)],
+    respond: impl Fn(&str) -> i32 + Send + 'static,
+) -> MockSystem {
+    runner_mock_at(ROOT, "/work/cssh-rs-core", docker, ssh, host_env, respond)
+}
+
+/// Build a mock for the runner that cargo runs in `cwd` for the worktree
+/// at `root`, whose host sets `HOME` and `host_env`, and whose VM commands
+/// exit with the code `respond` picks.
+fn runner_mock_at(
+    root: &'static str,
+    cwd: &'static str,
     docker: &FakeDocker,
     ssh: &FakeSsh,
     host_env: &'static [(&'static str, &'static str)],
@@ -343,9 +648,9 @@ fn runner_mock(
             .map(|(_, value)| (*value).to_owned())
     });
     mock.expect_workspace_root()
-        .returning(|| Ok(PathBuf::from("/work")));
+        .returning(move || Ok(PathBuf::from(root)));
     mock.expect_current_dir()
-        .returning(|| Ok(PathBuf::from("/work/cssh-rs-core")));
+        .returning(move || Ok(PathBuf::from(cwd)));
     mock.expect_process_id().returning(|| 7);
     mock.expect_sleep().returning(|_| ());
     docker.install(&mut mock);
@@ -355,7 +660,7 @@ fn runner_mock(
 
 const MKDIR: &str = r#"if not exist "C:\cssh-rs\cross-test\7" mkdir "C:\cssh-rs\cross-test\7""#;
 const RMDIR: &str = r#"rmdir /s /q "C:\cssh-rs\cross-test\7" 2>nul"#;
-const RUN: &str = r#"set "INSTA_WORKSPACE_ROOT=C:\work" && cd /d "C:\work\cssh-rs-core" && "C:\cssh-rs\cross-test\7\core-abc.exe""#;
+const RUN: &str = r#"set "INSTA_WORKSPACE_ROOT=C:\cssh-rs\workspaces\1f92008dc8753ba3" && cd /d "C:\cssh-rs\workspaces\1f92008dc8753ba3\cssh-rs-core" && "C:\cssh-rs\cross-test\7\core-abc.exe""#;
 
 /// Windows' "The directory is not empty." error:
 /// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
@@ -470,7 +775,9 @@ fn test_runner_forwards_rust_test_variables_set_on_the_host() {
     assert_eq!(result.unwrap(), 0);
     assert_eq!(
         ssh.commands()[1],
-        r#"set "INSTA_WORKSPACE_ROOT=C:\work" && set "RUST_BACKTRACE=full" && set "RUST_TEST_THREADS=1" && cd /d "C:\work\cssh-rs-core" && "C:\cssh-rs\cross-test\7\core-abc.exe""#
+        format!(
+            r#"set "INSTA_WORKSPACE_ROOT={MIRROR}" && set "RUST_BACKTRACE=full" && set "RUST_TEST_THREADS=1" && cd /d "{MIRROR}\cssh-rs-core" && "C:\cssh-rs\cross-test\7\core-abc.exe""#
+        )
     );
 }
 
@@ -558,4 +865,23 @@ fn test_runner_fails_when_the_vm_is_not_running() {
         "error did not say how to start the VM: {err}"
     );
     assert!(ssh.commands().is_empty(), "{:?}", ssh.commands());
+}
+
+#[test]
+fn test_runner_fails_when_cargo_runs_the_binary_outside_the_workspace() {
+    // Arrange
+    let docker = FakeDocker::new(Some("running"));
+    let ssh = FakeSsh::default();
+    let mock = runner_mock_at(ROOT, "/elsewhere", &docker, &ssh, &[], |_| 0);
+
+    // Act
+    let result = run_test_binary(&mock, Target::X86_64PcWindowsMsvc, &strings(&[BINARY]));
+
+    // Assert
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("/elsewhere") && err.contains("outside the workspace /work"),
+        "error did not name the directories: {err}"
+    );
+    assert_eq!(ssh.commands(), [MKDIR, RMDIR]);
 }

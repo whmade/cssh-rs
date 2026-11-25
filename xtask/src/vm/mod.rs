@@ -38,6 +38,19 @@ const INSTALL_BAT: &str = include_str!("install.bat");
 
 const KEY_FILE: &str = "id_ed25519";
 
+/// Lock file that each [`Lease`] holds shared, and that an xtask stopping
+/// the VM takes exclusively.
+const LOCK_FILE: &str = "vm.lock";
+
+/// Lock file held exclusively while an xtask checks whether the VM runs
+/// and launches it, so two xtasks starting at once launch it only once.
+const LAUNCH_LOCK_FILE: &str = "launch.lock";
+
+/// Marker present while the running VM was launched by a cross-test run,
+/// which makes the last run using it stop it. The run writes it only once
+/// the VM accepts SSH, so a VM that does not come up stays for inspection.
+const AUTO_STOP_FILE: &str = "auto-stop";
+
 const KVM_DEVICE: &str = "/dev/kvm";
 
 const SSH_PORT: u16 = 22;
@@ -69,23 +82,145 @@ enum ContainerState {
 /// On first use dockurr installs Windows unattended and runs `install.bat`,
 /// which authorizes an SSH key this function generates. The VM's disk lives
 /// in a Docker volume, so `cargo clean` keeps it and every worktree shares
-/// one VM.
+/// one VM. A VM started here runs until `cargo xtask vm stop`, even one a
+/// `cross-test --with-vm` run started earlier.
 ///
 /// # Arguments
 /// * `system` - Injected I/O provider.
 /// * `target` - Target whose tests the VM runs.
 ///
-/// # Returns
-/// `true` if this call launched the VM, `false` if it was already running.
-///
 /// # Errors
 /// Returns an error if the host cannot run the VM, a prerequisite is
 /// missing, or the VM does not become reachable.
-pub fn start<S: VmSystem>(system: &S, target: Target) -> Result<bool> {
+pub fn start<S: VmSystem>(system: &S, target: Target) -> Result<()> {
     require_vm_host(system, target)?;
     check_host_prerequisites(system)?;
-    let triple = target.triple();
+    let _lease = acquire_lease(system)?;
     let dir = data_dir(system)?;
+    let _launching = system.lock_exclusive(&dir.join(LAUNCH_LOCK_FILE))?;
+    system.remove_file(&dir.join(AUTO_STOP_FILE))?;
+    ensure_running(system, target, &dir)?;
+    let triple = target.triple();
+    log::info!("The {triple} test VM is ready; stop it with `cargo xtask vm stop {triple}`");
+    Ok(())
+}
+
+/// Start the test VM for `target` for the cross-test run holding a lease
+/// from [`acquire_lease`], unless it runs already.
+///
+/// A VM launched here that comes up stops in [`release_lease`] after the
+/// last run using it; one that does not come up is left for inspection.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - Target whose tests the VM runs.
+///
+/// # Errors
+/// Returns an error if the VM does not become reachable.
+pub fn start_for_run<S: VmSystem>(system: &S, target: Target) -> Result<()> {
+    let dir = data_dir(system)?;
+    let _launching = system.lock_exclusive(&dir.join(LAUNCH_LOCK_FILE))?;
+    if ensure_running(system, target, &dir)? {
+        system.write_file(&dir.join(AUTO_STOP_FILE), "")?;
+        log::info!(
+            "The {} test VM is ready; it stops after the last cross-test using it",
+            target.triple()
+        );
+    }
+    Ok(())
+}
+
+/// Stop the test VM for `target`, keeping its disk for the next start.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - Target whose tests the VM runs.
+/// * `force` - Stop the VM even while a cross-test run uses it.
+///
+/// # Errors
+/// Returns an error if the host cannot run the VM, Docker is missing, a
+/// cross-test run uses it and `force` is false, or Docker fails.
+pub fn stop<S: VmSystem>(system: &S, target: Target, force: bool) -> Result<()> {
+    require_vm_host(system, target)?;
+    require_prerequisites(&[missing_docker(system)])?;
+    let dir = data_dir(system)?;
+    system.create_dir_all(&dir)?;
+    let _lock = match system.try_lock_exclusive(&dir.join(LOCK_FILE))? {
+        Some(lock) => Some(lock),
+        None if force => {
+            log::warn!("Stopping the test VM while a cross-test uses it; that run fails");
+            None
+        }
+        None => bail!(
+            "a cross-test or a starting `vm start` is using the {} test VM. Stop it \
+             once they finish, or pass --force to stop it now",
+            target.triple()
+        ),
+    };
+    shut_down(system, target, &dir)
+}
+
+/// A claim on the test VM that a cross-test run holds while it uses the
+/// VM, and `vm start` while it starts it: while any xtask holds one,
+/// `vm stop` refuses and no cross-test run stops the VM.
+#[must_use]
+pub struct Lease<L> {
+    _lock: L,
+}
+
+/// Claim the test VM, waiting while another xtask stops it.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+///
+/// # Returns
+/// The lease, to hand to [`release_lease`] when the run ends.
+///
+/// # Errors
+/// Returns an error if the lock file cannot be created or locked.
+pub fn acquire_lease<S: VmSystem>(system: &S) -> Result<Lease<S::Lock>> {
+    let dir = data_dir(system)?;
+    system.create_dir_all(&dir)?;
+    Ok(Lease {
+        _lock: system.lock_shared(&dir.join(LOCK_FILE))?,
+    })
+}
+
+/// End a run's claim on the test VM, and stop the VM if a cross-test run
+/// started it and no other run still holds a lease.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - Target whose tests the VM runs.
+/// * `lease` - The run's lease from [`acquire_lease`].
+///
+/// # Errors
+/// Returns an error if stopping the VM fails.
+pub fn release_lease<S: VmSystem>(system: &S, target: Target, lease: Lease<S::Lock>) -> Result<()> {
+    drop(lease);
+    let dir = data_dir(system)?;
+    let auto_stop = dir.join(AUTO_STOP_FILE);
+    if !system.path_exists(&auto_stop) {
+        return Ok(());
+    }
+    let Some(_lock) = system.try_lock_exclusive(&dir.join(LOCK_FILE))? else {
+        log::info!("Leaving the test VM to the cross-test runs still using it");
+        return Ok(());
+    };
+    // Between our check and our lock, another run may have stopped the VM,
+    // or `vm start` claimed it.
+    if !system.path_exists(&auto_stop) {
+        return Ok(());
+    }
+    shut_down(system, target, &dir)
+}
+
+/// Launch the test VM unless it runs, and wait until it accepts SSH. The
+/// caller holds the launch lock; `dir` is the VM's data directory.
+///
+/// Returns `true` if this call launched the VM.
+fn ensure_running<S: VmSystem>(system: &S, target: Target, dir: &Path) -> Result<bool> {
+    let triple = target.triple();
     match container_state(system)? {
         ContainerState::Running => {
             log::info!("The {triple} test VM is already running");
@@ -98,6 +233,9 @@ pub fn start<S: VmSystem>(system: &S, target: Target) -> Result<bool> {
         }
         ContainerState::Missing => {}
     }
+    // A marker whose VM went away unstopped, as at a host reboot, would make
+    // the last run stop this VM even if its launch fails.
+    system.remove_file(&dir.join(AUTO_STOP_FILE))?;
 
     let key = dir.join(KEY_FILE);
     let installed = system.volume_exists(VM_NAME);
@@ -110,7 +248,7 @@ pub fn start<S: VmSystem>(system: &S, target: Target) -> Result<bool> {
                 key.display()
             );
         }
-        system.create_dir_all(&dir)?;
+        system.create_dir_all(dir)?;
         system.generate_ssh_key(&key)?;
     }
     let oem = dir.join("oem");
@@ -137,22 +275,14 @@ pub fn start<S: VmSystem>(system: &S, target: Target) -> Result<bool> {
         INSTALL_TIMEOUT
     };
     wait_for_ssh(system, target, &connect(system, target)?, timeout)?;
-    log::info!("The {triple} test VM is ready; stop it with `cargo xtask vm stop {triple}`");
     Ok(true)
 }
 
-/// Stop the test VM for `target`, keeping its disk for the next start.
-///
-/// # Arguments
-/// * `system` - Injected I/O provider.
-/// * `target` - Target whose tests the VM runs.
-///
-/// # Errors
-/// Returns an error if the host cannot run the VM, Docker is missing, or
-/// Docker fails.
-pub fn stop<S: VmSystem>(system: &S, target: Target) -> Result<()> {
-    require_vm_host(system, target)?;
-    require_prerequisites(&[missing_docker(system)])?;
+fn shut_down<S: VmSystem>(system: &S, target: Target, dir: &Path) -> Result<()> {
+    // `vm stop --force` takes no lock, so a run may launch the VM meanwhile.
+    // It writes the marker once its VM is up, so removing the marker first
+    // either stops that VM too or keeps its marker.
+    system.remove_file(&dir.join(AUTO_STOP_FILE))?;
     let triple = target.triple();
     match container_state(system)? {
         ContainerState::Missing => log::info!("The {triple} test VM is not running"),
@@ -183,7 +313,7 @@ pub fn connect<S: VmSystem>(system: &S, target: Target) -> Result<SshEndpoint> {
         bail!(
             "the {triple} test VM is not running. Start it with \
              `cargo xtask vm start {triple}`, or pass `--with-vm` to \
-             `cargo xtask cross-test` to start it for one run"
+             `cargo xtask cross-test` to start it for the run"
         );
     }
     Ok(SshEndpoint {
