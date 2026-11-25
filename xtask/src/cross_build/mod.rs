@@ -1,9 +1,9 @@
 //! Cross-build dispatch for cssh-rs.
 //!
 //! Single contributor-facing entry point - `cargo xtask cross-build <target>` -
-//! for producing a cssh-rs binary for any supported target from any
-//! supported host. The xtask owns the toolchain selection so the
-//! developer experience does not drift over time.
+//! for building cssh-rs, or any other workspace packages, for any supported
+//! target from any supported host. The xtask owns the toolchain selection so
+//! the developer experience does not drift over time.
 //!
 //! [`run_cross_build`] orchestrates the workflow. [`prepare_toolchain`]
 //! has the per-target [`strategy`] pick the [`Toolchain`] that reaches the
@@ -156,12 +156,18 @@ pub fn run_cargo_for<S: CrossBuildSystem>(
     system.run_cargo(&cargo_args, &cargo_envs)
 }
 
-/// Cross-build cssh-rs for the given target.
+/// Cross-build cssh-rs, or the packages that `extra_args` select, for the
+/// given target.
 ///
 /// # Arguments
 /// * `system` - Injected I/O provider.
 /// * `target` - The user-selected target.
 /// * `release` - When true, build with `--release`; otherwise debug.
+/// * `extra_args` - Further arguments for `cargo build`. If they select
+///   packages, they replace the default `--package cssh-rs`.
+///
+/// # Returns
+/// `Ok(())` once cargo succeeds.
 ///
 /// # Errors
 /// Returns an error if the (host, target) pair is unsupported, a
@@ -170,24 +176,42 @@ pub fn run_cross_build<S: WindowsMsvcSystem>(
     system: &S,
     target: Target,
     release: bool,
+    extra_args: &[String],
 ) -> Result<()> {
     let triple = target.triple();
     let profile = if release { "release" } else { "debug" };
-    log::info!(
-        "Cross-building {triple} from {} host ({profile} profile)",
-        system.host_os()
-    );
+    log::info!("Cross-building {triple} from {} host", system.host_os());
     let toolchain = prepare_toolchain(system, target)?;
-    // When the host is the target, a workspace build would relink this
-    // running xtask.exe, and Windows cannot delete a mapped file:
-    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
-    let mut args = vec!["--package".to_owned(), PACKAGE_NAME.to_owned()];
+    let mut args = Vec::new();
+    if !extra_args.iter().any(|arg| selects_packages(arg)) {
+        args.extend(["--package".to_owned(), PACKAGE_NAME.to_owned()]);
+    }
     if release {
         args.push("--release".to_owned());
     }
+    args.extend_from_slice(extra_args);
+    let workspace_build = extra_args
+        .iter()
+        .any(|arg| arg == "--workspace" || arg == "--all");
+    if toolchain.kind == ToolchainKind::Host && workspace_build {
+        // A native workspace build can relink this running xtask.exe, and
+        // Windows cannot delete a mapped file:
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
+        args.extend(["--exclude".to_owned(), env!("CARGO_PKG_NAME").to_owned()]);
+    }
     run_cargo_for(system, toolchain, "build", &args, &[])?;
-    log::info!("Binary built: {}", toolchain.binary_path(profile));
+    // Arguments after `--` can change what cargo builds and where it puts it.
+    if extra_args.is_empty() {
+        log::info!("Binary built: {}", toolchain.binary_path(profile));
+    }
     Ok(())
+}
+
+/// Return whether the `cargo build` argument `arg` selects packages.
+fn selects_packages(arg: &str) -> bool {
+    matches!(arg, "--package" | "--workspace" | "--all")
+        || arg.starts_with("--package=")
+        || arg.starts_with("-p")
 }
 
 /// Ensure the given Rust target triple is installed via rustup.

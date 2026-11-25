@@ -61,7 +61,7 @@ fn test_cross_build_windows_x64_host_runs_plain_cargo_build() {
     );
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -79,7 +79,96 @@ fn test_cross_build_windows_arm64_host_builds_with_target_flag() {
     expect_rust_target_installed(&mut mock);
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn test_cross_build_leaves_xtask_out_of_a_workspace_build_on_a_windows_x64_host() {
+    // Arrange
+    let mock = mock_expecting_cargo(
+        "windows",
+        "x86_64",
+        strings(&[
+            "build",
+            "--release",
+            "--workspace",
+            "--all-targets",
+            "--exclude",
+            "xtask",
+        ]),
+        vec![],
+    );
+
+    // Act
+    let result = run_cross_build(
+        &mock,
+        Target::X86_64PcWindowsMsvc,
+        true,
+        &strings(&["--workspace", "--all-targets"]),
+    );
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn test_cross_build_package_arguments_replace_the_cssh_rs_default() {
+    for extra in [
+        vec!["--workspace"],
+        vec!["--all"],
+        vec!["-p", "cssh-rs-core"],
+        vec!["-pcssh-rs-core"],
+        vec!["--package", "cssh-rs-core"],
+        vec!["--package=cssh-rs-core"],
+    ] {
+        // Arrange
+        // A Windows arm64 host builds with `--target`, so xtask stays in a
+        // workspace build.
+        let mut mock = mock_expecting_cargo(
+            "windows",
+            "aarch64",
+            strings(&[&["build", "--target", TRIPLE], extra.as_slice()].concat()),
+            vec![],
+        );
+        expect_rust_target_installed(&mut mock);
+
+        // Act
+        let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &strings(&extra));
+
+        // Assert
+        assert!(result.is_ok(), "{extra:?}: {result:?}");
+    }
+}
+
+#[test]
+fn test_cross_build_keeps_the_cssh_rs_default_beside_other_arguments() {
+    // Arrange
+    let mut mock = mock_expecting_cargo(
+        "linux",
+        "x86_64",
+        strings(&[
+            "xwin",
+            "build",
+            "--target",
+            TRIPLE,
+            "--package",
+            "cssh-rs",
+            "--all-targets",
+        ]),
+        xwin_license(),
+    );
+    expect_cargo_xwin_ready(&mut mock);
+
+    // Act
+    let result = run_cross_build(
+        &mock,
+        Target::X86_64PcWindowsMsvc,
+        false,
+        &strings(&["--all-targets"]),
+    );
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -107,7 +196,7 @@ fn test_cross_build_windows_gnu_host_builds_with_target_flag() {
     );
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, true);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -134,7 +223,7 @@ fn test_cross_build_linux_and_macos_hosts_use_cargo_xwin() {
         expect_cargo_xwin_ready(&mut mock);
 
         // Act
-        let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, true);
+        let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, true, &[]);
 
         // Assert
         assert!(result.is_ok(), "{host}: {result:?}");
@@ -203,7 +292,7 @@ fn test_cross_build_installs_missing_rust_target() {
     mock.expect_run_cargo().returning(|_, _| Ok(()));
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -231,7 +320,7 @@ fn test_cross_build_installs_missing_cargo_xwin_at_pinned_version() {
     mock.expect_run_cargo().returning(|_, _| Ok(()));
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -250,7 +339,7 @@ fn test_cross_build_unsupported_host_errors_before_any_build_work() {
     mock.expect_run_cargo().never();
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
 
     // Assert
     let err = result.unwrap_err().to_string();
@@ -269,7 +358,7 @@ fn test_cross_build_propagates_build_failure() {
         .returning(|_, _| anyhow::bail!("link.exe equivalent crashed"));
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
 
     // Assert
     assert!(result
@@ -292,7 +381,7 @@ fn test_cross_build_errors_when_llvm_tooling_missing() {
     mock.expect_run_cargo().never();
 
     // Act
-    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false);
+    let result = run_cross_build(&mock, Target::X86_64PcWindowsMsvc, false, &[]);
 
     // Assert
     let err = result.unwrap_err().to_string();

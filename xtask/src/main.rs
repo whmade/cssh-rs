@@ -87,7 +87,8 @@ enum Command {
     /// invoked from `paseo.json`'s `worktree.teardown` so the same
     /// entry works on Windows (PowerShell) and Linux/macOS (bash).
     WorktreeTeardown,
-    /// Cross-build a binary of cssh-rs for the given target.
+    /// Cross-build cssh-rs, or the packages that the arguments after `--`
+    /// select, for the given target.
     /// Detects the host and dispatches to the right toolchain (native
     /// `cargo build`, with `--target`, or `cargo xwin build`); installs
     /// the Rust target and any required helper crate on first use.
@@ -102,6 +103,11 @@ enum Command {
         /// to a debug build so contributor iteration stays fast.
         #[arg(short, long)]
         release: bool,
+        /// Arguments for `cargo build`, after `--`, for example
+        /// `-- --workspace --all-targets`. If they select packages, they
+        /// replace the default `--package cssh-rs`.
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
     },
     /// Record the cssh-rs demo GIF into `target/demo/cssh-rs.gif` by
     /// building the binary, driving real console windows and capturing
@@ -159,8 +165,12 @@ fn run() -> Result<()> {
         Command::WorktreeTeardown => {
             worktree_teardown::worktree_teardown(&worktree_teardown::RealSystem)?;
         }
-        Command::CrossBuild { target, release } => {
-            cross_build::run_cross_build(&cross_build::RealSystem, target, release)?;
+        Command::CrossBuild {
+            target,
+            release,
+            cargo_args,
+        } => {
+            cross_build::run_cross_build(&cross_build::RealSystem, target, release, &cargo_args)?;
         }
         Command::RecordDemo => {
             record_demo::record_demo(&record_demo::RealSystem)?;
