@@ -109,6 +109,22 @@ enum Command {
         #[arg(last = true)]
         cargo_args: Vec<String>,
     },
+    /// Lint the workspace for the given target. On a Windows x64 host
+    /// with the MSVC toolchain this is `cargo lint`; other hosts add
+    /// `--target` or go through cargo-xwin.
+    CrossLint {
+        /// Target triple to lint for.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+    },
+    /// Document the workspace for the given target. On a Windows x64
+    /// host with the MSVC toolchain this is `cargo docs`; other hosts add
+    /// `--target` or go through cargo-xwin.
+    CrossDoc {
+        /// Target triple to document for.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+    },
     /// Record the cssh-rs demo GIF into `target/demo/cssh-rs.gif` by
     /// building the binary, driving real console windows and capturing
     /// the desktop. Windows only.
@@ -171,6 +187,12 @@ fn run() -> Result<()> {
             cargo_args,
         } => {
             cross_build::run_cross_build(&cross_build::RealSystem, target, release, &cargo_args)?;
+        }
+        Command::CrossLint { target } => {
+            cross_build::run_cross_lint(&cross_build::RealSystem, target)?;
+        }
+        Command::CrossDoc { target } => {
+            cross_build::run_cross_doc(&cross_build::RealSystem, target)?;
         }
         Command::RecordDemo => {
             record_demo::record_demo(&record_demo::RealSystem)?;

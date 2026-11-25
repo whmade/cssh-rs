@@ -95,15 +95,17 @@ cssh-rs uses cargo aliases and the [`xtask`](https://github.com/matklad/cargo-xt
 
 ### Cross-compiling
 
-cssh-rs ships a cross-build xtask so contributors can produce a binary for any supported target from any supported host:
+`cssh-rs`, `cssh-rs-core` and `cssh-rs-protocol` build only for Windows, so on a Linux or macOS host `cargo build`, `cargo lint` and `cargo docs` fail. Cross xtasks run them for a target from any supported host:
 
 ```sh
 cargo xtask cross-build <target> [--release] [-- <cargo build arguments>]
+cargo xtask cross-lint <target>
+cargo xtask cross-doc <target>
 ```
 
-`cross-build` builds the cssh-rs package unless the arguments after `--` select packages themselves, for example `-- --workspace --all-targets`.
+On a Windows x64 host with the MSVC Rust toolchain they run the plain native commands; other hosts reach the target with `--target` or through cargo-xwin. Run `cargo xtask cross-build --help` for the list of supported targets. On first use the xtasks install the Rust target and cargo-xwin; on Linux and macOS, put LLVM's `clang`, `llvm-rc` and `lld-link` on PATH yourself.
 
-Run `cargo xtask cross-build --help` for the list of supported targets. The xtask installs the required toolchain on first use.
+`cross-build` builds the cssh-rs package unless the arguments after `--` select packages themselves, for example `-- --workspace --all-targets`.
 
 ### Pre-commit Hooks
 
