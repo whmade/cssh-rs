@@ -8,6 +8,7 @@
 mod changelog;
 mod coverage;
 mod cross_build;
+mod cross_test;
 mod inject_agent_token;
 mod readme;
 mod record_demo;
@@ -126,8 +127,38 @@ enum Command {
         #[arg(value_enum)]
         target: cross_build::Target,
     },
-    /// Start or stop the Windows test VM that xtasks reach over SSH on a
-    /// Linux host.
+    /// Run the workspace's tests for the given target. A Windows host
+    /// runs native `cargo test`; a Linux host builds the tests with
+    /// cargo-xwin and runs each test binary in the test VM of
+    /// `cargo xtask vm start`, which must be running unless `--with-vm`
+    /// is passed.
+    CrossTest {
+        /// Target triple to test. Run with `--help` for the list of
+        /// supported targets.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+        /// Start the test VM for this run and stop it afterwards. A VM
+        /// that is already running is reused and left running.
+        #[arg(long)]
+        with_vm: bool,
+        /// Arguments for `cargo test`, after `--`, for example
+        /// `-- -p cssh-rs-core input`.
+        #[arg(last = true)]
+        cargo_args: Vec<String>,
+    },
+    /// Run one test binary in the test VM. `cross-test` sets this as
+    /// cargo's target runner.
+    #[command(name = cross_test::RUNNER_SUBCOMMAND, hide = true)]
+    CrossTestRunner {
+        /// Target the test binary was built for.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+        /// The test binary's path, followed by its arguments.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Start or stop the VM that `cross-test` runs a target's tests in on
+    /// a Linux host.
     Vm {
         #[clap(subcommand)]
         action: VmAction,
@@ -220,6 +251,19 @@ fn run() -> Result<()> {
         }
         Command::CrossDoc { target } => {
             cross_build::run_cross_doc(&cross_build::RealSystem, target)?;
+        }
+        Command::CrossTest {
+            target,
+            with_vm,
+            cargo_args,
+        } => {
+            cross_test::run_cross_test(&cross_build::RealSystem, target, with_vm, &cargo_args)?;
+        }
+        Command::CrossTestRunner { target, command } => {
+            let code = cross_test::run_test_binary(&cross_build::RealSystem, target, &command)?;
+            if code != 0 {
+                std::process::exit(code);
+            }
         }
         Command::Vm { action } => match action {
             VmAction::Start { target } => {

@@ -109,9 +109,25 @@ On a Windows x64 host with the MSVC Rust toolchain they run the plain native com
 
 `cargo xtask update-readme-help` and `cargo xtask check-readme-help` have no cross variant: they run cssh-rs to read its `--help` output, so they work only on a Windows host. Elsewhere they fail and leave the README unchanged.
 
-### Windows test VM
+### Cross-testing
 
-On a Linux host, `cargo xtask vm start x86_64-pc-windows-msvc` runs a Windows 11 VM that xtasks reach over SSH: a [dockurr/windows](https://github.com/dockur/windows) container that you start once and reuse. `cargo xtask vm stop x86_64-pc-windows-msvc` shuts it down.
+`cargo test` fails on a Linux host for the same reason. The cross-test xtask runs the workspace's tests for a target instead:
+
+```sh
+cargo xtask cross-test <target> [-- <cargo test arguments>]
+```
+
+On a Windows host it runs native `cargo test`. On a Linux host it builds the tests with cargo-xwin, as `cross-build` does, and runs each test binary over SSH in a Windows 11 VM: a [dockurr/windows](https://github.com/dockur/windows) container that you start once and reuse for as many runs as you like:
+
+```sh
+cargo xtask vm start x86_64-pc-windows-msvc
+cargo xtask cross-test x86_64-pc-windows-msvc -- -p cssh-rs-core input
+cargo xtask vm stop x86_64-pc-windows-msvc
+```
+
+`cross-test` fails if the VM is not running; pass `--with-vm` to start it for one run and stop it afterwards. It never starts the VM unasked, as the first start installs Windows for up to an hour and a running VM holds 4 GB of RAM; a VM you start once also saves each run a boot and a shutdown. Each run mirrors the workspace's source files into the VM at the same path on `C:`, so tests that read files from the source tree, such as insta snapshots, find them.
+
+The test binaries in the VM see none of your shell's environment variables except `RUST_BACKTRACE` and `RUST_TEST_THREADS`. The `.snap.new` files that insta writes for failing snapshot tests stay in the VM.
 
 The VM needs Docker with access to its daemon, KVM (`/dev/kvm`) and the OpenSSH client (`ssh`, `scp`, `ssh-keygen`). The xtask names whichever is missing but installs none of them, as that needs root. macOS hosts have no KVM and are not supported.
 

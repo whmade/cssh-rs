@@ -180,7 +180,11 @@ pub fn stop<S: VmSystem>(system: &S, target: Target) -> Result<()> {
 pub fn connect<S: VmSystem>(system: &S, target: Target) -> Result<SshEndpoint> {
     if container_state(system)? != ContainerState::Running {
         let triple = target.triple();
-        bail!("the {triple} test VM is not running. Start it with `cargo xtask vm start {triple}`");
+        bail!(
+            "the {triple} test VM is not running. Start it with \
+             `cargo xtask vm start {triple}`, or pass `--with-vm` to \
+             `cargo xtask cross-test` to start it for one run"
+        );
     }
     Ok(SshEndpoint {
         port: published_port(system, SSH_PORT)?,
@@ -319,8 +323,15 @@ fn require_prerequisites(missing: &[Option<String>]) -> Result<()> {
     );
 }
 
-/// Fail unless the host runs the test VM: dockurr needs Linux with KVM.
-fn require_vm_host<S: VmSystem>(system: &S, target: Target) -> Result<()> {
+/// Fail unless the host can run the test VM: dockurr needs Linux with KVM.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - Target whose tests the VM runs.
+///
+/// # Errors
+/// Returns an error, saying why, on any host but Linux.
+pub fn require_vm_host<S: VmSystem>(system: &S, target: Target) -> Result<()> {
     let host = system.host_os();
     let triple = target.triple();
     match host {

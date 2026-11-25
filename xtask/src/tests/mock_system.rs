@@ -1,5 +1,5 @@
-//! One mock for every cross-build and test VM system trait, plus fakes
-//! that give it state.
+//! One mock for every cross-build, test VM and cross-test system trait,
+//! plus fakes that give it state.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,6 +10,7 @@ use mockall::mock;
 
 use crate::cross_build::system::windows_msvc::WindowsMsvcSystem;
 use crate::cross_build::system::CrossBuildSystem;
+use crate::cross_test::CrossTestSystem;
 use crate::vm::{SshEndpoint, VmSystem};
 
 mock! {
@@ -41,8 +42,17 @@ mock! {
         fn write_file(&self, path: &Path, contents: &str) -> anyhow::Result<()>;
         fn generate_ssh_key(&self, path: &Path) -> anyhow::Result<()>;
         fn ssh_ready(&self, endpoint: &SshEndpoint) -> bool;
+        fn ssh(&self, endpoint: &SshEndpoint, command: &str) -> anyhow::Result<i32>;
+        fn scp(&self, endpoint: &SshEndpoint, local: &Path, remote: &str) -> anyhow::Result<()>;
         fn sleep(&self, duration: Duration);
         fn now(&self) -> Instant;
+    }
+    impl CrossTestSystem for System {
+        fn current_exe(&self) -> anyhow::Result<PathBuf>;
+        fn process_id(&self) -> u32;
+        fn current_dir(&self) -> anyhow::Result<PathBuf>;
+        fn workspace_root(&self) -> anyhow::Result<PathBuf>;
+        fn pack_workspace(&self, root: &Path, archive: &Path) -> anyhow::Result<()>;
     }
 }
 
@@ -223,5 +233,67 @@ impl FakeFiles {
     /// The contents, or `None` if the file does not exist.
     pub fn get(&self, path: &str) -> Option<String> {
         self.files.lock().unwrap().get(Path::new(path)).cloned()
+    }
+}
+
+/// Records every command sent to the VM over SSH and answers each with
+/// the exit code `respond` picks for it.
+#[derive(Clone, Default)]
+pub struct FakeSsh {
+    commands: Arc<Mutex<Vec<String>>>,
+    copies: Arc<Mutex<Vec<(PathBuf, String)>>>,
+    copies_fail: bool,
+}
+
+impl FakeSsh {
+    /// Create a fake whose every copy into the VM fails.
+    ///
+    /// # Returns
+    /// The fake, to [`FakeSsh::install`] into a mock.
+    pub fn failing_copies() -> Self {
+        Self {
+            copies_fail: true,
+            ..Self::default()
+        }
+    }
+
+    /// Route the mock's SSH and SCP calls to this fake.
+    ///
+    /// # Arguments
+    /// * `mock` - Mock to answer `ssh` and `scp` calls through this fake.
+    /// * `respond` - Exit code for each command sent over SSH.
+    pub fn install(&self, mock: &mut MockSystem, respond: impl Fn(&str) -> i32 + Send + 'static) {
+        let fake = self.clone();
+        mock.expect_ssh().returning(move |_, command| {
+            fake.commands.lock().unwrap().push(command.to_owned());
+            Ok(respond(command))
+        });
+        let fake = self.clone();
+        mock.expect_scp().returning(move |_, local, remote| {
+            if fake.copies_fail {
+                anyhow::bail!("scp: connection reset");
+            }
+            fake.copies
+                .lock()
+                .unwrap()
+                .push((local.to_path_buf(), remote.to_owned()));
+            Ok(())
+        });
+    }
+
+    /// Return every command sent to the VM over SSH so far.
+    ///
+    /// # Returns
+    /// One command line per call, oldest first.
+    pub fn commands(&self) -> Vec<String> {
+        self.commands.lock().unwrap().clone()
+    }
+
+    /// Return every copy into the VM so far.
+    ///
+    /// # Returns
+    /// One `(host file, VM path)` pair per copy, oldest first.
+    pub fn copies(&self) -> Vec<(PathBuf, String)> {
+        self.copies.lock().unwrap().clone()
     }
 }
