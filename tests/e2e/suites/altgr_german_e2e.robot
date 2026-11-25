@@ -3,13 +3,16 @@ Documentation       Windows E2E cases for AltGr input on the German layout, each
 ...                 one behaviour:
 ...                 - AltGr characters typed in the daemon reach every host as typed
 ...                 - left Ctrl + left Alt types the same character as AltGr
-...                 - a paste holding AltGr and keyless characters reaches every host
+...                 - a paste holding AltGr and keyless characters, an emoji among them,
+...                   reaches every host
 ...                 - AltGr+A, which types nothing on German, does not open control mode
 ...                 - a held AltGr key types one character per auto-repeat
 ...                 - right Ctrl held with AltGr sends Ctrl plus the AltGr character, in
 ...                   either press order
 ...                 - left Alt held with AltGr sends Alt plus the AltGr character
 ...                 - AltGr characters typed at a focused client reach only that host
+...                 - a paste holding AltGr and keyless characters, an emoji among them,
+...                   into a focused client reaches only that host
 ...                 - Alt+X and Ctrl+B, which compose no AltGr character, stay chords
 ...
 ...                 Type Text stays correct on German, which maps pyautogui's virtual keys
@@ -33,8 +36,8 @@ ${GERMAN_LAYOUT}            00000407
 ${ALTGR_CHARACTERS}         €{[]}@\\~|
 ${EURO}                     €
 ${AT_SIGN}                  @
-# Characters German has no key for; the console pastes them without modifiers.
-${KEYLESS_CHARACTERS}       éá
+# Characters German has no key for: letters, pasted without modifiers, and a surrogate-pair emoji.
+${KEYLESS_CHARACTERS}       éá\U0001F600
 
 
 *** Test Cases ***
@@ -104,3 +107,9 @@ AltGr Characters Typed At A Client Reach Only That Host
     Press Key    enter
     Wait Until Keyword Succeeds    10x    0.5s
     ...    Assert Only Host Received    ${CLIENT}    ${prefix}${EURO}${AT_SIGN}
+
+Pasted AltGr And Keyless Characters At A Client Reach Only That Host
+    ${prefix}=    Unique Message    CLIENTPASTE
+    ${line}=    Set Variable    ${prefix}${ALTGR_CHARACTERS}${KEYLESS_CHARACTERS}
+    Paste Into Client    ${CLIENT}    ${line}
+    Wait Until Keyword Succeeds    10x    0.5s    Assert Only Host Received    ${CLIENT}    ${line}

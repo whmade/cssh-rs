@@ -2,18 +2,23 @@
 
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, ModifierKeyCode, Modifiers};
-use windows::Win32::System::Console::{KEY_EVENT_RECORD, KEY_EVENT_RECORD_0};
+use windows::Win32::System::Console::{KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, LEFT_ALT_PRESSED};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_A, VK_C, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
-    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT,
-    VK_PRIOR, VK_RIGHT, VK_UP,
+    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
+    VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD6, VK_NUMPAD8, VK_PACKET, VK_PRIOR,
+    VK_RIGHT, VK_UP,
 };
 
 use crate::client::input_bytes::{
-    input_event_to_bytes, key_event_record_to_bytes, keystroke_count,
+    input_event_to_bytes, key_event_record_to_bytes, keystroke_count, KeystrokeDecoder,
 };
 
-fn key_event_record(
+pub(crate) const GRINNING_FACE: &str = "\u{1f600}";
+pub(crate) const GRINNING_FACE_HIGH_SURROGATE: u16 = 0xd83d;
+pub(crate) const GRINNING_FACE_LOW_SURROGATE: u16 = 0xde00;
+
+pub(crate) fn key_event_record(
     unicode_char: u16,
     virtual_key: VIRTUAL_KEY,
     repeat_count: u16,
@@ -28,6 +33,49 @@ fn key_event_record(
         },
         dwControlKeyState: 0,
     };
+}
+
+pub(crate) fn released(record: KEY_EVENT_RECORD) -> KEY_EVENT_RECORD {
+    return KEY_EVENT_RECORD {
+        bKeyDown: false.into(),
+        ..record
+    };
+}
+
+/// Return the Alt code that types `digits` on the numeric keypad and releases Alt with `unit`.
+fn alt_code(digits: &[VIRTUAL_KEY], unit: u16) -> Vec<KEY_EVENT_RECORD> {
+    let alt = KEY_EVENT_RECORD {
+        dwControlKeyState: LEFT_ALT_PRESSED,
+        ..key_event_record(0, VK_MENU, 1)
+    };
+    let mut records = vec![alt];
+    for &digit in digits {
+        let digit = KEY_EVENT_RECORD {
+            dwControlKeyState: LEFT_ALT_PRESSED,
+            ..key_event_record(0, digit, 1)
+        };
+        records.extend([digit, released(digit)]);
+    }
+    records.push(released(KEY_EVENT_RECORD {
+        uChar: KEY_EVENT_RECORD_0 { UnicodeChar: unit },
+        dwControlKeyState: 0,
+        ..alt
+    }));
+    return records;
+}
+
+/// Return the Alt code conhost pastes a keyless `unit` as, typing `?` and releasing Alt with `unit`:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/interactivity/base/EventSynthesis.cpp#L125-L156>.
+pub(crate) fn pasted_alt_code(unit: u16) -> Vec<KEY_EVENT_RECORD> {
+    return alt_code(&[VK_NUMPAD6, VK_NUMPAD3], unit);
+}
+
+fn key_event_records_to_bytes(records: &[KEY_EVENT_RECORD]) -> Vec<u8> {
+    let mut decoder = KeystrokeDecoder::default();
+    return records
+        .iter()
+        .flat_map(|record| return key_event_record_to_bytes(record, &mut decoder))
+        .collect();
 }
 
 fn key(code: KeyCode, modifiers: Modifiers, text: Option<&str>) -> InputEvent {
@@ -86,7 +134,7 @@ fn test_key_event_record_to_bytes() {
     let cases: [(u16, VIRTUAL_KEY, &[u8]); 26] = [
         (u16::from(b'a'), VK_C, b"a"),
         (0x03, VK_C, b"\x03"),
-        (0xD800, VK_UP, b"\x1b[A"),
+        (0xDC00, VK_UP, b"\x1b[A"),
         (0, VIRTUAL_KEY(0), b""),
         (0, VK_UP, b"\x1b[A"),
         (0, VK_DOWN, b"\x1b[B"),
@@ -114,7 +162,7 @@ fn test_key_event_record_to_bytes() {
     for (unicode_char, virtual_key, expected) in cases {
         let record = key_event_record(unicode_char, virtual_key, 1);
         assert_eq!(
-            key_event_record_to_bytes(&record),
+            key_event_records_to_bytes(&[record]),
             expected,
             "{unicode_char:#x} {:#x}",
             virtual_key.0
@@ -132,11 +180,69 @@ fn test_key_event_record_to_bytes_encodes_every_keystroke() {
     for (unicode_char, virtual_key, repeat_count, expected) in cases {
         let record = key_event_record(unicode_char, virtual_key, repeat_count);
         assert_eq!(
-            key_event_record_to_bytes(&record),
+            key_event_records_to_bytes(&[record]),
             expected,
             "{unicode_char:#x} {:#x} x{repeat_count}",
             virtual_key.0
         );
+    }
+}
+
+#[test]
+fn test_key_event_record_to_bytes_pairs_surrogates_split_across_key_downs() {
+    let high = key_event_record(GRINNING_FACE_HIGH_SURROGATE, VK_PACKET, 1);
+    let low = key_event_record(GRINNING_FACE_LOW_SURROGATE, VK_PACKET, 1);
+
+    let bytes = key_event_records_to_bytes(&[high, released(high), low, released(low)]);
+
+    assert_eq!(bytes, GRINNING_FACE.as_bytes());
+}
+
+#[test]
+fn test_key_event_record_to_bytes_drops_a_high_surrogate_the_next_character_does_not_pair() {
+    let records = [
+        key_event_record(GRINNING_FACE_HIGH_SURROGATE, VK_PACKET, 1),
+        key_event_record(u16::from(b'a'), VK_A, 1),
+    ];
+
+    let bytes = key_event_records_to_bytes(&records);
+
+    assert_eq!(bytes, b"a");
+}
+
+#[test]
+fn test_key_event_record_to_bytes_pairs_only_the_last_of_two_high_surrogates() {
+    let records = [
+        key_event_record(0xd83c, VK_PACKET, 1),
+        key_event_record(GRINNING_FACE_HIGH_SURROGATE, VK_PACKET, 1),
+        key_event_record(GRINNING_FACE_LOW_SURROGATE, VK_PACKET, 1),
+    ];
+
+    let bytes = key_event_records_to_bytes(&records);
+
+    assert_eq!(bytes, GRINNING_FACE.as_bytes());
+}
+
+#[test]
+fn test_key_event_record_to_bytes_pairs_surrogates_split_across_alt_codes() {
+    let records = [
+        pasted_alt_code(GRINNING_FACE_HIGH_SURROGATE),
+        pasted_alt_code(GRINNING_FACE_LOW_SURROGATE),
+    ]
+    .concat();
+
+    let bytes = key_event_records_to_bytes(&records);
+
+    assert_eq!(bytes, GRINNING_FACE.as_bytes());
+}
+
+#[test]
+fn test_key_event_record_to_bytes_encodes_the_character_of_an_alt_code() {
+    let pasted = pasted_alt_code(0x20ac);
+    let typed_by_hand = alt_code(&[VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD8], 0x20ac);
+
+    for records in [pasted, typed_by_hand] {
+        assert_eq!(key_event_records_to_bytes(&records), "\u{20ac}".as_bytes());
     }
 }
 

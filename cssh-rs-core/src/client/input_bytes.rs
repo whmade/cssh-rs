@@ -1,6 +1,8 @@
 //! Encoding of keystrokes into the terminal bytes written to the PTY master,
 //! and the key-event record helpers the daemon shares.
 
+use std::ops::RangeInclusive;
+
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
 use log::warn;
@@ -9,8 +11,8 @@ use windows::Win32::System::Console::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4,
-    VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT,
-    VK_UP,
+    VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT, VK_PRIOR,
+    VK_RIGHT, VK_UP,
 };
 
 /// The `dwControlKeyState` flags of either Ctrl key.
@@ -40,27 +42,169 @@ pub(crate) fn input_event_to_bytes(event: &InputEvent) -> Vec<u8> {
     }
 }
 
+const HIGH_SURROGATES: RangeInclusive<u16> = 0xd800..=0xdbff;
+
+/// A keystroke read from a key-event record.
+pub(crate) struct Keystroke {
+    /// The virtual key of the record that completed the keystroke.
+    pub(crate) virtual_key: VIRTUAL_KEY,
+    /// The `dwControlKeyState` of the record that completed the keystroke.
+    control_key_state: u32,
+    /// The composed text, `None` for a key such as an arrow.
+    pub(crate) composed_text: Option<char>,
+}
+
+impl Keystroke {
+    /// Return the key code of the keystroke.
+    ///
+    /// # Returns
+    ///
+    /// The composed text as a character key, else the code of the virtual
+    /// key, else `None`.
+    pub(crate) fn key_code(&self) -> Option<KeyCode> {
+        match self.composed_text {
+            Some(character) => return Some(KeyCode::Char(character.to_string())),
+            None => return virtual_key_to_keycode(self.virtual_key),
+        }
+    }
+
+    /// Return whether the keystroke's Ctrl and Alt only selected an AltGr character.
+    ///
+    /// Windows reports AltGr as Ctrl+Alt and treats any Ctrl+Alt as AltGr, so
+    /// this follows Windows Terminal's rule:
+    /// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L390>.
+    fn is_altgr_character(&self) -> bool {
+        let state = self.control_key_state;
+        return state & CTRL_PRESSED != 0
+            && state & ALT_PRESSED != 0
+            && self
+                .composed_text
+                .is_some_and(|character| return character > ' ' && character != '\u{7f}');
+    }
+
+    /// Return `dwControlKeyState` without a Ctrl and Alt that only selected an AltGr character.
+    ///
+    /// As in Windows Terminal, whose rule [`Keystroke::is_altgr_character`]
+    /// follows, holding both Ctrl keys keeps Ctrl and holding both Alt keys
+    /// keeps Alt. Unlike it, right Ctrl with AltGr's right Alt keeps Ctrl too:
+    /// AltGr only ever fakes the left Ctrl, and when right Ctrl is pressed
+    /// first Windows reports no left Ctrl at all, as this `ReadConsoleInputW`
+    /// capture of right Ctrl, then AltGr + sharp-s on a German layout shows:
+    ///
+    /// ```text
+    /// down  vk=0x11 (CONTROL)  scan=0x1d  char=U+0000  state=0x0104 RIGHT_CTRL|ENHANCED
+    /// down  vk=0x12 (MENU)     scan=0x38  char=U+0000  state=0x0105 RIGHT_ALT|RIGHT_CTRL|ENHANCED
+    /// down  vk=0xdb (OEM_4)    scan=0x0c  char=U+005C '\\'  state=0x0005 RIGHT_ALT|RIGHT_CTRL
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The `dwControlKeyState` of the record that completed the keystroke,
+    /// minus its Ctrl and Alt flags if [`Keystroke::is_altgr_character`]
+    /// matches, except a Ctrl or Alt kept as above.
+    pub(crate) fn control_key_state_without_altgr(&self) -> u32 {
+        let state = self.control_key_state;
+        if !self.is_altgr_character() {
+            return state;
+        }
+        let holds = |flags: u32| return state & flags == flags;
+        let keeps_ctrl = holds(RIGHT_CTRL_PRESSED | RIGHT_ALT_PRESSED)
+            || holds(LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
+        let keeps_alt = holds(LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
+        let mut kept = state;
+        if !keeps_ctrl {
+            kept &= !CTRL_PRESSED;
+        }
+        if !keeps_alt {
+            kept &= !ALT_PRESSED;
+        }
+        return kept;
+    }
+}
+
+/// A decoder of the keystrokes in the key-event records one console delivers.
+///
+/// The console splits a character outside the BMP into its two UTF-16
+/// surrogates, each in its own record, which Windows Terminal pairs up too:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L244-L255>.
+///
+/// The Alt release that ends an Alt code carries composed text too: the
+/// inbox conhost pastes a UTF-16 unit that no key types and that is no
+/// letter, each half of an emoji among them, as an Alt code:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/interactivity/base/EventSynthesis.cpp#L35-L63>,
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/interactivity/base/EventSynthesis.cpp#L125-L156>.
+/// An Alt code typed on the numeric keypad ends in the same release:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L333-L338>.
+#[derive(Default)]
+pub(crate) struct KeystrokeDecoder {
+    high_surrogate: Option<u16>,
+}
+
+impl KeystrokeDecoder {
+    /// Return the keystroke a key-event record completes.
+    ///
+    /// The record holds that keystroke [`keystroke_count`] times, so decode
+    /// each record once, not once per keystroke. A record without composed
+    /// text leaves a pending high surrogate in place; a surrogate without its
+    /// other half is dropped.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The next key-event record read from the console.
+    ///
+    /// # Returns
+    ///
+    /// The keystroke of a key-down record or an Alt code's release, or
+    /// `None` for any other key release or a record holding the first half
+    /// of a character.
+    pub(crate) fn decode(&mut self, key: &KEY_EVENT_RECORD) -> Option<Keystroke> {
+        let unit = unsafe { key.uChar.UnicodeChar };
+        let is_alt_code_release = key.wVirtualKeyCode == VK_MENU.0 && unit != 0;
+        if !key.bKeyDown.as_bool() && !is_alt_code_release {
+            return None;
+        }
+        if HIGH_SURROGATES.contains(&unit) {
+            self.high_surrogate = Some(unit);
+            return None;
+        }
+        let composed_text = match unit {
+            0 => None,
+            _ => char::decode_utf16(self.high_surrogate.take().into_iter().chain([unit]))
+                .last()
+                .and_then(Result::ok),
+        };
+        return Some(Keystroke {
+            virtual_key: VIRTUAL_KEY(key.wVirtualKeyCode),
+            control_key_state: key.dwControlKeyState,
+            composed_text,
+        });
+    }
+}
+
 /// Encode every keystroke a key-event record read at this window holds.
 ///
 /// # Arguments
 ///
-/// * `key` - The key-down record.
+/// * `key` - The key-event record.
+/// * `decoder` - The decoder of the records read before it at this window.
 ///
 /// # Returns
 ///
-/// The bytes of one keystroke, repeated [`keystroke_count`] times: the
-/// composed text, else the encoding of the virtual key, else nothing.
-pub(crate) fn key_event_record_to_bytes(key: &KEY_EVENT_RECORD) -> Vec<u8> {
-    let unicode_char = unsafe { key.uChar.UnicodeChar };
-    let keystroke = match char::from_u32(u32::from(unicode_char))
-        .filter(|character| return *character != '\0')
-    {
-        Some(character) => character.to_string().into_bytes(),
-        None => virtual_key_to_keycode(VIRTUAL_KEY(key.wVirtualKeyCode))
-            .map(|code| return key_to_bytes(&code, Modifiers::NONE, None))
-            .unwrap_or_default(),
+/// The bytes of the keystroke `decoder` reads from `key`, repeated
+/// [`keystroke_count`] times: the composed text, else the encoding of the
+/// virtual key, else nothing.
+pub(crate) fn key_event_record_to_bytes(
+    key: &KEY_EVENT_RECORD,
+    decoder: &mut KeystrokeDecoder,
+) -> Vec<u8> {
+    let Some(keystroke) = decoder.decode(key) else {
+        return Vec::new();
     };
-    return keystroke.repeat(keystroke_count(key));
+    let bytes = keystroke
+        .key_code()
+        .map(|code| return key_to_bytes(&code, Modifiers::NONE, None))
+        .unwrap_or_default();
+    return bytes.repeat(keystroke_count(key));
 }
 
 /// Encode a key with its modifiers and optional composed text.
@@ -151,63 +295,7 @@ pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
     return usize::from(key.wRepeatCount);
 }
 
-/// Return whether a key-event record's Ctrl and Alt only selected an AltGr character.
-///
-/// Windows reports AltGr as Ctrl+Alt and treats any Ctrl+Alt as AltGr, so
-/// this follows Windows Terminal's rule:
-/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L390>.
-fn is_altgr_character(key: &KEY_EVENT_RECORD) -> bool {
-    let state = key.dwControlKeyState;
-    let unicode_char = unsafe { key.uChar.UnicodeChar };
-    return state & CTRL_PRESSED != 0
-        && state & ALT_PRESSED != 0
-        && char::from_u32(u32::from(unicode_char))
-            .is_some_and(|character| return character > ' ' && character != '\u{7f}');
-}
-
-/// Return `dwControlKeyState` without a Ctrl and Alt that only selected an AltGr character.
-///
-/// As in Windows Terminal, whose rule [`is_altgr_character`] follows,
-/// holding both Ctrl keys keeps Ctrl and holding both Alt keys keeps Alt.
-/// Unlike it, right Ctrl with AltGr's right Alt keeps Ctrl too: AltGr only
-/// ever fakes the left Ctrl, and when right Ctrl is pressed first Windows
-/// reports no left Ctrl at all, as this `ReadConsoleInputW` capture of
-/// right Ctrl, then AltGr + sharp-s on a German layout shows:
-///
-/// ```text
-/// down  vk=0x11 (CONTROL)  scan=0x1d  char=U+0000  state=0x0104 RIGHT_CTRL|ENHANCED
-/// down  vk=0x12 (MENU)     scan=0x38  char=U+0000  state=0x0105 RIGHT_ALT|RIGHT_CTRL|ENHANCED
-/// down  vk=0xdb (OEM_4)    scan=0x0c  char=U+005C '\\'  state=0x0005 RIGHT_ALT|RIGHT_CTRL
-/// ```
-///
-/// # Arguments
-///
-/// * `key` - The key-event record.
-///
-/// # Returns
-///
-/// The record's `dwControlKeyState`, minus its Ctrl and Alt flags if
-/// [`is_altgr_character`] matches, except a Ctrl or Alt kept as above.
-pub(crate) fn control_key_state_without_altgr(key: &KEY_EVENT_RECORD) -> u32 {
-    let state = key.dwControlKeyState;
-    if !is_altgr_character(key) {
-        return state;
-    }
-    let holds = |flags: u32| return state & flags == flags;
-    let keeps_ctrl = holds(RIGHT_CTRL_PRESSED | RIGHT_ALT_PRESSED)
-        || holds(LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED);
-    let keeps_alt = holds(LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED);
-    let mut kept = state;
-    if !keeps_ctrl {
-        kept &= !CTRL_PRESSED;
-    }
-    if !keeps_alt {
-        kept &= !ALT_PRESSED;
-    }
-    return kept;
-}
-
-pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
+fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
     match virtual_key {
         VK_UP => return Some(KeyCode::Up),
         VK_DOWN => return Some(KeyCode::Down),
@@ -237,4 +325,4 @@ pub(crate) fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode
 
 #[cfg(test)]
 #[path = "../tests/client/test_input_bytes.rs"]
-mod tests;
+pub(crate) mod tests;

@@ -3,39 +3,28 @@
 use cssh_rs_protocol::v1::input::{InputEvent, SignalKind};
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
 use cssh_rs_protocol::v1::message::DaemonToClient;
-use windows::Win32::System::Console::{KEY_EVENT_RECORD, SHIFT_PRESSED};
-use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_CANCEL};
+use windows::Win32::System::Console::SHIFT_PRESSED;
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL;
 
-use crate::client::input_bytes::{
-    control_key_state_without_altgr, virtual_key_to_keycode, ALT_PRESSED, CTRL_PRESSED,
-};
+use crate::client::input_bytes::{Keystroke, ALT_PRESSED, CTRL_PRESSED};
 
-/// Return the message that broadcasts a key-down event to the clients.
+/// Return the message that broadcasts a keystroke to the clients.
 ///
 /// # Arguments
-/// * `key` - The key-down event.
+/// * `keystroke` - The keystroke.
 ///
 /// # Returns
 /// A `Break` signal for Ctrl+Break, which has no input byte, otherwise the
-/// key, its modifiers read from [`control_key_state_without_altgr`].
-pub fn key_event_to_message(key: &KEY_EVENT_RECORD) -> DaemonToClient {
-    let virtual_key = VIRTUAL_KEY(key.wVirtualKeyCode);
-    if virtual_key == VK_CANCEL {
+/// key, its modifiers read from [`Keystroke::control_key_state_without_altgr`].
+pub fn keystroke_to_message(keystroke: &Keystroke) -> DaemonToClient {
+    if keystroke.virtual_key == VK_CANCEL {
         return DaemonToClient::Signal(SignalKind::Break);
     }
-    let unicode_char = unsafe { key.uChar.UnicodeChar };
-    let text = char::from_u32(u32::from(unicode_char))
-        .filter(|character| return *character != '\0')
-        .map(String::from);
-    let code = match &text {
-        Some(text) => KeyCode::Char(text.clone()),
-        None => virtual_key_to_keycode(virtual_key).unwrap_or(KeyCode::Unknown),
-    };
     return DaemonToClient::Input {
         event: InputEvent::Key {
-            code,
-            modifiers: modifiers_from_state(control_key_state_without_altgr(key)),
-            text,
+            code: keystroke.key_code().unwrap_or(KeyCode::Unknown),
+            modifiers: modifiers_from_state(keystroke.control_key_state_without_altgr()),
+            text: keystroke.composed_text.map(String::from),
         },
     };
 }

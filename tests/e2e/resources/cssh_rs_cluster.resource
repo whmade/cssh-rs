@@ -121,10 +121,22 @@ Paste Into Daemon
     [Documentation]    Stage ${payload} on the clipboard and paste it into the daemon, then
     ...                press Enter to flush the line to every marker.
     [Arguments]    ${payload}
+    Paste Into Window    ${payload}    ${DAEMON_TITLE}
+
+Paste Into Client
+    [Documentation]    Stage ${payload} on the clipboard and paste it into the ${target}
+    ...                client, then press Enter to flush the line to that host's marker.
+    [Arguments]    ${target}    ${payload}
+    Paste Into Window    ${payload}    @${target}    substring
+
+Paste Into Window
+    [Documentation]    Stage ${payload} on the clipboard, paste it into the window whose
+    ...                title matches ${title} by ${match_mode}, then press Enter.
+    [Arguments]    ${payload}    ${title}    ${match_mode}=exact
     Set Clipboard    ${payload}
-    Focus Window    ${DAEMON_TITLE}
+    Focus Window    ${title}    ${match_mode}
     # conhost pastes the clipboard on a right-click (QuickEdit mode); it has no Ctrl+V paste.
-    Right Click Window    ${DAEMON_TITLE}
+    Right Click Window    ${title}    ${match_mode}
     Press Key    enter
 
 Assert Every Host Received

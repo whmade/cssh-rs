@@ -56,10 +56,15 @@ def test_raw_input_flag_without_marker_returns_2(monkeypatch: pytest.MonkeyPatch
 
 
 def _patch_console(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Make stdin look like a console and record every console mode set on it."""
+    """Make stdin look like a console read as UTF-16 and record every console mode set on it."""
     modes: list[int] = []
     monkeypatch.setattr(_marker_writer.os, "isatty", lambda _fd: True)
     monkeypatch.setattr(_marker_writer, "_set_console_mode", lambda _fd, mode: modes.append(mode))
+    monkeypatch.setattr(
+        _marker_writer,
+        "_read_console",
+        lambda fd, max_units: os.read(fd, max_units).decode().encode("utf-16-le"),
+    )
     return modes
 
 
@@ -99,6 +104,24 @@ def test_raw_input_echoes_what_it_records_like_a_terminal(
 
     assert echoed == b"ab^[\xe2\x82\xac^@^\\^]^B\t^?\r\n"
     assert marker.read_bytes() == typed
+
+
+def test_raw_input_records_a_character_split_across_console_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_console(monkeypatch)
+    reads = iter(
+        [
+            "a\ud83d".encode("utf-16-le", "surrogatepass"),
+            "\ude00b".encode("utf-16-le", "surrogatepass"),
+        ]
+    )
+    monkeypatch.setattr(_marker_writer, "_read_console", lambda _fd, _max_units: next(reads, b""))
+    marker = tmp_path / "h1.log"
+
+    _run_echoing(monkeypatch, marker, b"", "--raw-input")
+
+    assert marker.read_bytes() == "a\U0001f600b".encode()
 
 
 def test_raw_input_echoes_a_pasted_line_break_once(

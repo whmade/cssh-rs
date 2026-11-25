@@ -36,7 +36,7 @@ use cssh_rs_protocol::ClientState;
 
 use crate::client::console_mode::ConsoleModeGuard;
 use crate::client::dispatch::dispatch_daemon_message;
-use crate::client::input_bytes::key_event_record_to_bytes;
+use crate::client::input_bytes::{key_event_record_to_bytes, KeystrokeDecoder};
 use crate::client::pty::{
     console_viewport_size, scan_and_answer_dsr, spawn_client_pty, write_to_master, SharedWriter,
 };
@@ -435,24 +435,25 @@ fn spawn_local_input<A: WindowsApi + Clone + 'static>(
     writer: SharedWriter,
     master: Box<dyn MasterPty + Send>,
 ) {
-    std::thread::spawn(move || loop {
-        let record = read_console_input(&api);
-        match u32::from(record.EventType) {
-            KEY_EVENT => {
-                let key = unsafe { record.Event.KeyEvent };
-                if key.bKeyDown.as_bool() {
-                    write_to_master(&*writer, &key_event_record_to_bytes(&key));
+    std::thread::spawn(move || {
+        let mut decoder = KeystrokeDecoder::default();
+        loop {
+            let record = read_console_input(&api);
+            match u32::from(record.EventType) {
+                KEY_EVENT => {
+                    let key = unsafe { record.Event.KeyEvent };
+                    write_to_master(&*writer, &key_event_record_to_bytes(&key, &mut decoder));
                 }
-            }
-            // The event reports the buffer size; the PTY follows the visible window.
-            WINDOW_BUFFER_SIZE_EVENT => {
-                if let Some(size) = console_viewport_size(&api) {
-                    if let Err(err) = master.resize(size) {
-                        warn!("Failed to resize the PTY: {}", err);
+                // The event reports the buffer size; the PTY follows the visible window.
+                WINDOW_BUFFER_SIZE_EVENT => {
+                    if let Some(size) = console_viewport_size(&api) {
+                        if let Err(err) = master.resize(size) {
+                            warn!("Failed to resize the PTY: {}", err);
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
     });
 }
