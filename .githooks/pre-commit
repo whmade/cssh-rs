@@ -14,9 +14,14 @@ elif [ -d "$CARGO_HOME/bin" ]; then
     esac
 fi
 
+# cssh-rs builds only for Windows, so every host checks its release target.
+target=x86_64-pc-windows-msvc
 cargo fmt
-cargo lint
+cargo xtask cross-lint "$target"
 cargo xtask check-typography
-cargo build --workspace --all-targets
-cargo docs
-cargo xtask update-readme-help
+cargo xtask cross-build "$target" -- --workspace --all-targets
+cargo xtask cross-doc "$target"
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) cargo xtask update-readme-help ;;
+    *) echo "Skipping cargo xtask update-readme-help: it runs cssh-rs, which needs a Windows host." ;;
+esac
