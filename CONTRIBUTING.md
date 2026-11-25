@@ -109,6 +109,14 @@ On a Windows x64 host with the MSVC Rust toolchain they run the plain native com
 
 `cargo xtask update-readme-help` and `cargo xtask check-readme-help` have no cross variant: they run cssh-rs to read its `--help` output, so they work only on a Windows host. Elsewhere they fail and leave the README unchanged.
 
+### Windows test VM
+
+On a Linux host, `cargo xtask vm start x86_64-pc-windows-msvc` runs a Windows 11 VM that xtasks reach over SSH: a [dockurr/windows](https://github.com/dockur/windows) container that you start once and reuse. `cargo xtask vm stop x86_64-pc-windows-msvc` shuts it down.
+
+The VM needs Docker with access to its daemon, KVM (`/dev/kvm`) and the OpenSSH client (`ssh`, `scp`, `ssh-keygen`). The xtask names whichever is missing but installs none of them, as that needs root. macOS hosts have no KVM and are not supported.
+
+The first `vm start` downloads Windows 11 (about 8 GB) and installs it unattended, which takes 20 to 60 minutes depending on the download; watch it at the web viewer URL the xtask logs. The VM's disk lives in the Docker volume `cssh-rs-windows-vm`, so `cargo clean` keeps it and every worktree shares it. After the install the volume holds about 20 GB: the installation image and the VM's disk, which grows with use up to 64 GB. Later starts boot in about 15 seconds. While it runs, the VM uses 4 GB of RAM and 2 CPU cores. Its SSH key lives in `$XDG_DATA_HOME/cssh-rs/windows-vm/` (by default `~/.local/share/cssh-rs/windows-vm/`). To reinstall Windows, stop the VM and remove its disk with `docker volume rm cssh-rs-windows-vm`.
+
 ### Pre-commit Hooks
 
 cssh-rs uses pre-commit git hooks to enforce code quality. These are automatically installed when you set the hooks path as shown above. The hooks will:

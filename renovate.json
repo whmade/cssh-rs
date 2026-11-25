@@ -68,6 +68,18 @@
       ],
       "depNameTemplate": "cargo-llvm-cov",
       "datasourceTemplate": "crate"
+    },
+    {
+      "customType": "regex",
+      "description": "dockurr/windows image pinned for the Windows test VM",
+      "managerFilePatterns": [
+        "/^\\.config/vm/dockurr-windows\\.version$/"
+      ],
+      "matchStrings": [
+        "(?<currentValue>\\d[\\w.+-]*)"
+      ],
+      "depNameTemplate": "dockurr/windows",
+      "datasourceTemplate": "docker"
     }
   ]
 }
