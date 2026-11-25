@@ -107,6 +107,8 @@ On a Windows x64 host with the MSVC Rust toolchain they run the plain native com
 
 `cross-build` builds the cssh-rs package unless the arguments after `--` select packages themselves, for example `-- --workspace --all-targets`.
 
+`cargo xtask update-readme-help` and `cargo xtask check-readme-help` have no cross variant: they run cssh-rs to read its `--help` output, so they work only on a Windows host. Elsewhere they fail and leave the README unchanged.
+
 ### Pre-commit Hooks
 
 cssh-rs uses pre-commit git hooks to enforce code quality. These are automatically installed when you set the hooks path as shown above. The hooks will:

@@ -135,6 +135,20 @@ fn test_check_readme_help_fails_when_different() {
 }
 
 #[test]
+fn test_check_readme_help_fails_with_help_error_when_help_output_fails() {
+    // Arrange
+    let mut mock = MockReadmeSystemMock::new();
+    mock.expect_get_help_output()
+        .returning(|| Err(anyhow::anyhow!("cssh-rs does not build")));
+
+    // Act
+    let result = check_readme_help(&mock);
+
+    // Assert
+    assert_eq!(result.unwrap_err().to_string(), "cssh-rs does not build");
+}
+
+#[test]
 fn test_update_readme_help_returns_false_when_up_to_date() {
     // Arrange
     let help = "Cluster SSH tool";
@@ -177,4 +191,19 @@ fn test_update_readme_help_returns_true_and_writes_new_content_when_different() 
     // Assert
     assert!(result, "should return true when README was updated");
     assert_eq!(*written.lock().unwrap(), make_readme(new_help));
+}
+
+#[test]
+fn test_update_readme_help_leaves_readme_alone_when_help_output_fails() {
+    // Arrange
+    let mut mock = MockReadmeSystemMock::new();
+    mock.expect_get_help_output()
+        .returning(|| Err(anyhow::anyhow!("cssh-rs does not build")));
+    mock.expect_write_readme().never();
+
+    // Act
+    let result = update_readme_help(&mock);
+
+    // Assert
+    assert_eq!(result.unwrap_err().to_string(), "cssh-rs does not build");
 }
