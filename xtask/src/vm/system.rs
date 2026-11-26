@@ -1,5 +1,6 @@
 //! I/O abstraction for the test VM subcommands.
 
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -22,8 +23,19 @@ pub struct SshEndpoint {
     pub key: PathBuf,
 }
 
+/// An advisory lock on a file, released when dropped or when the process
+/// exits, so a crashed xtask never leaves a stale lock behind.
+#[derive(Debug)]
+#[must_use]
+pub struct FileLock {
+    _file: File,
+}
+
 /// I/O the test VM subcommands need on top of [`CrossBuildSystem`].
 pub trait VmSystem: CrossBuildSystem {
+    /// A held lock on a file, released when dropped.
+    type Lock;
+
     /// Return true if `docker info` reaches the Docker daemon.
     ///
     /// # Returns
@@ -172,6 +184,94 @@ pub trait VmSystem: CrossBuildSystem {
     /// # Returns
     /// A monotonic timestamp.
     fn now(&self) -> Instant;
+
+    /// Delete the file at `path`.
+    ///
+    /// # Arguments
+    /// * `path` - File to delete.
+    ///
+    /// # Errors
+    /// Returns an error if the file exists but cannot be deleted.
+    fn remove_file(&self, path: &Path) -> Result<()>;
+
+    /// Take a shared lock on `path`, creating the file if needed, and wait
+    /// while another process holds it exclusively.
+    ///
+    /// # Arguments
+    /// * `path` - Lock file.
+    ///
+    /// # Returns
+    /// The lock, held until it is dropped.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened or locked.
+    fn lock_shared(&self, path: &Path) -> Result<Self::Lock>;
+
+    /// Take an exclusive lock on `path`, creating the file if needed, and
+    /// wait while another process holds any lock on it.
+    ///
+    /// # Arguments
+    /// * `path` - Lock file.
+    ///
+    /// # Returns
+    /// The lock, held until it is dropped.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened or locked.
+    fn lock_exclusive(&self, path: &Path) -> Result<Self::Lock>;
+
+    /// Take an exclusive lock on `path`, creating the file if needed,
+    /// unless another process holds any lock on it.
+    ///
+    /// # Arguments
+    /// * `path` - Lock file.
+    ///
+    /// # Returns
+    /// The lock, held until it is dropped, or `None` if the file is locked.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened or locked.
+    fn try_lock_exclusive(&self, path: &Path) -> Result<Option<Self::Lock>>;
+}
+
+fn open_lock_file(path: &Path) -> Result<File> {
+    OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))
+}
+
+/// Lock `path` with `try_lock`, or return `None` if another process holds a
+/// lock that conflicts.
+fn try_lock_file(
+    path: &Path,
+    try_lock: fn(&File) -> Result<(), TryLockError>,
+) -> Result<Option<FileLock>> {
+    let file = open_lock_file(path)?;
+    match try_lock(&file) {
+        Ok(()) => Ok(Some(FileLock { _file: file })),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(err)) => {
+            Err(err).with_context(|| format!("failed to lock {}", path.display()))
+        }
+    }
+}
+
+/// Lock `path` with `lock`, saying so first when `try_lock` finds it held.
+fn lock_waiting(
+    path: &Path,
+    try_lock: fn(&File) -> Result<(), TryLockError>,
+    lock: fn(&File) -> std::io::Result<()>,
+) -> Result<FileLock> {
+    if let Some(held) = try_lock_file(path, try_lock)? {
+        return Ok(held);
+    }
+    log::info!("Waiting for another xtask to release {}", path.display());
+    let file = open_lock_file(path)?;
+    lock(&file).with_context(|| format!("failed to lock {}", path.display()))?;
+    Ok(FileLock { _file: file })
 }
 
 /// Return an `ssh` or `scp` command with the options every call to the VM
@@ -234,6 +334,8 @@ fn docker_stdout(args: &[&str]) -> Result<String> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl VmSystem for RealSystem {
+    type Lock = FileLock;
+
     fn docker_daemon_reachable(&self) -> bool {
         docker_succeeds(&["info", "--format", "{{.ServerVersion}}"])
     }
@@ -354,5 +456,26 @@ impl VmSystem for RealSystem {
 
     fn now(&self) -> Instant {
         Instant::now()
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<()> {
+        match std::fs::remove_file(path) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                Err(err).with_context(|| format!("failed to delete {}", path.display()))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn lock_shared(&self, path: &Path) -> Result<FileLock> {
+        lock_waiting(path, File::try_lock_shared, File::lock_shared)
+    }
+
+    fn lock_exclusive(&self, path: &Path) -> Result<FileLock> {
+        lock_waiting(path, File::try_lock, File::lock)
+    }
+
+    fn try_lock_exclusive(&self, path: &Path) -> Result<Option<FileLock>> {
+        try_lock_file(path, File::try_lock)
     }
 }

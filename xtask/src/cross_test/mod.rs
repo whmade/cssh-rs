@@ -19,13 +19,18 @@ pub const RUNNER_SUBCOMMAND: &str = "cross-test-runner";
 /// the [`vm::VM_ROOT`] that Defender skips.
 static REMOTE_ROOT: LazyLock<String> = LazyLock::new(|| format!(r"{}\cross-test", vm::VM_ROOT));
 
+/// Directory in the VM that holds one mirror of the source files per
+/// worktree, under the [`vm::VM_ROOT`] that Defender skips.
+static MIRRORS_ROOT: LazyLock<String> = LazyLock::new(|| format!(r"{}\workspaces", vm::VM_ROOT));
+
 const CLEANUP_ATTEMPTS: u32 = 5;
 
 /// Host environment variables the runner sets for each test binary in the
 /// VM, whose SSH session inherits none from the host.
 const FORWARDED_VARS: [&str; 2] = ["RUST_BACKTRACE", "RUST_TEST_THREADS"];
 
-/// Directory under the workspace root for the workspace archive.
+/// Directory under the workspace root for the worktree lock and the
+/// workspace archive.
 const SCRATCH_DIR: &str = "target/cross-test";
 
 /// Run the workspace's tests for `target`.
@@ -33,7 +38,8 @@ const SCRATCH_DIR: &str = "target/cross-test";
 /// # Arguments
 /// * `system` - Injected I/O provider.
 /// * `target` - Target to build and run the tests for.
-/// * `with_vm` - Start the test VM for this run and stop it afterwards.
+/// * `with_vm` - Start the test VM if it is not running, to stop after the
+///   last run using it.
 /// * `cargo_args` - Arguments passed through to `cargo test`.
 ///
 /// # Returns
@@ -73,8 +79,8 @@ pub fn run_cross_test<S: CrossTestSystem>(
 ///
 /// # Errors
 /// Returns an error if an argument or a forwarded environment variable
-/// cannot pass through `cmd.exe`, the VM is not running, or the binary
-/// cannot be copied into it.
+/// cannot pass through `cmd.exe`, the VM is not running, the binary
+/// cannot be copied into it, or cargo runs it outside the workspace.
 pub fn run_test_binary<S: CrossTestSystem>(
     system: &S,
     target: Target,
@@ -132,22 +138,46 @@ fn test_in_vm<S: CrossTestSystem>(
     with_vm: bool,
     cargo_args: &[String],
 ) -> Result<()> {
+    let root = system.workspace_root()?;
+    let scratch = root.join(SCRATCH_DIR);
+    system.create_dir_all(&scratch)?;
+    // Runs in different worktrees share the VM, but two runs in one worktree
+    // would mirror the workspace to the same path in it.
+    let Some(_worktree_lock) = system.try_lock_exclusive(&scratch.join("worktree.lock"))? else {
+        bail!(
+            "a cross-test is already running in this worktree ({}); wait for it to finish",
+            root.display()
+        );
+    };
     let runner = runner_command(system, target)?;
     vm::check_host_prerequisites(system)?;
-    if !with_vm {
-        vm::connect(system, target)?;
-    }
-    let toolchain = prepare_toolchain(system, target)?;
-    let launched = with_vm && vm::start(system, target)?;
-    let result = test_in_running_vm(system, target, toolchain, cargo_args, &runner);
-    if !launched {
-        return result;
-    }
-    let stopped = vm::stop(system, target);
-    if let (Err(_), Err(err)) = (&result, &stopped) {
+    let lease = vm::acquire_lease(system)?;
+    let result = prepare_and_test(system, target, with_vm, cargo_args, &runner);
+    let released = vm::release_lease(system, target, lease);
+    if let (Err(_), Err(err)) = (&result, &released) {
         log::error!("{err:#}");
     }
-    result.and(stopped)
+    result.and(released)
+}
+
+/// Prepare the toolchain and make sure the test VM runs, starting it if
+/// `with_vm` and failing before the build otherwise, then run the tests.
+fn prepare_and_test<S: CrossTestSystem>(
+    system: &S,
+    target: Target,
+    with_vm: bool,
+    cargo_args: &[String],
+    runner: &str,
+) -> Result<()> {
+    let toolchain = if with_vm {
+        let toolchain = prepare_toolchain(system, target)?;
+        vm::start_for_run(system, target)?;
+        toolchain
+    } else {
+        vm::connect(system, target)?;
+        prepare_toolchain(system, target)?
+    };
+    test_in_running_vm(system, target, toolchain, cargo_args, runner)
 }
 
 /// Mirror the workspace into the running VM and run `cargo test` with
@@ -196,12 +226,11 @@ fn runner_command<S: CrossTestSystem>(system: &S, target: Target) -> Result<Stri
     Ok(format!("{path} {RUNNER_SUBCOMMAND} {}", target.triple()))
 }
 
-/// Copy the workspace's source files into the VM at their host paths on
-/// `C:`, where tests find them through paths compiled in from
-/// `CARGO_MANIFEST_DIR`.
+/// Copy the workspace's source files into the worktree's mirror in the VM,
+/// replacing the previous copy.
 fn mirror_workspace<S: CrossTestSystem>(system: &S, endpoint: &SshEndpoint) -> Result<()> {
     let root = system.workspace_root()?;
-    let remote_root = vm_path(&root);
+    let remote_root = vm_mirror(&root);
     let archive = root.join(SCRATCH_DIR).join("workspace.tar");
     let remote_archive = format!(r"{}\workspace-{}.tar", *REMOTE_ROOT, system.process_id());
     log::info!("Mirroring the workspace's source files to {remote_root} in the test VM");
@@ -232,8 +261,9 @@ fn copy_and_run<S: CrossTestSystem>(
     args: &[String],
 ) -> Result<i32> {
     system.scp(endpoint, binary, remote_binary)?;
-    let cwd = vm_path(&system.current_dir()?);
-    let workspace = vm_path(&system.workspace_root()?);
+    let root = system.workspace_root()?;
+    let workspace = vm_mirror(&root);
+    let cwd = vm_cwd(&workspace, &root, &system.current_dir()?)?;
     // insta finds the workspace root with `cargo metadata`, which the VM
     // lacks; https://insta.rs/docs/advanced/#workspace-root
     // The command must not start with a quote, which `cmd /c` would strip:
@@ -275,10 +305,42 @@ fn remove_remote_dir<S: CrossTestSystem>(system: &S, endpoint: &SshEndpoint, dir
     }
 }
 
-/// Return the VM path of a host path: Windows resolves `/a/b` against the
-/// current drive, which is `C:` for SSH sessions.
-fn vm_path(host: &Path) -> String {
-    format!("C:{}", host.to_string_lossy().replace('/', "\\"))
+/// Return the directory in the VM that mirrors the worktree at `root`.
+///
+/// It is named by a hash of `root` rather than mirroring that path, where a
+/// worktree nested in another, such as `.claude/worktrees/*`, would lie in
+/// the other's mirror, which every run there replaces.
+fn vm_mirror(root: &Path) -> String {
+    // 64-bit FNV-1a: unlike std's hashers, stable across Rust releases, so a
+    // worktree keeps its mirror.
+    // http://www.isthe.com/chongo/tech/comp/fnv/index.html#FNV-param
+    let hash = root
+        .as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    format!(r"{}\{hash:016x}", *MIRRORS_ROOT)
+}
+
+/// Return the directory in the mirror at `workspace` that matches `cwd` in
+/// the worktree at `root`, where cargo runs a test binary.
+fn vm_cwd(workspace: &str, root: &Path, cwd: &Path) -> Result<String> {
+    let relative = cwd.strip_prefix(root).with_context(|| {
+        format!(
+            "cargo runs the test binary in {}, outside the workspace {}, which \
+             the test VM does not mirror",
+            cwd.display(),
+            root.display()
+        )
+    })?;
+    let relative = relative.to_string_lossy().replace('/', "\\");
+    Ok(if relative.is_empty() {
+        workspace.to_owned()
+    } else {
+        format!(r"{workspace}\{relative}")
+    })
 }
 
 /// Return the [`FORWARDED_VARS`] set on the host, failing on a value

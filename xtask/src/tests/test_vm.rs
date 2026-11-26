@@ -1,11 +1,15 @@
 //! Tests for the test VM module.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
+
+use mockall::Sequence;
 
 use crate::cross_build::Target;
-use crate::mock_system::{FakeDocker, FakeFiles, MockSystem, DATA_DIR, KEY, PUBLIC_KEY};
+use crate::mock_system::{
+    refuse_ssh, vm_in_use, FakeDocker, FakeFiles, MockSystem, AUTO_STOP, DATA_DIR, KEY,
+    LAUNCH_LOCK, PUBLIC_KEY,
+};
 use crate::vm::{start, stop};
 
 const TRIPLE: &str = "x86_64-pc-windows-msvc";
@@ -13,6 +17,13 @@ const TRIPLE: &str = "x86_64-pc-windows-msvc";
 /// An `XDG_DATA_HOME` that `Path::is_absolute` accepts on the host running
 /// the tests, which on Windows takes a drive letter.
 const XDG_DATA_HOME: &str = if cfg!(windows) { r"C:\data" } else { "/data" };
+
+/// The test VM's data directory under [`XDG_DATA_HOME`].
+const XDG_DATA_DIR: &str = if cfg!(windows) {
+    r"C:\data\cssh-rs\windows-vm"
+} else {
+    "/data/cssh-rs/windows-vm"
+};
 
 #[test]
 fn test_vm_start_on_windows_host_errors_without_touching_docker() {
@@ -176,18 +187,21 @@ fn test_vm_start_names_every_missing_prerequisite_at_once() {
 }
 
 /// Build a Linux-host mock with every prerequisite present and Docker and
-/// the files faked. Tests add how the VM answers SSH.
+/// the files faked. Tests add how the VM answers SSH and whether another
+/// xtask holds it.
 fn vm_mock(docker: &FakeDocker, files: &FakeFiles, volume_exists: bool) -> MockSystem {
-    vm_mock_with_env(docker, files, volume_exists, |key| {
+    vm_mock_with_env(docker, files, volume_exists, DATA_DIR, |key| {
         (key == "HOME").then(|| "/home/dev".to_owned())
     })
 }
 
-/// Build a [`vm_mock`] whose environment variables `env` answers.
+/// Build a [`vm_mock`] whose environment variables `env` answers, which
+/// puts the data directory at `data_dir`.
 fn vm_mock_with_env(
     docker: &FakeDocker,
     files: &FakeFiles,
     volume_exists: bool,
+    data_dir: &'static str,
     env: fn(&str) -> Option<String>,
 ) -> MockSystem {
     let mut mock = MockSystem::new();
@@ -198,25 +212,25 @@ fn vm_mock_with_env(
     mock.expect_volume_exists()
         .returning(move |_| volume_exists);
     mock.expect_sleep().returning(|_| ());
+    let vm_lock = Path::new(data_dir).join("vm.lock");
+    mock.expect_lock_shared()
+        .withf(move |path| path == vm_lock)
+        .returning(|_| Ok(()));
     docker.install(&mut mock);
     files.install(&mut mock);
     mock
 }
 
-fn accept_ssh(mock: &mut MockSystem) {
-    mock.expect_ssh_ready().returning(|_| true);
-    mock.expect_now().returning(Instant::now);
+fn free_launch_lock(mock: &mut MockSystem) {
+    mock.expect_lock_exclusive()
+        .withf(|path| path == Path::new(LAUNCH_LOCK))
+        .returning(|_| Ok(()));
 }
 
-/// Make the VM refuse SSH forever while each clock reading advances a
-/// minute.
-fn refuse_ssh(mock: &mut MockSystem) {
-    mock.expect_ssh_ready().returning(|_| false);
-    let start_time = Instant::now();
-    let minutes = AtomicU64::new(0);
-    mock.expect_now().returning(move || {
-        start_time + Duration::from_secs(60 * minutes.fetch_add(1, Ordering::SeqCst))
-    });
+fn accept_ssh(mock: &mut MockSystem) {
+    free_launch_lock(mock);
+    mock.expect_ssh_ready().returning(|_| true);
+    mock.expect_now().returning(Instant::now);
 }
 
 #[test]
@@ -271,6 +285,39 @@ fn test_vm_start_installs_windows_on_first_use() {
         calls[0].last().unwrap().starts_with("dockurr/windows:"),
         "`docker {run}` does not run the dockurr image last"
     );
+    assert_eq!(
+        files.get(AUTO_STOP),
+        None,
+        "a started VM must not auto-stop"
+    );
+}
+
+#[test]
+fn test_vm_start_reuses_a_vm_another_run_launched_while_it_waited() {
+    // Arrange
+    let docker = FakeDocker::new(None);
+    let files = FakeFiles::new(&[(KEY, "PRIVATE"), (PUBLIC_KEY, "ssh-ed25519 KEY")]);
+    let mut mock = vm_mock(&docker, &files, true);
+    mock.expect_ssh_ready().returning(|_| true);
+    mock.expect_now().returning(Instant::now);
+    let other_run = docker.clone();
+    mock.expect_lock_exclusive()
+        .withf(|path| path == Path::new(LAUNCH_LOCK))
+        .returning(move |_| {
+            other_run.set_state(Some("running"));
+            Ok(())
+        });
+
+    // Act
+    let result = start(&mock, Target::X86_64PcWindowsMsvc);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    assert!(
+        docker.calls().is_empty(),
+        "launched a second VM: {:?}",
+        docker.calls()
+    );
 }
 
 #[test]
@@ -311,10 +358,10 @@ fn test_vm_start_refuses_a_disk_whose_key_is_gone() {
 }
 
 #[test]
-fn test_vm_start_leaves_a_running_vm_running() {
+fn test_vm_start_claims_a_running_vm_that_cross_test_started() {
     // Arrange
     let docker = FakeDocker::new(Some("running"));
-    let files = FakeFiles::new(&[(KEY, "PRIVATE")]);
+    let files = FakeFiles::new(&[(KEY, "PRIVATE"), (AUTO_STOP, "")]);
     let mut mock = vm_mock(&docker, &files, true);
     accept_ssh(&mut mock);
 
@@ -322,8 +369,13 @@ fn test_vm_start_leaves_a_running_vm_running() {
     let result = start(&mock, Target::X86_64PcWindowsMsvc);
 
     // Assert
-    assert!(!result.unwrap(), "start claimed to launch a running VM");
+    assert!(result.is_ok(), "{result:?}");
     assert!(docker.calls().is_empty(), "{:?}", docker.calls());
+    assert_eq!(
+        files.get(AUTO_STOP),
+        None,
+        "cross-test would still stop a VM the user started"
+    );
 }
 
 #[test]
@@ -348,6 +400,7 @@ fn test_vm_start_fails_when_the_container_stops_before_ssh_comes_up() {
     let docker = FakeDocker::new(None);
     let files = FakeFiles::new(&[(KEY, "PRIVATE"), (PUBLIC_KEY, "ssh-ed25519 KEY")]);
     let mut mock = vm_mock(&docker, &files, true);
+    free_launch_lock(&mut mock);
     let crashing = docker.clone();
     mock.expect_ssh_ready().returning(move |_| {
         crashing.set_state(Some("exited"));
@@ -372,6 +425,7 @@ fn test_vm_start_waits_two_hours_for_a_first_install() {
     let docker = FakeDocker::new(None);
     let files = FakeFiles::new(&[]);
     let mut mock = vm_mock(&docker, &files, false);
+    free_launch_lock(&mut mock);
     refuse_ssh(&mut mock);
 
     // Act
@@ -391,6 +445,7 @@ fn test_vm_start_gives_up_on_an_installed_vm_after_fifteen_minutes() {
     let docker = FakeDocker::new(None);
     let files = FakeFiles::new(&[(KEY, "PRIVATE"), (PUBLIC_KEY, "ssh-ed25519 KEY")]);
     let mut mock = vm_mock(&docker, &files, true);
+    free_launch_lock(&mut mock);
     refuse_ssh(&mut mock);
 
     // Act
@@ -422,12 +477,17 @@ fn test_vm_start_keeps_its_files_under_xdg_data_home() {
     // Arrange
     let docker = FakeDocker::new(None);
     let files = FakeFiles::new(&[]);
-    let mut mock = vm_mock_with_env(&docker, &files, false, |key| match key {
+    let mut mock = vm_mock_with_env(&docker, &files, false, XDG_DATA_DIR, |key| match key {
         "XDG_DATA_HOME" => Some(XDG_DATA_HOME.to_owned()),
         "HOME" => Some("/home/dev".to_owned()),
         _ => None,
     });
-    accept_ssh(&mut mock);
+    let launch_lock = Path::new(XDG_DATA_DIR).join("launch.lock");
+    mock.expect_lock_exclusive()
+        .withf(move |path| path == launch_lock)
+        .returning(|_| Ok(()));
+    mock.expect_ssh_ready().returning(|_| true);
+    mock.expect_now().returning(Instant::now);
 
     // Act
     let result = start(&mock, Target::X86_64PcWindowsMsvc);
@@ -448,7 +508,7 @@ fn test_vm_start_ignores_a_relative_xdg_data_home() {
     // Arrange
     let docker = FakeDocker::new(None);
     let files = FakeFiles::new(&[]);
-    let mut mock = vm_mock_with_env(&docker, &files, false, |key| match key {
+    let mut mock = vm_mock_with_env(&docker, &files, false, DATA_DIR, |key| match key {
         "XDG_DATA_HOME" => Some("data".to_owned()),
         "HOME" => Some("/home/dev".to_owned()),
         _ => None,
@@ -470,11 +530,49 @@ fn test_vm_start_ignores_a_relative_xdg_data_home() {
 fn test_vm_stop_shuts_down_and_removes_a_running_vm() {
     // Arrange
     let docker = FakeDocker::new(Some("running"));
-    let files = FakeFiles::new(&[]);
-    let mock = vm_mock(&docker, &files, true);
+    let files = FakeFiles::new(&[(AUTO_STOP, "")]);
+    let mut mock = vm_mock(&docker, &files, true);
+    vm_in_use(&mut mock, false);
 
     // Act
-    let result = stop(&mock, Target::X86_64PcWindowsMsvc);
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, false);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(docker.subcommands(), ["stop", "rm"]);
+    assert_eq!(files.get(AUTO_STOP), None);
+}
+
+#[test]
+fn test_vm_stop_refuses_while_a_cross_test_uses_the_vm() {
+    // Arrange
+    let docker = FakeDocker::new(Some("running"));
+    let files = FakeFiles::new(&[]);
+    let mut mock = vm_mock(&docker, &files, true);
+    vm_in_use(&mut mock, true);
+
+    // Act
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, false);
+
+    // Assert
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("--force"),
+        "error did not mention --force: {err}"
+    );
+    assert!(docker.calls().is_empty(), "{:?}", docker.calls());
+}
+
+#[test]
+fn test_vm_stop_with_force_stops_a_vm_in_use() {
+    // Arrange
+    let docker = FakeDocker::new(Some("running"));
+    let files = FakeFiles::new(&[]);
+    let mut mock = vm_mock(&docker, &files, true);
+    vm_in_use(&mut mock, true);
+
+    // Act
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, true);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -482,14 +580,45 @@ fn test_vm_stop_shuts_down_and_removes_a_running_vm() {
 }
 
 #[test]
+fn test_vm_stop_with_force_removes_the_marker_before_it_looks_at_the_vm() {
+    // Arrange
+    let mut mock = prerequisite_mock(&[], true, true);
+    mock.expect_env_var()
+        .returning(|key| (key == "HOME").then(|| "/home/dev".to_owned()));
+    mock.expect_create_dir_all().returning(|_| Ok(()));
+    vm_in_use(&mut mock, true);
+    let mut order = Sequence::new();
+    mock.expect_remove_file()
+        .withf(|path| path == Path::new(AUTO_STOP))
+        .times(1)
+        .in_sequence(&mut order)
+        .returning(|_| Ok(()));
+    mock.expect_list_containers()
+        .times(1)
+        .in_sequence(&mut order)
+        .returning(|| Ok("cssh-rs-windows-vm\trunning\n".to_owned()));
+    mock.expect_run_docker()
+        .times(2)
+        .in_sequence(&mut order)
+        .returning(|_| Ok(()));
+
+    // Act
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, true);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
 fn test_vm_stop_does_nothing_without_a_vm() {
     // Arrange
     let docker = FakeDocker::new(None);
     let files = FakeFiles::new(&[]);
-    let mock = vm_mock(&docker, &files, true);
+    let mut mock = vm_mock(&docker, &files, true);
+    vm_in_use(&mut mock, false);
 
     // Act
-    let result = stop(&mock, Target::X86_64PcWindowsMsvc);
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, false);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -501,10 +630,11 @@ fn test_vm_stop_removes_an_exited_container() {
     // Arrange
     let docker = FakeDocker::new(Some("exited"));
     let files = FakeFiles::new(&[]);
-    let mock = vm_mock(&docker, &files, true);
+    let mut mock = vm_mock(&docker, &files, true);
+    vm_in_use(&mut mock, false);
 
     // Act
-    let result = stop(&mock, Target::X86_64PcWindowsMsvc);
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, false);
 
     // Assert
     assert!(result.is_ok(), "{result:?}");
@@ -521,7 +651,7 @@ fn test_vm_stop_on_macos_host_errors_without_touching_docker() {
     mock.expect_run_docker().never();
 
     // Act
-    let result = stop(&mock, Target::X86_64PcWindowsMsvc);
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, false);
 
     // Assert
     let err = result.unwrap_err().to_string();
@@ -536,7 +666,7 @@ fn test_vm_stop_names_missing_docker() {
     mock.expect_run_docker().never();
 
     // Act
-    let result = stop(&mock, Target::X86_64PcWindowsMsvc);
+    let result = stop(&mock, Target::X86_64PcWindowsMsvc, false);
 
     // Assert
     let err = result.unwrap_err().to_string();

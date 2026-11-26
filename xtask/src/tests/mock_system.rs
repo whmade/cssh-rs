@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +31,7 @@ mock! {
         fn read_cargo_xwin_version(&self) -> anyhow::Result<String>;
     }
     impl VmSystem for System {
+        type Lock = ();
         fn docker_daemon_reachable(&self) -> bool;
         fn path_exists(&self, path: &Path) -> bool;
         fn env_var(&self, key: &str) -> Option<String>;
@@ -46,6 +48,10 @@ mock! {
         fn scp(&self, endpoint: &SshEndpoint, local: &Path, remote: &str) -> anyhow::Result<()>;
         fn sleep(&self, duration: Duration);
         fn now(&self) -> Instant;
+        fn remove_file(&self, path: &Path) -> anyhow::Result<()>;
+        fn lock_shared(&self, path: &Path) -> anyhow::Result<()>;
+        fn lock_exclusive(&self, path: &Path) -> anyhow::Result<()>;
+        fn try_lock_exclusive(&self, path: &Path) -> anyhow::Result<Option<()>>;
     }
     impl CrossTestSystem for System {
         fn current_exe(&self) -> anyhow::Result<PathBuf>;
@@ -62,6 +68,12 @@ pub const DATA_DIR: &str = "/home/dev/.local/share/cssh-rs/windows-vm";
 pub const KEY: &str = "/home/dev/.local/share/cssh-rs/windows-vm/id_ed25519";
 /// The public half of [`KEY`].
 pub const PUBLIC_KEY: &str = "/home/dev/.local/share/cssh-rs/windows-vm/id_ed25519.pub";
+/// The marker in [`DATA_DIR`] that makes the last cross-test stop the VM.
+pub const AUTO_STOP: &str = "/home/dev/.local/share/cssh-rs/windows-vm/auto-stop";
+/// The lock file in [`DATA_DIR`] that every lease on the VM holds.
+pub const VM_LOCK: &str = "/home/dev/.local/share/cssh-rs/windows-vm/vm.lock";
+/// The lock file in [`DATA_DIR`] held while an xtask launches the VM.
+pub const LAUNCH_LOCK: &str = "/home/dev/.local/share/cssh-rs/windows-vm/launch.lock";
 
 /// Return owned copies of some string slices.
 ///
@@ -72,6 +84,31 @@ pub const PUBLIC_KEY: &str = "/home/dev/.local/share/cssh-rs/windows-vm/id_ed255
 /// The copies, in order.
 pub fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| (*item).to_owned()).collect()
+}
+
+/// Make [`VM_LOCK`] look held by another xtask using the VM, or free.
+///
+/// # Arguments
+/// * `mock` - Mock to answer `try_lock_exclusive` on [`VM_LOCK`].
+/// * `in_use` - Whether another xtask holds a lease on the VM.
+pub fn vm_in_use(mock: &mut MockSystem, in_use: bool) {
+    mock.expect_try_lock_exclusive()
+        .withf(|path| path == Path::new(VM_LOCK))
+        .returning(move |_| Ok((!in_use).then_some(())));
+}
+
+/// Make the VM refuse SSH forever while each clock reading advances a
+/// minute, so a wait for it times out.
+///
+/// # Arguments
+/// * `mock` - Mock to answer `ssh_ready` and `now`.
+pub fn refuse_ssh(mock: &mut MockSystem) {
+    mock.expect_ssh_ready().returning(|_| false);
+    let start_time = Instant::now();
+    let minutes = AtomicU64::new(0);
+    mock.expect_now().returning(move || {
+        start_time + Duration::from_secs(60 * minutes.fetch_add(1, Ordering::SeqCst))
+    });
 }
 
 /// A stand-in Docker daemon holding the VM container's state.
@@ -215,6 +252,11 @@ impl FakeFiles {
             Ok(())
         });
         let fake = self.clone();
+        mock.expect_remove_file().returning(move |path| {
+            fake.files.lock().unwrap().remove(path);
+            Ok(())
+        });
+        let fake = self.clone();
         mock.expect_generate_ssh_key().returning(move |path| {
             let mut files = fake.files.lock().unwrap();
             files.insert(path.to_path_buf(), "PRIVATE".to_owned());
@@ -233,6 +275,14 @@ impl FakeFiles {
     /// The contents, or `None` if the file does not exist.
     pub fn get(&self, path: &str) -> Option<String> {
         self.files.lock().unwrap().get(Path::new(path)).cloned()
+    }
+
+    /// Delete a file, as if another process deleted it.
+    ///
+    /// # Arguments
+    /// * `path` - File to delete.
+    pub fn remove(&self, path: &str) {
+        self.files.lock().unwrap().remove(Path::new(path));
     }
 }
 
