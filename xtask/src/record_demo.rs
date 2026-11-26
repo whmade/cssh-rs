@@ -65,11 +65,7 @@ impl DemoSystem for RealSystem {
     }
 
     fn workspace_root(&self) -> Result<PathBuf> {
-        // CARGO_MANIFEST_DIR points at xtask/, whose parent is the workspace root.
-        Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?
-            .to_path_buf())
+        crate::workspace_root()
     }
 
     fn build_binary(&self) -> Result<PathBuf> {
