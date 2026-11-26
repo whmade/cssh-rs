@@ -22,10 +22,10 @@ mod worktree_teardown;
 #[path = "tests/mock_system.rs"]
 mod mock_system;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use simplelog::{format_description, ColorChoice, ConfigBuilder, TermLogger, TerminalMode};
@@ -280,6 +280,15 @@ fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Return the workspace root this xtask was built from: the parent of
+/// `xtask/`, where cargo points `CARGO_MANIFEST_DIR`.
+fn workspace_root() -> Result<PathBuf> {
+    Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?
+        .to_path_buf())
 }
 
 /// Initialize the terminal logger.

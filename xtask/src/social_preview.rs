@@ -101,14 +101,7 @@ pub struct RealSystem;
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl SocialPreviewSystem for RealSystem {
     fn workspace_root(&self) -> Result<PathBuf> {
-        // CARGO_MANIFEST_DIR is set by Cargo when building this binary; it
-        // points at xtask/, whose parent is the workspace root.
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let root = Path::new(manifest_dir)
-            .parent()
-            .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?
-            .to_path_buf();
-        Ok(root)
+        crate::workspace_root()
     }
 
     fn env_var(&self, key: &str) -> Option<String> {

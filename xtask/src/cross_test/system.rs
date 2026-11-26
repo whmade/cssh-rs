@@ -72,10 +72,7 @@ impl CrossTestSystem for RealSystem {
     }
 
     fn workspace_root(&self) -> Result<PathBuf> {
-        Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .context("failed to resolve workspace root from CARGO_MANIFEST_DIR")?
-            .to_path_buf())
+        crate::workspace_root()
     }
 
     fn pack_workspace(&self, root: &Path, archive: &Path) -> Result<()> {
