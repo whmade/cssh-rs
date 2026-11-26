@@ -98,8 +98,10 @@ cssh-rs uses cargo aliases and the [`xtask`](https://github.com/matklad/cargo-xt
 cssh-rs ships a cross-build xtask so contributors can produce a binary for any supported target from any supported host:
 
 ```sh
-cargo xtask cross-build <target>
+cargo xtask cross-build <target> [--release] [-- <cargo build arguments>]
 ```
+
+`cross-build` builds the cssh-rs package unless the arguments after `--` select packages themselves, for example `-- --workspace --all-targets`.
 
 Run `cargo xtask cross-build --help` for the list of supported targets. The xtask installs the required toolchain on first use.
 
