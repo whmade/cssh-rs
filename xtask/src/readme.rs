@@ -25,6 +25,7 @@ const END_MARKER: &str = "<!-- HELP_OUTPUT_END -->";
 static PREAMBLE: LazyLock<String> =
     LazyLock::new(|| format!("\r\n```cmd\r\n{PACKAGE_NAME}.exe --help\r\n"));
 const POSTAMBLE: &str = "\r\n```\r\n";
+const STDERR_TAIL_LINES: usize = 20;
 
 /// All side-effecting operations required by this module.
 ///
@@ -59,14 +60,26 @@ pub struct RealSystem;
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl ReadmeSystem for RealSystem {
     fn get_help_output(&self) -> Result<String> {
+        let command = format!("`cargo run --package {PACKAGE_NAME} -- --help`");
         let output = std::process::Command::new("cargo")
             .args(["run", "--package", PACKAGE_NAME, "--", "--help"])
             .output()
-            .with_context(|| {
-                format!("failed to run `cargo run --package {PACKAGE_NAME} -- --help`")
-            })?;
-        let raw = String::from_utf8_lossy(&output.stdout).into_owned();
-        Ok(raw)
+            .with_context(|| format!("failed to run {command}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let lines: Vec<&str> = stderr.lines().collect();
+            let tail = lines[lines.len().saturating_sub(STDERR_TAIL_LINES)..].join("\n");
+            let hint = if cfg!(windows) {
+                ""
+            } else {
+                "; it builds only on Windows"
+            };
+            bail!(
+                "{command} failed with status {}{hint}:\n{tail}",
+                output.status
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
     fn read_readme(&self) -> Result<String> {
