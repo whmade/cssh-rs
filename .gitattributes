@@ -1,1 +1,3 @@
 * text=auto eol=crlf
+# Bash on Linux and macOS cannot run a hook with CRLF line endings.
+.githooks/* text eol=lf

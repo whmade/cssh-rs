@@ -813,9 +813,11 @@ pub fn prepare_release<S: ReleaseSystem>(system: &S) -> Result<()> {
         "CHANGELOG.md".to_owned(),
         "changelogging.toml".to_owned(),
     ])?;
-    // Skip pre-commit hooks: the project's hook runs `cargo build --workspace
-    // --all-targets`, which would try to replace the running xtask.exe and
-    // fail on Windows with an access-denied error.
+    // Skip the pre-commit hook: the bump changes the version of xtask's
+    // cssh-rs-meta dependency, so the hook's `cargo xtask` steps relink
+    // xtask.exe while this process runs it, and Windows cannot delete a
+    // mapped file:
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
     system.git_commit(&commit_message, true)?;
 
     if let Some(pr_branch_name) = pr_branch.as_deref() {

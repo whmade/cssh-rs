@@ -114,12 +114,13 @@ On a Windows x64 host with the MSVC Rust toolchain they run the plain native com
 cssh-rs uses pre-commit git hooks to enforce code quality. These are automatically installed when you set the hooks path as shown above. The hooks will:
 
 - Format your code with `cargo fmt`
-- Run linting with `cargo lint`
-- Build the project
-- Generate documentation
-- Update README help output if needed
-- Run documentation tests
-- Run all tests
+- Run linting with `cargo xtask cross-lint`
+- Check for forbidden Unicode with `cargo xtask check-typography`
+- Build the workspace, tests included, with `cargo xtask cross-build`; on a Windows x64 host with the MSVC toolchain the build leaves out xtask, which cannot relink itself while it runs
+- Generate documentation with `cargo xtask cross-doc`
+- On a Windows host, update README help output with `cargo xtask update-readme-help` if needed; other hosts skip this step and leave the README check to CI
+
+The hook runs the cross xtasks for `x86_64-pc-windows-msvc` on every host. On Linux and macOS it therefore needs the LLVM tools listed under [Cross-compiling](#cross-compiling), and on first use the xtasks install the Rust target and cargo-xwin, which downloads the MSVC CRT and Windows SDK into your local cache; the xtasks accept their Microsoft license terms for you by setting `XWIN_ACCEPT_LICENSE=1`.
 
 ### For Small Changes
 
