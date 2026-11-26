@@ -137,6 +137,30 @@ pub trait VmSystem: CrossBuildSystem {
     /// `true` if `ssh` logs in and runs `exit 0` within its timeout.
     fn ssh_ready(&self, endpoint: &SshEndpoint) -> bool;
 
+    /// Run `command` in the VM's `cmd.exe` over SSH with inherited stdio.
+    ///
+    /// # Arguments
+    /// * `endpoint` - SSH endpoint of the VM.
+    /// * `command` - Command line for `cmd.exe /c`.
+    ///
+    /// # Returns
+    /// The remote command's exit code, or 255 when SSH itself fails.
+    ///
+    /// # Errors
+    /// Returns an error if `ssh` cannot be started or is killed by a signal.
+    fn ssh(&self, endpoint: &SshEndpoint, command: &str) -> Result<i32>;
+
+    /// Copy a host file into the VM over SSH.
+    ///
+    /// # Arguments
+    /// * `endpoint` - SSH endpoint of the VM.
+    /// * `local` - Host file to copy.
+    /// * `remote` - Destination path in the VM.
+    ///
+    /// # Errors
+    /// Returns an error if `scp` cannot be started or exits non-zero.
+    fn scp(&self, endpoint: &SshEndpoint, local: &Path, remote: &str) -> Result<()>;
+
     /// Block the current thread for `duration`.
     ///
     /// # Arguments
@@ -150,24 +174,31 @@ pub trait VmSystem: CrossBuildSystem {
     fn now(&self) -> Instant;
 }
 
-/// Return the options every `ssh` and `scp` call to the VM shares.
-///
-/// The VM is a throwaway bound to 127.0.0.1 whose host key changes on every
-/// reinstall, so host key checking is off and nothing lands in
-/// `known_hosts`. `IdentitiesOnly` stops an agent from offering other keys
-/// first and hitting the server's authentication limit.
-fn ssh_options(endpoint: &SshEndpoint) -> Vec<String> {
-    let mut options = vec!["-i".to_owned(), endpoint.key.to_string_lossy().into_owned()];
+/// Return an `ssh` or `scp` command with the options every call to the VM
+/// shares.
+fn vm_client(program: &str, endpoint: &SshEndpoint) -> Command {
+    let mut command = Command::new(program);
+    command.arg("-i").arg(&endpoint.key);
     for option in [
+        // Stops an agent from offering other keys first and hitting the
+        // server's authentication limit.
         "IdentitiesOnly=yes",
         "BatchMode=yes",
+        // The VM is a throwaway bound to 127.0.0.1 whose host key changes
+        // on every reinstall.
         "StrictHostKeyChecking=no",
         "UserKnownHostsFile=/dev/null",
         "LogLevel=ERROR",
+        &format!("Port={}", endpoint.port),
     ] {
-        options.extend(["-o".to_owned(), option.to_owned()]);
+        command.args(["-o", option]);
     }
-    options
+    command.stdin(Stdio::null());
+    command
+}
+
+fn vm_login() -> String {
+    format!("{VM_USER}@127.0.0.1")
 }
 
 /// Return true if `docker` with `args` exits successfully, discarding its
@@ -277,16 +308,44 @@ impl VmSystem for RealSystem {
     }
 
     fn ssh_ready(&self, endpoint: &SshEndpoint) -> bool {
-        Command::new("ssh")
-            .args(ssh_options(endpoint))
-            .args(["-o", "ConnectTimeout=5", "-p", &endpoint.port.to_string()])
-            .arg(format!("{VM_USER}@127.0.0.1"))
+        vm_client("ssh", endpoint)
+            .args(["-o", "ConnectTimeout=5"])
+            .arg(vm_login())
             .arg("exit 0")
-            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .is_ok_and(|status| status.success())
+    }
+
+    fn ssh(&self, endpoint: &SshEndpoint, command: &str) -> Result<i32> {
+        let status = vm_client("ssh", endpoint)
+            .arg(vm_login())
+            .arg(command)
+            .status()
+            .context("failed to run `ssh`")?;
+        status
+            .code()
+            .with_context(|| format!("`ssh` was terminated by a signal ({status})"))
+    }
+
+    fn scp(&self, endpoint: &SshEndpoint, local: &Path, remote: &str) -> Result<()> {
+        let status = vm_client("scp", endpoint)
+            .arg("-q")
+            .arg(local)
+            // scp copies over SFTP since OpenSSH 9.0, and SFTP separates
+            // path components with `/`:
+            // https://datatracker.ietf.org/doc/html/draft-ietf-secsh-filexfer-02#section-6.2
+            .arg(format!("{}:{}", vm_login(), remote.replace('\\', "/")))
+            .status()
+            .context("failed to run `scp`")?;
+        if !status.success() {
+            bail!(
+                "`scp {} {remote}` failed with status {status}",
+                local.display()
+            );
+        }
+        Ok(())
     }
 
     fn sleep(&self, duration: Duration) {
