@@ -1,15 +1,16 @@
-//! Cross-build dispatch for cssh-rs.
+//! Cross-build, cross-lint and cross-doc dispatch for cssh-rs.
 //!
-//! Single contributor-facing entry point - `cargo xtask cross-build <target>` -
-//! for building cssh-rs, or any other workspace packages, for any supported
+//! Contributor-facing entry points - `cargo xtask cross-build <target>`,
+//! `cross-lint <target>` and `cross-doc <target>` - for building, linting and
+//! documenting cssh-rs and the other workspace packages for any supported
 //! target from any supported host. The xtask owns the toolchain selection so
 //! the developer experience does not drift over time.
 //!
-//! [`run_cross_build`] orchestrates the workflow. [`prepare_toolchain`]
-//! has the per-target [`strategy`] pick the [`Toolchain`] that reaches the
-//! target from this host and install what it needs; [`run_cargo_for`]
-//! turns a cargo subcommand into that toolchain's command line. All I/O
-//! goes through the [`system`] traits.
+//! [`run_cross_build`], [`run_cross_lint`] and [`run_cross_doc`] orchestrate
+//! the workflows. [`prepare_toolchain`] has the per-target [`strategy`] pick
+//! the [`Toolchain`] that reaches the target from this host and install what
+//! it needs; [`run_cargo_for`] turns a cargo subcommand into that toolchain's
+//! command line. All I/O goes through the [`system`] traits.
 
 pub mod strategy;
 pub mod system;
@@ -212,6 +213,52 @@ fn selects_packages(arg: &str) -> bool {
     matches!(arg, "--package" | "--workspace" | "--all")
         || arg.starts_with("--package=")
         || arg.starts_with("-p")
+}
+
+/// Lint the workspace for the given target, as the `lint` alias in
+/// `.cargo/config.toml` does for the host.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - The user-selected target.
+///
+/// # Returns
+/// `Ok(())` once cargo succeeds.
+///
+/// # Errors
+/// Returns an error if the (host, target) pair is unsupported, a
+/// toolchain install fails, or clippy reports a warning.
+pub fn run_cross_lint<S: WindowsMsvcSystem>(system: &S, target: Target) -> Result<()> {
+    let toolchain = prepare_toolchain(system, target)?;
+    let args = [
+        "--workspace",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings",
+    ]
+    .map(str::to_owned);
+    run_cargo_for(system, toolchain, "clippy", &args, &[])
+}
+
+/// Document the workspace for the given target, as the `docs` alias in
+/// `.cargo/config.toml` does for the host.
+///
+/// # Arguments
+/// * `system` - Injected I/O provider.
+/// * `target` - The user-selected target.
+///
+/// # Returns
+/// `Ok(())` once cargo succeeds.
+///
+/// # Errors
+/// Returns an error if the (host, target) pair is unsupported, a
+/// toolchain install fails, or rustdoc fails.
+pub fn run_cross_doc<S: WindowsMsvcSystem>(system: &S, target: Target) -> Result<()> {
+    let toolchain = prepare_toolchain(system, target)?;
+    let args = ["--bins", "--lib", "--no-deps"].map(str::to_owned);
+    run_cargo_for(system, toolchain, "doc", &args, &[])
 }
 
 /// Ensure the given Rust target triple is installed via rustup.

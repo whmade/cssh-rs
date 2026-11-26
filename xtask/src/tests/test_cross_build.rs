@@ -1,7 +1,8 @@
-//! Tests for the cross-build module.
+//! Tests for the cross-build, cross-lint and cross-doc tasks.
 
 use crate::cross_build::{
-    prepare_toolchain, run_cargo_for, run_cross_build, Target, Toolchain, ToolchainKind,
+    prepare_toolchain, run_cargo_for, run_cross_build, run_cross_doc, run_cross_lint, Target,
+    Toolchain, ToolchainKind,
 };
 use crate::mock_system::{strings, MockSystem};
 
@@ -39,6 +40,21 @@ fn expect_cargo(mock: &mut MockSystem, args: Vec<String>, envs: Vec<(String, Str
 fn expect_rust_target_installed(mock: &mut MockSystem) {
     mock.expect_list_installed_targets()
         .returning(|| Ok(format!("{TRIPLE}\n")));
+}
+
+fn cargo_alias(name: &str) -> Vec<String> {
+    let config: toml_edit::DocumentMut = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../.cargo/config.toml"
+    ))
+    .parse()
+    .expect(".cargo/config.toml should parse");
+    config["alias"][name]
+        .as_str()
+        .unwrap_or_else(|| panic!("alias `{name}` should be a string"))
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
 }
 
 fn expect_cargo_xwin_ready(mock: &mut MockSystem) {
@@ -393,6 +409,85 @@ fn test_cross_build_errors_when_llvm_tooling_missing() {
         err.contains("apt install") || err.contains("dnf install"),
         "error did not include a Linux install hint: {err}"
     );
+}
+
+#[test]
+fn test_cross_lint_runs_the_lint_alias_natively_on_a_windows_x64_host() {
+    // Arrange
+    let mock = mock_expecting_cargo("windows", "x86_64", cargo_alias("lint"), vec![]);
+
+    // Act
+    let result = run_cross_lint(&mock, Target::X86_64PcWindowsMsvc);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn test_cross_lint_puts_the_target_before_the_clippy_arguments_on_linux() {
+    // Arrange
+    let mut mock = mock_expecting_cargo(
+        "linux",
+        "x86_64",
+        strings(&[
+            "xwin",
+            "clippy",
+            "--target",
+            TRIPLE,
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--",
+            "-D",
+            "warnings",
+        ]),
+        xwin_license(),
+    );
+    expect_cargo_xwin_ready(&mut mock);
+
+    // Act
+    let result = run_cross_lint(&mock, Target::X86_64PcWindowsMsvc);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn test_cross_doc_runs_the_docs_alias_natively_on_a_windows_x64_host() {
+    // Arrange
+    let mock = mock_expecting_cargo("windows", "x86_64", cargo_alias("docs"), vec![]);
+
+    // Act
+    let result = run_cross_doc(&mock, Target::X86_64PcWindowsMsvc);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn test_cross_doc_uses_cargo_xwin_on_linux() {
+    // Arrange
+    let mut mock = mock_expecting_cargo(
+        "linux",
+        "x86_64",
+        strings(&[
+            "xwin",
+            "doc",
+            "--target",
+            TRIPLE,
+            "--bins",
+            "--lib",
+            "--no-deps",
+        ]),
+        xwin_license(),
+    );
+    expect_cargo_xwin_ready(&mut mock);
+
+    // Act
+    let result = run_cross_doc(&mock, Target::X86_64PcWindowsMsvc);
+
+    // Assert
+    assert!(result.is_ok(), "{result:?}");
 }
 
 #[test]
