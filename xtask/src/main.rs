@@ -16,6 +16,10 @@ mod social_preview;
 mod typography;
 mod worktree_teardown;
 
+#[cfg(test)]
+#[path = "tests/mock_system.rs"]
+mod mock_system;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -84,9 +88,9 @@ enum Command {
     /// entry works on Windows (PowerShell) and Linux/macOS (bash).
     WorktreeTeardown,
     /// Cross-build a binary of cssh-rs for the given target.
-    /// Detects the host OS and dispatches to the right toolchain
-    /// (native `cargo build` or `cargo xwin build`); installs the
-    /// Rust target and any required helper crate on first use.
+    /// Detects the host and dispatches to the right toolchain (native
+    /// `cargo build`, with `--target`, or `cargo xwin build`); installs
+    /// the Rust target and any required helper crate on first use.
     /// Defaults to a debug build; pass `--release` for an optimized
     /// binary.
     CrossBuild {

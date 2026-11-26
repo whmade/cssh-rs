@@ -1,74 +1,43 @@
-//! Windows-MSVC build orchestration.
-//!
-//! On Windows hosts, dispatches to native `cargo build`. On Linux and
-//! macOS hosts, delegates to [`cargo-xwin`], which fetches the MSVC
-//! CRT and Windows SDK on first use under the Microsoft Software
-//! License Terms; this xtask sets `XWIN_ACCEPT_LICENSE=1` on the
-//! cargo-xwin subprocess only after printing a notice.
-//!
-//! [`cargo-xwin`]: https://github.com/rust-cross/cargo-xwin
+//! Toolchain preparation for the `x86_64-pc-windows-msvc` target.
 
 use anyhow::{bail, Result};
 
-use super::super::ensure_rust_target_installed;
 use super::super::system::windows_msvc::WindowsMsvcSystem;
 use super::super::system::CrossBuildSystem;
+use super::super::{ensure_rust_target_installed, ToolchainKind};
 
 pub const TRIPLE: &str = "x86_64-pc-windows-msvc";
 
-/// Build cssh-rs for `x86_64-pc-windows-msvc`.
+/// Install what the host needs to build `x86_64-pc-windows-msvc`.
 ///
 /// # Arguments
 /// * `system` - Injected I/O provider.
-/// * `release` - When true, build with `--release`; otherwise debug.
+///
+/// # Returns
+/// How cargo reaches the target from this host.
 ///
 /// # Errors
-/// Returns an error if the host is not supported, a prerequisite
-/// install fails, or the build subprocess fails.
-pub fn build<S: WindowsMsvcSystem>(system: &S, release: bool) -> Result<()> {
+/// Returns an error if the host is not supported or a prerequisite
+/// install fails.
+pub fn prepare<S: WindowsMsvcSystem>(system: &S) -> Result<ToolchainKind> {
     let host = system.host_os();
     // Decide up front whether this (host, target) pair is supported
     // so we do not run a network-touching `rustup target add` against
     // a host we cannot finish the build on anyway.
-    let path = match host {
-        "windows" => BuildPath::Native,
-        "linux" | "macos" => BuildPath::CargoXwin,
-        _ => bail!("cross-build {TRIPLE} from {host} host is not supported by this xtask yet"),
+    let kind = match (host, system.host_arch()) {
+        ("windows", "x86_64") if system.host_is_msvc() => ToolchainKind::Host,
+        ("windows", _) => ToolchainKind::HostWithTarget,
+        ("linux" | "macos", _) => ToolchainKind::CargoXwin,
+        _ => bail!("building {TRIPLE} on a {host} host is not supported by this xtask yet"),
     };
-    ensure_rust_target_installed(system, TRIPLE)?;
-    match path {
-        BuildPath::Native => build_native(system, release),
-        BuildPath::CargoXwin => build_via_xwin(system, host, release),
+    if kind != ToolchainKind::Host {
+        ensure_rust_target_installed(system, TRIPLE)?;
     }
-}
-
-enum BuildPath {
-    Native,
-    CargoXwin,
-}
-
-fn build_native<S: WindowsMsvcSystem>(system: &S, release: bool) -> Result<()> {
-    log::info!(
-        "Running `cargo build {}--target {TRIPLE}`",
-        if release { "--release " } else { "" }
-    );
-    system.run_cargo_build(TRIPLE, release)
-}
-
-fn build_via_xwin<S: WindowsMsvcSystem>(system: &S, host: &str, release: bool) -> Result<()> {
-    ensure_llvm_tooling_available(system, host)?;
-    ensure_cargo_xwin_installed(system)?;
-    log::info!(
-        "Invoking cargo-xwin with XWIN_ACCEPT_LICENSE=1 to accept the \
-         Microsoft Software License Terms for the MSVC CRT and Windows SDK. \
-         cargo-xwin downloads them into your local cache on first use; \
-         nothing is checked into this repository."
-    );
-    log::info!(
-        "Running `cargo xwin build {}--target {TRIPLE}`",
-        if release { "--release " } else { "" }
-    );
-    system.run_cargo_xwin_build(TRIPLE, release)
+    if kind == ToolchainKind::CargoXwin {
+        ensure_llvm_tooling_available(system, host)?;
+        ensure_cargo_xwin_installed(system)?;
+    }
+    Ok(kind)
 }
 
 /// Verify that the LLVM tools cargo-xwin and embed-resource need are

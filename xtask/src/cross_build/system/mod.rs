@@ -2,9 +2,9 @@
 //!
 //! [`CrossBuildSystem`] is the trait every cross-build target reuses
 //! (host detection, target install, cargo helpers). Per-target traits
-//! such as [`windows_msvc::WindowsMsvcSystem`] extend it with the
-//! invocations specific to that target so a future macOS or Linux
-//! target can add its own trait + impl without growing this one.
+//! such as [`windows_msvc::WindowsMsvcSystem`] extend it with the I/O
+//! only that target needs, so a future macOS or Linux target can add
+//! its own trait + impl without growing this one.
 
 pub mod windows_msvc;
 
@@ -14,6 +14,18 @@ use anyhow::{bail, Context, Result};
 pub trait CrossBuildSystem {
     /// Return the host OS identifier (matches [`std::env::consts::OS`]).
     fn host_os(&self) -> &'static str;
+
+    /// Return the host CPU architecture.
+    ///
+    /// # Returns
+    /// [`std::env::consts::ARCH`], such as `x86_64` or `aarch64`.
+    fn host_arch(&self) -> &'static str;
+
+    /// Return whether the host's Rust target uses the MSVC environment.
+    ///
+    /// # Returns
+    /// `true` for a `*-msvc` host.
+    fn host_is_msvc(&self) -> bool;
 
     /// Run `rustup target list --installed` and return its stdout.
     ///
@@ -53,15 +65,18 @@ pub trait CrossBuildSystem {
     /// Returns an error if the install fails.
     fn install_cargo_subcommand(&self, crate_name: &str, version: &str) -> Result<()>;
 
-    /// Run `cargo build [--release] --target <triple>`.
+    /// Run `cargo <args>` with inherited stdio.
     ///
     /// # Arguments
-    /// * `triple` - Target triple passed to `--target`.
-    /// * `release` - When true, append `--release`.
+    /// * `args` - Arguments after `cargo`, starting with the subcommand.
+    /// * `envs` - Environment variables set on the cargo process only.
+    ///
+    /// # Returns
+    /// `Ok(())` once cargo exits zero.
     ///
     /// # Errors
-    /// Returns an error if the build fails.
-    fn run_cargo_build(&self, triple: &str, release: bool) -> Result<()>;
+    /// Returns an error if cargo cannot run or exits non-zero.
+    fn run_cargo(&self, args: &[String], envs: &[(String, String)]) -> Result<()>;
 }
 
 /// Production implementation of every cross-build trait.
@@ -71,6 +86,14 @@ pub struct RealSystem;
 impl CrossBuildSystem for RealSystem {
     fn host_os(&self) -> &'static str {
         std::env::consts::OS
+    }
+
+    fn host_arch(&self) -> &'static str {
+        std::env::consts::ARCH
+    }
+
+    fn host_is_msvc(&self) -> bool {
+        cfg!(target_env = "msvc")
     }
 
     fn list_installed_targets(&self) -> Result<String> {
@@ -144,16 +167,12 @@ impl CrossBuildSystem for RealSystem {
         Ok(())
     }
 
-    fn run_cargo_build(&self, triple: &str, release: bool) -> Result<()> {
-        let mut args = vec!["build"];
-        if release {
-            args.push("--release");
-        }
-        args.extend(["--target", triple]);
+    fn run_cargo(&self, args: &[String], envs: &[(String, String)]) -> Result<()> {
         let status = std::process::Command::new("cargo")
-            .args(&args)
+            .args(args)
+            .envs(envs.iter().map(|(key, value)| (key, value)))
             .status()
-            .context("failed to run `cargo build`")?;
+            .context("failed to run `cargo`")?;
         if !status.success() {
             bail!("`cargo {}` failed with status {status}", args.join(" "));
         }
