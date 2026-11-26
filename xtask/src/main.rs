@@ -14,6 +14,7 @@ mod record_demo;
 mod release;
 mod social_preview;
 mod typography;
+mod vm;
 mod worktree_teardown;
 
 #[cfg(test)]
@@ -125,10 +126,36 @@ enum Command {
         #[arg(value_enum)]
         target: cross_build::Target,
     },
+    /// Start or stop the Windows test VM that xtasks reach over SSH on a
+    /// Linux host.
+    Vm {
+        #[clap(subcommand)]
+        action: VmAction,
+    },
     /// Record the cssh-rs demo GIF into `target/demo/cssh-rs.gif` by
     /// building the binary, driving real console windows and capturing
     /// the desktop. Windows only.
     RecordDemo,
+}
+
+/// Actions on the test VM.
+#[derive(Subcommand)]
+enum VmAction {
+    /// Start the test VM for the given target and wait until it accepts
+    /// SSH. The first start installs Windows, which takes 20 to 60
+    /// minutes; later starts reuse the installed disk.
+    Start {
+        /// Target whose tests the VM runs.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+    },
+    /// Stop the test VM for the given target. Its disk persists for the
+    /// next start.
+    Stop {
+        /// Target whose tests the VM runs.
+        #[arg(value_enum)]
+        target: cross_build::Target,
+    },
 }
 
 fn main() -> ExitCode {
@@ -194,6 +221,12 @@ fn run() -> Result<()> {
         Command::CrossDoc { target } => {
             cross_build::run_cross_doc(&cross_build::RealSystem, target)?;
         }
+        Command::Vm { action } => match action {
+            VmAction::Start { target } => {
+                vm::start(&cross_build::RealSystem, target)?;
+            }
+            VmAction::Stop { target } => vm::stop(&cross_build::RealSystem, target)?,
+        },
         Command::RecordDemo => {
             record_demo::record_demo(&record_demo::RealSystem)?;
         }
