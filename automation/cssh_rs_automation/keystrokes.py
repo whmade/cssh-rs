@@ -175,8 +175,9 @@ class Keystrokes:
                 (right Alt), ``altleft``, ``ctrlleft``, ``ctrlright``,
                 ``shiftleft``, ``left`` (the arrow key), ``f1``, ``f5``, a
                 letter, a digit, ``-`` or ``]`` (named by their US
-                characters), or ``nonusbackslash``, the extra key left of Z
-                on 102-key keyboards.
+                characters), ``nonusbackslash`` (the extra key left of Z on
+                102-key keyboards), or ``break`` (the key Ctrl+Pause sends;
+                pass a Ctrl key before it).
             repeat: Key-down events the last key sends before its release, as
                 when a held key auto-repeats.
         """
@@ -251,6 +252,7 @@ _SCAN_CODES: dict[str, tuple[int, bool]] = {
     "-": (0x0C, False),
     "]": (0x1B, False),
     "nonusbackslash": (0x56, False),
+    "break": (0x46, True),
     **{key: (code, False) for code, key in enumerate("1234567890", 0x02)},
     **{key: (code, False) for code, key in enumerate("qwertyuiop", 0x10)},
     **{key: (code, False) for code, key in enumerate("asdfghjkl", 0x1E)},
