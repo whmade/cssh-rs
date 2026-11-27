@@ -8,7 +8,8 @@ use windows::Win32::System::Console::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_A, VK_C, VK_CANCEL, VK_UP};
 
-use crate::daemon::input::key_event_to_message;
+use crate::client::input_bytes::KeystrokeDecoder;
+use crate::daemon::input::keystroke_to_message;
 
 fn key(unicode_char: u16, virtual_key: VIRTUAL_KEY, control_key_state: u32) -> KEY_EVENT_RECORD {
     return KEY_EVENT_RECORD {
@@ -34,7 +35,7 @@ fn input(code: KeyCode, modifiers: Modifiers, text: Option<&str>) -> DaemonToCli
 }
 
 #[test]
-fn test_key_event_to_message() {
+fn test_keystroke_to_message() {
     let cases = [
         (
             key(u16::from(b'a'), VK_A, 0),
@@ -63,6 +64,9 @@ fn test_key_event_to_message() {
         ),
     ];
     for (key, expected) in cases {
-        assert_eq!(key_event_to_message(&key), expected);
+        let keystroke = KeystrokeDecoder::default()
+            .decode(&key)
+            .expect("a key-down record holds a keystroke");
+        assert_eq!(keystroke_to_message(&keystroke), expected);
     }
 }

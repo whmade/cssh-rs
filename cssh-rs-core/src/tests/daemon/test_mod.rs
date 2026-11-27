@@ -19,8 +19,8 @@ mod daemon_test {
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         VIRTUAL_KEY, VK_7, VK_A, VK_BACK, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_ESCAPE, VK_H,
-        VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_OEM_4, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T, VK_UP,
-        VK_X,
+        VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_OEM_4, VK_PACKET, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T,
+        VK_UP, VK_X,
     };
 
     use cssh_rs_platform::ControlChannelClient;
@@ -32,7 +32,17 @@ mod daemon_test {
     use cssh_rs_protocol::ClientState;
 
     use crate::{
-        client::{client_handshake, read_message},
+        client::{
+            client_handshake,
+            input_bytes::{
+                input_event_to_bytes,
+                tests::{
+                    key_event_record, pasted_alt_code, released, GRINNING_FACE,
+                    GRINNING_FACE_HIGH_SURROGATE, GRINNING_FACE_LOW_SURROGATE,
+                },
+            },
+            read_message,
+        },
         daemon::{
             build_client_args, classify_control_mode_key, classify_enable_disable_submenu_key,
             encode_broadcast, expand_hosts,
@@ -1734,24 +1744,20 @@ mod daemon_test {
         );
     }
 
+    fn input_record(key: KEY_EVENT_RECORD) -> INPUT_RECORD_0 {
+        return INPUT_RECORD_0 { KeyEvent: key };
+    }
+
     fn key_down_record(
         virtual_key: VIRTUAL_KEY,
         character: char,
         control_key_state: u32,
         repeat_count: u16,
     ) -> INPUT_RECORD_0 {
-        return INPUT_RECORD_0 {
-            KeyEvent: KEY_EVENT_RECORD {
-                bKeyDown: true.into(),
-                wRepeatCount: repeat_count,
-                wVirtualKeyCode: virtual_key.0,
-                wVirtualScanCode: 0,
-                uChar: KEY_EVENT_RECORD_0 {
-                    UnicodeChar: character as u16,
-                },
-                dwControlKeyState: control_key_state,
-            },
-        };
+        return input_record(KEY_EVENT_RECORD {
+            dwControlKeyState: control_key_state,
+            ..key_event_record(character as u16, virtual_key, repeat_count)
+        });
     }
 
     /// Feed `input_record` to `daemon` and return the keystroke frames it broadcast, decoded.
@@ -1791,17 +1797,44 @@ mod daemon_test {
     async fn handle_input_record_outside_control_mode(
         input_record: INPUT_RECORD_0,
     ) -> (ControlModeState, Vec<DaemonToClient>) {
+        return handle_input_records_outside_control_mode(&[input_record]).await;
+    }
+
+    /// Feed `input_records` in order to one daemon outside control mode and
+    /// return its control-mode state afterwards and the keystrokes it broadcast.
+    async fn handle_input_records_outside_control_mode(
+        input_records: &[INPUT_RECORD_0],
+    ) -> (ControlModeState, Vec<DaemonToClient>) {
         let config = DaemonConfig::default();
         let clusters: Vec<Cluster> = Vec::new();
         let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
-        let broadcasts = handle_input_record_broadcasts(
-            &mut daemon,
-            &mock_no_calls(),
-            &mut Arc::new(Mutex::new(Clients::new())),
-            input_record,
-        )
-        .await;
+        let mut clients = Arc::new(Mutex::new(Clients::new()));
+        let mut broadcasts = Vec::new();
+        for input_record in input_records {
+            broadcasts.extend(
+                handle_input_record_broadcasts(
+                    &mut daemon,
+                    &mock_no_calls(),
+                    &mut clients,
+                    *input_record,
+                )
+                .await,
+            );
+        }
         return (daemon.control_mode_state, broadcasts);
+    }
+
+    /// Return the bytes a client writes to its PTY for `messages`.
+    fn client_bytes(messages: &[DaemonToClient]) -> Vec<u8> {
+        return messages
+            .iter()
+            .flat_map(|message| {
+                let DaemonToClient::Input { event } = message else {
+                    panic!("expected only input, got {message:?}");
+                };
+                return input_event_to_bytes(event);
+            })
+            .collect();
     }
 
     #[tokio::test]
@@ -1955,18 +1988,10 @@ mod daemon_test {
 
     #[tokio::test]
     async fn test_handle_input_record_keeps_the_ctrl_alt_of_a_lone_surrogate() {
-        let lone_surrogate = INPUT_RECORD_0 {
-            KeyEvent: KEY_EVENT_RECORD {
-                bKeyDown: true.into(),
-                wRepeatCount: 1,
-                wVirtualKeyCode: VK_E.0,
-                wVirtualScanCode: 0,
-                uChar: KEY_EVENT_RECORD_0 {
-                    UnicodeChar: 0xd83d,
-                },
-                dwControlKeyState: RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED,
-            },
-        };
+        let lone_surrogate = input_record(KEY_EVENT_RECORD {
+            dwControlKeyState: RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED,
+            ..key_event_record(GRINNING_FACE_LOW_SURROGATE, VK_E, 1)
+        });
 
         let (control_mode_state, broadcasts) =
             handle_input_record_outside_control_mode(lone_surrogate).await;
@@ -1982,6 +2007,108 @@ mod daemon_test {
                 },
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_nothing_for_a_key_release() {
+        let key_release = released(key_event_record(u16::from(b'a'), VK_A, 1));
+
+        let (control_mode_state, broadcasts) =
+            handle_input_record_outside_control_mode(input_record(key_release)).await;
+
+        assert_eq!(control_mode_state, ControlModeState::Inactive);
+        assert_eq!(broadcasts, Vec::new());
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_every_repeat_of_a_character_split_across_key_downs(
+    ) {
+        let high = key_event_record(GRINNING_FACE_HIGH_SURROGATE, VK_PACKET, 1);
+        let low = key_event_record(GRINNING_FACE_LOW_SURROGATE, VK_PACKET, 2);
+        let records = [high, released(high), low].map(input_record);
+
+        let (control_mode_state, broadcasts) =
+            handle_input_records_outside_control_mode(&records).await;
+
+        assert_eq!(control_mode_state, ControlModeState::Inactive);
+        assert_eq!(
+            broadcasts,
+            vec![keystroke(GRINNING_FACE), keystroke(GRINNING_FACE)]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_drops_a_high_surrogate_when_control_mode_consumes_the_next_key(
+    ) {
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let mut daemon = Daemon::for_test(&config, &clusters, ControlModeState::Active);
+        let mut clients = Arc::new(Mutex::new(Clients::new()));
+        let records = [
+            key_event_record(GRINNING_FACE_HIGH_SURROGATE, VK_PACKET, 1),
+            key_event_record(0x1b, VK_ESCAPE, 1),
+            key_event_record(GRINNING_FACE_LOW_SURROGATE, VK_PACKET, 1),
+        ];
+
+        let mut broadcasts = Vec::new();
+        for record in records {
+            broadcasts.extend(
+                handle_input_record_broadcasts(
+                    &mut daemon,
+                    &mock_with_clear_screen(),
+                    &mut clients,
+                    input_record(record),
+                )
+                .await,
+            );
+        }
+
+        assert_eq!(daemon.control_mode_state, ControlModeState::Inactive);
+        assert_eq!(
+            broadcasts,
+            vec![DaemonToClient::Input {
+                event: InputEvent::Key {
+                    code: KeyCode::Unknown,
+                    modifiers: Modifiers::NONE,
+                    text: None,
+                },
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_broadcasts_a_character_split_across_alt_codes() {
+        let records: Vec<INPUT_RECORD_0> =
+            [GRINNING_FACE_HIGH_SURROGATE, GRINNING_FACE_LOW_SURROGATE]
+                .map(pasted_alt_code)
+                .concat()
+                .into_iter()
+                .map(input_record)
+                .collect();
+
+        let (control_mode_state, broadcasts) =
+            handle_input_records_outside_control_mode(&records).await;
+
+        assert_eq!(control_mode_state, ControlModeState::Inactive);
+        assert_eq!(client_bytes(&broadcasts), GRINNING_FACE.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn test_handle_input_record_drops_the_ctrl_alt_that_selected_a_character_split_across_key_downs(
+    ) {
+        let altgr = RIGHT_ALT_PRESSED | LEFT_CTRL_PRESSED;
+        let records = [GRINNING_FACE_HIGH_SURROGATE, GRINNING_FACE_LOW_SURROGATE].map(|unit| {
+            return input_record(KEY_EVENT_RECORD {
+                dwControlKeyState: altgr,
+                ..key_event_record(unit, VK_E, 1)
+            });
+        });
+
+        let (control_mode_state, broadcasts) =
+            handle_input_records_outside_control_mode(&records).await;
+
+        assert_eq!(control_mode_state, ControlModeState::Inactive);
+        assert_eq!(broadcasts, vec![keystroke(GRINNING_FACE)]);
     }
 
     #[tokio::test]

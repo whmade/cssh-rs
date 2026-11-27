@@ -12,7 +12,9 @@ use std::{
 };
 use std::{thread, time};
 
-use crate::client::input_bytes::{keystroke_count, ALT_PRESSED, CTRL_PRESSED};
+use crate::client::input_bytes::{
+    keystroke_count, Keystroke, KeystrokeDecoder, ALT_PRESSED, CTRL_PRESSED,
+};
 use crate::get_console_window_handle;
 use crate::utils::config::{Cluster, DaemonConfig, EdgeBehavior};
 use crate::utils::windows::{clear_screen, set_console_color, WindowsApi};
@@ -506,6 +508,8 @@ struct Daemon<'a> {
     /// If debug mode is enabled on the daemon it will also be enabled on all
     /// clients.
     debug: bool,
+    /// Decodes the keystrokes of the daemon console's key-event records.
+    keystroke_decoder: KeystrokeDecoder,
 }
 
 /// Compute the next submenu selection given a grid step.
@@ -605,6 +609,7 @@ impl<'a> Daemon<'a> {
             clusters,
             control_mode_state,
             debug: false,
+            keystroke_decoder: KeystrokeDecoder::default(),
         };
     }
 
@@ -822,11 +827,14 @@ impl<'a> Daemon<'a> {
     ) {
         // SAFETY: `read_keyboard_input` only returns key-event records.
         let key_event = unsafe { input_record.KeyEvent };
+        // Decode before control mode, so a key it consumes still drops a pending high surrogate.
+        let keystroke = self.keystroke_decoder.decode(&key_event);
         for _ in 0..keystroke_count(&key_event) {
             self.handle_keystroke(
                 windows_api,
                 sender,
                 input_record,
+                keystroke.as_ref(),
                 clients,
                 workspace_area,
                 servers,
@@ -836,12 +844,13 @@ impl<'a> Daemon<'a> {
         return;
     }
 
-    /// Broadcast one keystroke of `input_record` to the clients unless control mode consumes it.
+    /// Broadcast one `keystroke` of `input_record` to the clients unless control mode consumes it.
     async fn handle_keystroke<W: WindowsApi + Clone + 'static>(
         &mut self,
         windows_api: &W,
         sender: &Sender<ClientBroadcast>,
         input_record: INPUT_RECORD_0,
+        keystroke: Option<&Keystroke>,
         clients: &mut Arc<Mutex<Clients>>,
         workspace_area: &workspace::WorkspaceArea,
         servers: &mut Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -994,11 +1003,10 @@ impl<'a> Daemon<'a> {
             }
             return;
         }
-        let key_event = unsafe { input_record.KeyEvent };
-        if !key_event.bKeyDown.as_bool() {
+        let Some(keystroke) = keystroke else {
             return;
-        }
-        let frame = encode_broadcast(&input::key_event_to_message(&key_event));
+        };
+        let frame = encode_broadcast(&input::keystroke_to_message(keystroke));
         match sender.send(ClientBroadcast::Keystroke(frame)) {
             Ok(_) => {}
             Err(_) => {
@@ -2189,6 +2197,7 @@ pub async fn main<W: WindowsApi + Clone + 'static>(
         clusters,
         control_mode_state: ControlModeState::Inactive,
         debug,
+        keystroke_decoder: KeystrokeDecoder::default(),
     };
     daemon.launch(windows_api).await;
     debug!("Actually exiting");
