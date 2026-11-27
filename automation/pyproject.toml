@@ -21,8 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.17.5",
-    "pyrefly==1.4.1",
+    "ruff==0.17.6",
+    "pyrefly==1.5.0",
     "pytest==9.2.0",
 ]
 
