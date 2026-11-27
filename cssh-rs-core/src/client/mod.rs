@@ -31,7 +31,7 @@ use cssh_rs_protocol::v1::codec::{decode_frames, encode_frame};
 use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
 use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
 use cssh_rs_protocol::v1::message::DaemonToClient;
-use cssh_rs_protocol::v1::version::{ProtocolVersion, Role};
+use cssh_rs_protocol::v1::version::{Role, PROTOCOL_VERSION};
 use cssh_rs_protocol::ClientState;
 
 use crate::client::console_mode::ConsoleModeGuard;
@@ -262,7 +262,7 @@ async fn connect_with_retry(client: &mut WindowsControlChannelClient, endpoint: 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn client_handshake(client: &mut WindowsControlChannelClient) -> (u32, Vec<u8>) {
     let hello = Hello {
-        protocol_version: ProtocolVersion::new(1, 0),
+        protocol_version: PROTOCOL_VERSION,
         role: Role::Client,
         pid: std::process::id(),
         capabilities: Vec::new(),
