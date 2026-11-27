@@ -26,7 +26,7 @@ use windows::Win32::System::Console::{
 
 use cssh_rs_meta::PACKAGE_NAME;
 use cssh_rs_platform::ControlChannelClient;
-use cssh_rs_protocol::v1::capability::negotiate_max_frame_len;
+use cssh_rs_protocol::v1::capability::{check_version, negotiate_max_frame_len, VersionMismatch};
 use cssh_rs_protocol::v1::codec::{decode_frames, encode_frame};
 use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
 use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
@@ -249,6 +249,45 @@ async fn connect_with_retry(client: &mut WindowsControlChannelClient, endpoint: 
     return false;
 }
 
+/// Reason the client rejects the daemon's side of the handshake.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HandshakeError {
+    /// The daemon speaks a different protocol major version.
+    VersionMismatch(VersionMismatch),
+    /// The peer's `Hello` names a role other than [`Role::Daemon`].
+    UnexpectedRole(Role),
+    /// The channel closed or failed, or carried an oversized or undecodable
+    /// frame, before the daemon's `Hello` arrived.
+    NoHello,
+}
+
+impl std::fmt::Display for HandshakeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HandshakeError::VersionMismatch(mismatch) => return write!(f, "{mismatch}"),
+            HandshakeError::UnexpectedRole(role) => {
+                return write!(f, "the peer's Hello has role {role:?}, not Daemon");
+            }
+            HandshakeError::NoHello => return write!(f, "the daemon sent no decodable Hello"),
+        }
+    }
+}
+
+impl std::error::Error for HandshakeError {}
+
+/// Validate the daemon's `Hello` and negotiate the maximum frame length.
+fn accept_daemon_hello(hello: &Hello) -> Result<u32, HandshakeError> {
+    check_version(PROTOCOL_VERSION, hello.protocol_version)
+        .map_err(HandshakeError::VersionMismatch)?;
+    if hello.role != Role::Daemon {
+        return Err(HandshakeError::UnexpectedRole(hello.role));
+    }
+    return Ok(negotiate_max_frame_len(
+        DEFAULT_MAX_FRAME_LEN,
+        hello.max_frame_len,
+    ));
+}
+
 /// Exchange `Hello`s and receive the `Welcome`.
 ///
 /// # Arguments
@@ -259,8 +298,14 @@ async fn connect_with_retry(client: &mut WindowsControlChannelClient, endpoint: 
 ///
 /// The negotiated maximum frame length and the bytes received past the
 /// `Welcome`.
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) async fn client_handshake(client: &mut WindowsControlChannelClient) -> (u32, Vec<u8>) {
+///
+/// # Errors
+///
+/// Returns a [`HandshakeError`] when the daemon's `Hello` is missing or
+/// rejected.
+pub(crate) async fn client_handshake(
+    client: &mut impl ControlChannelClient,
+) -> Result<(u32, Vec<u8>), HandshakeError> {
     let hello = Hello {
         protocol_version: PROTOCOL_VERSION,
         role: Role::Client,
@@ -275,15 +320,12 @@ pub(crate) async fn client_handshake(client: &mut WindowsControlChannelClient) -
     }
 
     let mut pending = Vec::new();
-    let max_frame_len =
-        match read_message::<Hello>(client, &mut pending, DEFAULT_MAX_FRAME_LEN).await {
-            Some(daemon_hello) => {
-                negotiate_max_frame_len(DEFAULT_MAX_FRAME_LEN, daemon_hello.max_frame_len)
-            }
-            None => DEFAULT_MAX_FRAME_LEN,
-        };
+    let daemon_hello = read_message::<Hello>(client, &mut pending, DEFAULT_MAX_FRAME_LEN)
+        .await
+        .ok_or(HandshakeError::NoHello)?;
+    let max_frame_len = accept_daemon_hello(&daemon_hello)?;
     let _ = read_message::<Welcome>(client, &mut pending, max_frame_len).await;
-    return (max_frame_len, pending);
+    return Ok((max_frame_len, pending));
 }
 
 /// Receive until `pending` holds a complete frame, then split it off.
@@ -298,9 +340,8 @@ pub(crate) async fn client_handshake(client: &mut WindowsControlChannelClient) -
 ///
 /// The frame including its length prefix, or `None` on disconnect, error, or
 /// an oversized frame.
-#[cfg_attr(coverage_nightly, coverage(off))]
 async fn read_frame(
-    client: &mut WindowsControlChannelClient,
+    client: &mut impl ControlChannelClient,
     pending: &mut Vec<u8>,
     max_frame_len: u32,
 ) -> Option<Vec<u8>> {
@@ -329,9 +370,8 @@ async fn read_frame(
 }
 
 /// Read one frame and decode it as `T`.
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn read_message<T: serde::de::DeserializeOwned>(
-    client: &mut WindowsControlChannelClient,
+    client: &mut impl ControlChannelClient,
     pending: &mut Vec<u8>,
     max_frame_len: u32,
 ) -> Option<T> {
@@ -663,7 +703,13 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
         error!("Failed to connect to the daemon control channel");
         return;
     }
-    let (max_frame_len, pending) = client_handshake(&mut control_channel).await;
+    let (max_frame_len, pending) = match client_handshake(&mut control_channel).await {
+        Ok(negotiated) => negotiated,
+        Err(err) => {
+            error!("Rejected the daemon handshake: {}", err);
+            return;
+        }
+    };
 
     let ssh_arguments = build_ssh_arguments(&resolved_username, host, port, config);
     let pty_size = console_viewport_size(api).unwrap_or_default();

@@ -1,16 +1,26 @@
 //! Unit tests for the client module.
 
+use std::collections::VecDeque;
 use std::env;
+use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use crate::client::{
-    build_ssh_arguments, get_effective_color, get_flash_color, paint_console_color,
-    resolve_username, run_visuals_loop, ConsolePaint,
+    accept_daemon_hello, build_ssh_arguments, client_handshake, get_effective_color,
+    get_flash_color, paint_console_color, resolve_username, run_visuals_loop, ConsolePaint,
+    HandshakeError,
 };
 use crate::utils::config::ClientConfig;
 use crate::utils::windows::{ConsolePaletteSnapshot, MockWindowsApi};
+use cssh_rs_platform::ControlChannelClient;
+use cssh_rs_protocol::v1::capability::VersionMismatch;
+use cssh_rs_protocol::v1::codec::encode_frame;
+use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
+use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
+use cssh_rs_protocol::v1::message::DaemonToClient;
+use cssh_rs_protocol::v1::version::{ProtocolVersion, Role, PROTOCOL_VERSION};
 use cssh_rs_protocol::ClientState;
 use tokio::sync::watch;
 use windows::Win32::Foundation::COLORREF;
@@ -640,4 +650,195 @@ async fn test_visuals_disable_enable_restores_palette() {
     };
 
     tokio::join!(visuals, driver);
+}
+
+fn peer_hello(protocol_version: ProtocolVersion, role: Role, max_frame_len: u32) -> Hello {
+    return Hello {
+        protocol_version,
+        role,
+        pid: 4242,
+        capabilities: Vec::new(),
+        max_frame_len,
+    };
+}
+
+fn frame_of<T: serde::Serialize>(message: &T) -> Vec<u8> {
+    return encode_frame(message, DEFAULT_MAX_FRAME_LEN).expect("encode");
+}
+
+fn welcome() -> Welcome {
+    return Welcome {
+        client_id: 1,
+        server_capabilities: Vec::new(),
+    };
+}
+
+#[test]
+fn test_accept_daemon_hello_negotiates_the_smaller_maximum_frame_length() {
+    let hello = peer_hello(PROTOCOL_VERSION, Role::Daemon, 256);
+
+    let result = accept_daemon_hello(&hello);
+
+    assert_eq!(result, Ok(256));
+}
+
+#[test]
+fn test_accept_daemon_hello_tolerates_a_different_minor_version() {
+    let next_minor = ProtocolVersion::new(PROTOCOL_VERSION.major, PROTOCOL_VERSION.minor + 1);
+    let hello = peer_hello(next_minor, Role::Daemon, DEFAULT_MAX_FRAME_LEN);
+
+    let result = accept_daemon_hello(&hello);
+
+    assert_eq!(result, Ok(DEFAULT_MAX_FRAME_LEN));
+}
+
+#[test]
+fn test_accept_daemon_hello_rejects_a_different_major_version() {
+    let next_major = ProtocolVersion::new(PROTOCOL_VERSION.major + 1, 0);
+    let hello = peer_hello(next_major, Role::Daemon, DEFAULT_MAX_FRAME_LEN);
+
+    let result = accept_daemon_hello(&hello);
+
+    assert_eq!(
+        result,
+        Err(HandshakeError::VersionMismatch(VersionMismatch {
+            local: PROTOCOL_VERSION,
+            remote: next_major,
+        }))
+    );
+}
+
+#[test]
+fn test_accept_daemon_hello_rejects_a_peer_that_is_not_the_daemon() {
+    for role in [Role::Client, Role::Unknown] {
+        let hello = peer_hello(PROTOCOL_VERSION, role, DEFAULT_MAX_FRAME_LEN);
+
+        let result = accept_daemon_hello(&hello);
+
+        assert_eq!(result, Err(HandshakeError::UnexpectedRole(role)));
+    }
+}
+
+#[test]
+fn test_handshake_error_display_names_the_rejection_reason() {
+    let cases = [
+        (
+            HandshakeError::VersionMismatch(VersionMismatch {
+                local: ProtocolVersion::new(1, 0),
+                remote: ProtocolVersion::new(2, 0),
+            }),
+            "incompatible protocol major version: local 1.0, remote 2.0",
+        ),
+        (
+            HandshakeError::UnexpectedRole(Role::Client),
+            "the peer's Hello has role Client, not Daemon",
+        ),
+        (
+            HandshakeError::NoHello,
+            "the daemon sent no decodable Hello",
+        ),
+    ];
+
+    for (error, expected) in cases {
+        let message = error.to_string();
+
+        assert_eq!(message, expected);
+    }
+}
+
+/// Daemon stand-in that ignores sends and answers each `recv` with the next
+/// scripted chunk, then end-of-file.
+struct ScriptedDaemon(VecDeque<io::Result<Vec<u8>>>);
+
+impl ControlChannelClient for ScriptedDaemon {
+    type Error = io::Error;
+
+    async fn connect(&mut self, _endpoint: &OsStr) -> io::Result<()> {
+        return Ok(());
+    }
+
+    async fn send(&mut self, _bytes: &[u8]) -> io::Result<()> {
+        return Ok(());
+    }
+
+    async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let Some(chunk) = self.0.pop_front() else {
+            return Ok(0);
+        };
+        let chunk = chunk?;
+        buf[..chunk.len()].copy_from_slice(&chunk);
+        return Ok(chunk.len());
+    }
+}
+
+#[tokio::test]
+async fn test_client_handshake_returns_the_bytes_received_past_the_welcome() {
+    let keep_alive = frame_of(&DaemonToClient::KeepAlive);
+    let mut stream = frame_of(&peer_hello(PROTOCOL_VERSION, Role::Daemon, 256));
+    stream.extend(frame_of(&welcome()));
+    stream.extend(&keep_alive);
+    let mut daemon = ScriptedDaemon(VecDeque::from([Ok(stream)]));
+
+    let result = client_handshake(&mut daemon).await;
+
+    assert_eq!(result, Ok((256, keep_alive)));
+}
+
+#[tokio::test]
+async fn test_client_handshake_reassembles_a_hello_split_across_reads() {
+    let hello = frame_of(&peer_hello(
+        PROTOCOL_VERSION,
+        Role::Daemon,
+        DEFAULT_MAX_FRAME_LEN,
+    ));
+    let (partial_prefix, rest) = hello.split_at(2);
+    let (prefix_end_and_partial_body, body_end) = rest.split_at(4);
+    let mut daemon = ScriptedDaemon(VecDeque::from([
+        Ok(partial_prefix.to_vec()),
+        Ok(prefix_end_and_partial_body.to_vec()),
+        Ok(body_end.to_vec()),
+        Ok(frame_of(&welcome())),
+    ]));
+
+    let result = client_handshake(&mut daemon).await;
+
+    assert_eq!(result, Ok((DEFAULT_MAX_FRAME_LEN, Vec::new())));
+}
+
+#[tokio::test]
+async fn test_client_handshake_rejects_a_hello_from_another_client() {
+    let impostor_hello = peer_hello(PROTOCOL_VERSION, Role::Client, DEFAULT_MAX_FRAME_LEN);
+    let mut impostor = ScriptedDaemon(VecDeque::from([Ok(frame_of(&impostor_hello))]));
+
+    let result = client_handshake(&mut impostor).await;
+
+    assert_eq!(result, Err(HandshakeError::UnexpectedRole(Role::Client)));
+}
+
+#[tokio::test]
+async fn test_client_handshake_rejects_a_missing_or_unreadable_hello() {
+    let oversized_hello = Hello {
+        capabilities: vec!["x".repeat(DEFAULT_MAX_FRAME_LEN as usize)],
+        ..peer_hello(PROTOCOL_VERSION, Role::Daemon, DEFAULT_MAX_FRAME_LEN)
+    };
+    let oversized_frame = encode_frame(&oversized_hello, u32::MAX).expect("encode");
+    // One-byte body: a lone CBOR "break" (0xff) is not a data item.
+    let undecodable_frame = vec![0, 0, 0, 1, 0xff];
+    let scripts: [(&str, Vec<io::Result<Vec<u8>>>); 4] = [
+        ("silent daemon", Vec::new()),
+        (
+            "receive error",
+            vec![Err(io::Error::from(io::ErrorKind::BrokenPipe))],
+        ),
+        ("oversized frame", vec![Ok(oversized_frame)]),
+        ("undecodable frame", vec![Ok(undecodable_frame)]),
+    ];
+
+    for (case, script) in scripts {
+        let mut daemon = ScriptedDaemon(script.into());
+
+        let result = client_handshake(&mut daemon).await;
+
+        assert_eq!(result, Err(HandshakeError::NoHello), "{case}");
+    }
 }
