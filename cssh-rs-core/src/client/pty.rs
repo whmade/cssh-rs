@@ -21,7 +21,6 @@ pub(crate) struct ClientPty {
     pub(crate) writer: SharedWriter,
     pub(crate) reader: Box<dyn Read + Send>,
     pub(crate) child: Box<dyn Child + Send + Sync>,
-    pub(crate) child_pid: u32,
     /// Keeps the pseudoconsole open.
     pub(crate) master: Box<dyn MasterPty + Send>,
 }
@@ -53,10 +52,6 @@ pub(crate) fn spawn_client_pty(
         .slave
         .spawn_command(command)
         .map_err(|err| return io::Error::other(err.to_string()))?;
-    // Process group 0 would signal every process on this console.
-    let child_pid = child
-        .process_id()
-        .ok_or_else(|| return io::Error::other("spawned PTY child has no process id"))?;
     // Otherwise reading the master never sees EOF once the child exits.
     drop(pair.slave);
 
@@ -73,7 +68,6 @@ pub(crate) fn spawn_client_pty(
         writer: Arc::new(Mutex::new(writer)),
         reader,
         child,
-        child_pid,
         master: pair.master,
     });
 }

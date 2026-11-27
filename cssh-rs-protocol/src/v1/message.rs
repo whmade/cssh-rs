@@ -37,7 +37,7 @@ pub enum DaemonToClient {
         /// Human-readable reason for the shutdown.
         reason: String,
     },
-    /// Out-of-band process-group signal (Ctrl+Break, Ctrl+C).
+    /// Control signal for the client to raise in its child (Ctrl+Break, Ctrl+C).
     Signal(SignalKind),
     /// Idle liveness probe.
     KeepAlive,

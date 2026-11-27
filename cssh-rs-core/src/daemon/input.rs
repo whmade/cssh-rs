@@ -4,7 +4,6 @@ use cssh_rs_protocol::v1::input::{InputEvent, SignalKind};
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
 use cssh_rs_protocol::v1::message::DaemonToClient;
 use windows::Win32::System::Console::SHIFT_PRESSED;
-use windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL;
 
 use crate::client::input_bytes::{Keystroke, ALT_PRESSED, CTRL_PRESSED};
 
@@ -14,10 +13,10 @@ use crate::client::input_bytes::{Keystroke, ALT_PRESSED, CTRL_PRESSED};
 /// * `keystroke` - The keystroke.
 ///
 /// # Returns
-/// A `Break` signal for Ctrl+Break, which has no input byte, otherwise the
-/// key, its modifiers read from [`Keystroke::control_key_state_without_altgr`].
+/// A `Break` signal for Ctrl+Break, otherwise the key, its modifiers read
+/// from [`Keystroke::control_key_state_without_altgr`].
 pub fn keystroke_to_message(keystroke: &Keystroke) -> DaemonToClient {
-    if keystroke.virtual_key == VK_CANCEL {
+    if keystroke.is_ctrl_break() {
         return DaemonToClient::Signal(SignalKind::Break);
     }
     return DaemonToClient::Input {

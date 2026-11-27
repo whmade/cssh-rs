@@ -23,8 +23,8 @@ use cssh_rs_meta::PACKAGE_NAME;
 use crate::{
     current_exe_path, spawn_console_process,
     utils::windows::{
-        arrange_console, control_endpoint, get_console_input_buffer, read_keyboard_input,
-        set_console_border_color, WindowsControlChannelServer,
+        arrange_console, control_endpoint, read_keyboard_input, set_console_border_color,
+        WindowsControlChannelServer,
     },
     WindowsSettingsDefaultTerminalApplicationGuard,
 };
@@ -48,7 +48,7 @@ use tokio::{
 };
 use windows::Win32::System::Console::{
     CONSOLE_CHARACTER_ATTRIBUTES, INPUT_RECORD_0, KEY_EVENT_RECORD, LEFT_ALT_PRESSED,
-    LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED,
+    LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED, SHIFT_PRESSED, STD_INPUT_HANDLE,
 };
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -611,13 +611,18 @@ impl<'a> Daemon<'a> {
         };
     }
 
-    /// Launches all client windows and blocks on the main run loop.
+    /// Set up the daemon console: disable processed input mode, read
+    /// Ctrl+Break as a keystroke, and apply the configured colors and
+    /// dimensions.
     ///
-    /// Sets up the daemon console by disabling processed input mode and applying
-    /// the configured colors and dimensions.
-    /// Once all client windows have successfully started the daemon console window
-    /// is moved to the foreground and receives focus.
-    async fn launch<W: WindowsApi + Clone + 'static>(mut self, windows_api: &W) {
+    /// # Arguments
+    ///
+    /// * `windows_api` - The Windows API implementation to use.
+    ///
+    /// # Returns
+    ///
+    /// The workspace area left for the client windows.
+    fn set_up_console<W: WindowsApi>(&self, windows_api: &W) -> WorkspaceArea {
         windows_api
             .set_console_title(format!("{PACKAGE_NAME} daemon").as_str())
             .unwrap();
@@ -628,6 +633,9 @@ impl<'a> Daemon<'a> {
         set_console_border_color(windows_api, COLORREF(0x000000FF));
 
         toggle_processed_input_mode(windows_api); // Disable processed input mode
+        if let Err(err) = windows_api.install_ctrl_break_handler() {
+            warn!("Failed to install the Ctrl+Break handler: {}", err);
+        }
 
         let workspace_area = workspace::get_workspace_area(windows_api, self.config.height);
 
@@ -638,6 +646,15 @@ impl<'a> Daemon<'a> {
             windows_api,
             CONSOLE_CHARACTER_ATTRIBUTES(self.config.console_color),
         );
+        return workspace_area;
+    }
+
+    /// Launch all client windows and block on the main run loop.
+    ///
+    /// Once all client windows have successfully started the daemon console window
+    /// is moved to the foreground and receives focus.
+    async fn launch<W: WindowsApi + Clone + 'static>(mut self, windows_api: &W) {
+        let workspace_area = self.set_up_console(windows_api);
 
         let mut clients = Arc::new(Mutex::new(
             launch_clients(
@@ -950,10 +967,7 @@ impl<'a> Daemon<'a> {
                             let number_of_existing_clients = clients.lock().unwrap().len();
                             let new_clients = launch_clients(
                                 windows_api,
-                                expand_hosts(
-                                    hostnames.split(' ').map(|x| return x.trim()).collect(),
-                                    self.clusters,
-                                ),
+                                hosts_from_hostname_prompt(&hostnames, self.clusters),
                                 &self.username,
                                 self.port,
                                 self.debug,
@@ -1345,9 +1359,9 @@ impl<'a> Daemon<'a> {
     }
 }
 
-/// The processed console input mode controls whether chords such as
-/// `Ctrl + c` or `Ctrl + BREAK` receive special handling or are treated as
-/// simple keystrokes.
+/// The processed console input mode controls whether `Ctrl + c` receives
+/// special handling or is treated as a simple keystroke; `Ctrl + BREAK` is
+/// always a signal.
 ///
 /// By default processed input mode is enabled, meaning `Ctrl + c` is treated as
 /// a signal, not keystrokes.
@@ -1358,7 +1372,9 @@ impl<'a> Daemon<'a> {
 ///
 /// * `windows_api` - The Windows API implementation to use
 fn toggle_processed_input_mode<W: WindowsApi>(windows_api: &W) {
-    let handle = get_console_input_buffer();
+    let handle = windows_api
+        .get_std_handle(STD_INPUT_HANDLE)
+        .expect("Failed to retrieve the console input handle");
     let mode = windows_api.get_console_mode(handle).unwrap();
     let new_mode = windows::Win32::System::Console::CONSOLE_MODE(mode.0 ^ ENABLE_PROCESSED_INPUT.0);
     let _ = windows_api.set_console_mode(handle, new_mode);
@@ -1397,6 +1413,23 @@ pub fn resolve_cluster_tags<'a>(hosts: Vec<&'a str>, clusters: &'a [Cluster]) ->
         }
     }
     return resolved_hosts;
+}
+
+/// Return the hosts named by a line read at the control-mode hostname prompt.
+///
+/// # Arguments
+///
+/// * `line`     - The line, as read with its line ending.
+/// * `clusters` - Available cluster definitions.
+///
+/// # Returns
+///
+/// The whitespace-separated entries of `line`, ignoring every ETX, passed
+/// through [`expand_hosts`].
+fn hosts_from_hostname_prompt(line: &str, clusters: &[Cluster]) -> Vec<String> {
+    // The ctrl handler can race this prompt opening and write a Ctrl+Break key-down into it.
+    let line = line.replace('\x03', "");
+    return expand_hosts(line.split_whitespace().collect(), clusters);
 }
 
 /// Resolve cluster tags in `hosts` and expand brace expressions

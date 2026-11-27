@@ -79,21 +79,6 @@ Broadcast And Assert Every Host Received
     Focus Daemon And Broadcast    ${message}
     Wait Until Keyword Succeeds    10x    0.5s    Assert Every Host Received    ${message}
 
-Navigate To Second Client
-    [Documentation]    Move the submenu selection from its default top-left to the second
-    ...                client. One of right/down moves and the other clamps, so this works
-    ...                for either grid orientation.
-    Send Control Mode Key    right
-    Send Control Mode Key    down
-
-Disable Second Client
-    [Documentation]    Disable the second client through the submenu [d].
-    Enter Control Mode
-    Send Control Mode Key    e
-    Navigate To Second Client
-    Send Control Mode Key    d
-    Exit Control Mode
-
 Enable Second Client
     [Documentation]    Enable the second client through the submenu [e].
     Enter Control Mode
