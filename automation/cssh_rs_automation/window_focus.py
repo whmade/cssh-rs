@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 import time
+from typing import Any
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.1
@@ -158,16 +159,7 @@ class WindowFocus:
         Returns:
             The number of matching top-level windows.
         """
-        if match_mode not in _VALID_MATCH_MODES:
-            raise WindowFocusError(
-                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
-            )
-
-        # Imported lazily for the same reason as focus_window; see its comment.
-        import pywinctl
-
-        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
-        return len(pywinctl.getWindowsWithTitle(title, condition=condition))
+        return len(_matching_windows(title, match_mode))
 
     def window_boxes(
         self, title: str, match_mode: str = "substring"
@@ -184,19 +176,9 @@ class WindowFocus:
         Returns:
             One ``(title, left, top, width, height)`` tuple per matching window.
         """
-        if match_mode not in _VALID_MATCH_MODES:
-            raise WindowFocusError(
-                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
-            )
-
-        # Imported lazily for the same reason as focus_window; see its comment.
-        import pywinctl
-
-        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
-        matches = pywinctl.getWindowsWithTitle(title, condition=condition)
         return [
             (window.title, window.box.left, window.box.top, window.box.width, window.box.height)
-            for window in matches
+            for window in _matching_windows(title, match_mode)
         ]
 
     def get_active_window_title(self) -> str:
@@ -219,19 +201,7 @@ class WindowFocus:
         Returns:
             The window's index in the top-level z-order, 0 for the topmost.
         """
-        if match_mode not in _VALID_MATCH_MODES:
-            raise WindowFocusError(
-                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
-            )
-
-        import pywinctl
-
-        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
-        matches = pywinctl.getWindowsWithTitle(title, condition=condition)
-        if len(matches) != 1:
-            titles = [window.title for window in matches]
-            raise WindowFocusError(f"expected exactly one window matching {title!r}, got {titles}")
-        return _z_order_index(int(matches[0].getHandle()))
+        return _z_order_index(int(find_window(title, match_mode).getHandle()))
 
     def right_click_window(self, title: str, match_mode: str = "exact") -> str:
         """Right-click the center of the single window matching ``title``; return its title.
@@ -247,19 +217,8 @@ class WindowFocus:
         Returns:
             The clicked window's title.
         """
-        if match_mode not in _VALID_MATCH_MODES:
-            raise WindowFocusError(
-                f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
-            )
-
-        import pywinctl
-
-        condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
-        matches = pywinctl.getWindowsWithTitle(title, condition=condition)
-        if len(matches) != 1:
-            titles = [window.title for window in matches]
-            raise WindowFocusError(f"expected exactly one window matching {title!r}, got {titles}")
-        box = matches[0].box
+        window = find_window(title, match_mode)
+        box = window.box
         center_x = box.left + box.width // 2
         center_y = box.top + box.height // 2
 
@@ -269,7 +228,37 @@ class WindowFocus:
 
         pyautogui.FAILSAFE = False
         pyautogui.rightClick(center_x, center_y)
-        return matches[0].title
+        return window.title
+
+
+def find_window(title: str, match_mode: str) -> Any:
+    """Return the single top-level window whose title matches ``title``.
+
+    Args:
+        title: Window title to match.
+        match_mode: ``"exact"`` (full title) or ``"substring"`` (contains).
+
+    Returns:
+        The matching pywinctl window.
+    """
+    matches = _matching_windows(title, match_mode)
+    if len(matches) != 1:
+        titles = [window.title for window in matches]
+        raise WindowFocusError(f"expected exactly one window matching {title!r}, got {titles}")
+    return matches[0]
+
+
+def _matching_windows(title: str, match_mode: str) -> list[Any]:
+    if match_mode not in _VALID_MATCH_MODES:
+        raise WindowFocusError(
+            f"match_mode must be one of {list(_VALID_MATCH_MODES)}, got {match_mode!r}"
+        )
+
+    # Imported lazily for the same reason as WindowFocus.focus_window; see its comment.
+    import pywinctl
+
+    condition = pywinctl.Re.IS if match_mode == "exact" else pywinctl.Re.CONTAINS
+    return pywinctl.getWindowsWithTitle(title, condition=condition)
 
 
 def _z_order_index(hwnd: int) -> int:
