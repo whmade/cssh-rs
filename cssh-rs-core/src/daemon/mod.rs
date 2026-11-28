@@ -1651,8 +1651,8 @@ fn launch_client_console<W: WindowsApi>(
 ///
 /// An unknown PID exits the process (production) or panics (tests) -
 /// the daemon's bookkeeping is broken and recovery is not possible.
-/// A failed pipe write or a dropped [`watch::Sender`] ends the routine
-/// cleanly.
+/// A rejected `Hello`, a failed pipe write, or a dropped [`watch::Sender`]
+/// ends the routine cleanly.
 async fn named_pipe_server_routine(
     mut server: WindowsControlChannelServer,
     receiver: &mut Receiver<ClientBroadcast>,
@@ -1672,6 +1672,10 @@ async fn named_pipe_server_routine(
             "Protocol version mismatch: daemon {} vs client {}",
             mismatch.local, mismatch.remote
         );
+        return;
+    }
+    if hello.role != Role::Client {
+        error!("Expected a client Hello, got role {:?}", hello.role);
         return;
     }
     let max_frame_len = negotiate_max_frame_len(DEFAULT_MAX_FRAME_LEN, hello.max_frame_len);

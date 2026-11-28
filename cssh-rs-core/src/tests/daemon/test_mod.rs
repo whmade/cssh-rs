@@ -24,11 +24,13 @@ mod daemon_test {
     };
 
     use cssh_rs_platform::ControlChannelClient;
-    use cssh_rs_protocol::v1::codec::decode_frames;
+    use cssh_rs_protocol::v1::codec::{decode_frames, encode_frame};
+    use cssh_rs_protocol::v1::handshake::Hello;
     use cssh_rs_protocol::v1::input::{ClientRunState, InputEvent, SignalKind};
     use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
     use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
     use cssh_rs_protocol::v1::message::DaemonToClient;
+    use cssh_rs_protocol::v1::version::{ProtocolVersion, Role};
     use cssh_rs_protocol::ClientState;
 
     use crate::{
@@ -347,6 +349,33 @@ mod daemon_test {
 
         assert_eq!(handshake, Err(HandshakeError::NoHello));
         assert!(routine.await.unwrap_err().is_panic());
+    }
+
+    #[tokio::test]
+    async fn test_named_pipe_server_routine_rejects_a_hello_that_is_not_from_a_client() {
+        for role in [Role::Daemon, Role::Unknown] {
+            let state_sender = watch::channel(ClientState::Active).0;
+            let (broadcast_sender, _) = broadcast::channel(16);
+            let (mut client, routine) =
+                connect_to_routine(std::process::id(), &state_sender, &broadcast_sender).await;
+            let hello = Hello {
+                protocol_version: ProtocolVersion::new(1, 0),
+                role,
+                pid: std::process::id(),
+                capabilities: Vec::new(),
+                max_frame_len: DEFAULT_MAX_FRAME_LEN,
+            };
+            client
+                .send(&encode_frame(&hello, DEFAULT_MAX_FRAME_LEN).expect("encode"))
+                .await
+                .expect("send");
+
+            let reply =
+                read_message::<Hello>(&mut client, &mut Vec::new(), DEFAULT_MAX_FRAME_LEN).await;
+
+            assert_eq!(reply, None, "role {role:?}");
+            routine.await.expect("routine ends without panicking");
+        }
     }
 
     #[tokio::test]
