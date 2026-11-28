@@ -9,6 +9,7 @@ Documentation       Windows E2E cases for Ctrl+Break, each asserting one behavio
 ...                 Ctrl+Break key, so the cases that need it to reach ssh skip on builds
 ...                 before Windows 11's 22000.
 
+Library             cssh_rs_automation.process_exit.ProcessExit
 Resource            ../resources/cssh_rs_cluster.resource
 
 Suite Setup         Start Cssh Cluster
@@ -28,12 +29,18 @@ ${WIN32_INPUT_MODE_BUILD}    ${22000}
 
 *** Test Cases ***
 Ctrl Break At A Client Ends Only That Client
-    [Documentation]    Press Ctrl+Break in the first client's window and assert its window
-    ...                closes while the second client still receives daemon broadcasts.
+    [Documentation]    Press Ctrl+Break in the first client's window and assert the client
+    ...                exits with code 0 and its window closes, while the second client
+    ...                still receives daemon broadcasts. A client that the Ctrl+Break itself
+    ...                ended would close too, but exit with STATUS_CONTROL_C_EXIT.
     [Setup]    Skip Without Win32 Input Mode
     Assert All Ssh Connections Established
+    ${client_pid}=    Watch Window Process    @${FIRST_HOST}    substring
     Focus Window    @${FIRST_HOST}    substring
     Press Ctrl Break
+    ${exit_code}=    Wait For Process Exit    ${client_pid}    timeout=10
+    Should Be Equal As Integers    ${exit_code}    0
+    ...    msg=Client exited with code ${{hex($exit_code)}}    values=False
     Wait Until Keyword Succeeds    20x    0.5s    Assert Client Window Gone    ${FIRST_HOST}
     ${message}=    Unique Message    SURVIVOR
     Focus Daemon And Broadcast    ${message}
