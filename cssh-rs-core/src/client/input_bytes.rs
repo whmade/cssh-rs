@@ -6,20 +6,65 @@ use std::ops::RangeInclusive;
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
 use log::warn;
+use windows::Win32::Foundation::FALSE;
 use windows::Win32::System::Console::{
     KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VIRTUAL_KEY, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2, VK_F3, VK_F4,
-    VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT, VK_PRIOR,
-    VK_RIGHT, VK_UP,
+    VIRTUAL_KEY, VK_CANCEL, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
+    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
+    VK_PRIOR, VK_RIGHT, VK_UP,
 };
+
+use crate::utils::windows::CTRL_BREAK_KEY_DOWN;
 
 /// The `dwControlKeyState` flags of either Ctrl key.
 pub(crate) const CTRL_PRESSED: u32 = LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED;
 
 /// The `dwControlKeyState` flags of either Alt key.
 pub(crate) const ALT_PRESSED: u32 = LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED;
+
+/// Ctrl+C as a terminal sends it: ETX, which ConPTY turns back into Ctrl+C.
+pub(crate) const CTRL_C_KEYSTROKE: &[u8] = b"\x03";
+
+/// Return Ctrl+Break's key-down and key-up in win32-input-mode.
+///
+/// `GenerateConsoleCtrlEvent` cannot reach the SSH child on its pseudoconsole,
+/// but ConPTY handles this key as if pressed in its own console and raises
+/// `CTRL_BREAK_EVENT` in every process attached to it:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/host/input.cpp#L134>.
+/// Windows 10's inbox ConPTY predates win32-input-mode, so there Ctrl+Break
+/// does not reach the child.
+///
+/// # Returns
+///
+/// The encoding of [`CTRL_BREAK_KEY_DOWN`], then of its release.
+pub(crate) fn ctrl_break_keystroke() -> Vec<u8> {
+    let key_up = KEY_EVENT_RECORD {
+        bKeyDown: FALSE,
+        ..CTRL_BREAK_KEY_DOWN
+    };
+    return [
+        win32_input_mode_bytes(&CTRL_BREAK_KEY_DOWN),
+        win32_input_mode_bytes(&key_up),
+    ]
+    .concat();
+}
+
+/// Encode a key-event record as `ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _`:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/doc/specs/%234999%20-%20Improved%20keyboard%20handling%20in%20Conpty.md>.
+fn win32_input_mode_bytes(key: &KEY_EVENT_RECORD) -> Vec<u8> {
+    return format!(
+        "\x1b[{};{};{};{};{};{}_",
+        key.wVirtualKeyCode,
+        key.wVirtualScanCode,
+        unsafe { key.uChar.UnicodeChar },
+        u8::from(key.bKeyDown.as_bool()),
+        key.dwControlKeyState,
+        key.wRepeatCount
+    )
+    .into_bytes();
+}
 
 /// Encode a daemon-delivered input event.
 ///
@@ -71,6 +116,15 @@ impl Keystroke {
             Some(character) => return Some(KeyCode::Char(character.to_string())),
             None => return virtual_key_to_keycode(self.virtual_key),
         }
+    }
+
+    /// Return whether the keystroke is Ctrl+Break.
+    ///
+    /// # Returns
+    ///
+    /// `true` if its virtual key is `VK_CANCEL`.
+    pub(crate) fn is_ctrl_break(&self) -> bool {
+        return self.virtual_key == VK_CANCEL;
     }
 
     /// Return whether the keystroke's Ctrl and Alt only selected an AltGr character.
@@ -196,8 +250,8 @@ impl KeystrokeDecoder {
 /// # Returns
 ///
 /// The bytes of the keystroke `decoder` reads from `key`, repeated
-/// [`keystroke_count`] times: the composed text, else the encoding of the
-/// virtual key, else nothing.
+/// [`keystroke_count`] times: [`ctrl_break_keystroke`] for Ctrl+Break, else
+/// the composed text, else the encoding of the virtual key, else nothing.
 pub(crate) fn key_event_record_to_bytes(
     key: &KEY_EVENT_RECORD,
     decoder: &mut KeystrokeDecoder,
@@ -205,6 +259,9 @@ pub(crate) fn key_event_record_to_bytes(
     let Some(keystroke) = decoder.decode(key) else {
         return Vec::new();
     };
+    if keystroke.is_ctrl_break() {
+        return ctrl_break_keystroke().repeat(keystroke_count(key));
+    }
     let bytes = keystroke
         .key_code()
         .map(|code| return key_to_bytes(&code, Modifiers::NONE, None))

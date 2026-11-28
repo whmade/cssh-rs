@@ -62,8 +62,10 @@ Tear Down Cssh Cluster
 Restart Cssh Cluster
     [Documentation]    Tear the current cluster down before starting a fresh one: the
     ...                single-instance sshd fixture refuses to start while one runs.
+    ...                Passes @{args} on to Start Cssh Cluster.
+    [Arguments]    @{args}
     Tear Down Cssh Cluster
-    Start Cssh Cluster
+    Start Cssh Cluster    @{args}
 
 Stop Cssh Process
     [Documentation]    Kill the daemon, every client and their ssh children by image name.
@@ -194,6 +196,21 @@ Send Control Mode Key
 Exit Control Mode
     [Documentation]    Press Esc to leave control mode and any open submenu.
     Press Key    esc
+
+Navigate To Second Client
+    [Documentation]    Move the submenu selection from its default top-left to the second
+    ...                client. One of right/down moves and the other clamps, so this works
+    ...                for either grid orientation.
+    Send Control Mode Key    right
+    Send Control Mode Key    down
+
+Disable Second Client
+    [Documentation]    Disable the second client through the submenu [d].
+    Enter Control Mode
+    Send Control Mode Key    e
+    Navigate To Second Client
+    Send Control Mode Key    d
+    Exit Control Mode
 
 Assert No Host Received
     [Documentation]    Assert ${message} reached no host's marker as a complete line.

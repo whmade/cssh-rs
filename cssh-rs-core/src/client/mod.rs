@@ -385,22 +385,17 @@ pub(crate) async fn read_message<T: serde::de::DeserializeOwned>(
 ///
 /// # Arguments
 ///
-/// * `api`              - The Windows API implementation to use.
 /// * `client`           - The connected control-channel client.
 /// * `master`           - Shared PTY master writer.
-/// * `child_pid`        - Process id of the SSH child.
 /// * `state_sender`     - Watch sender for the client state.
 /// * `highlight_sender` - Watch sender for the highlight flag.
 /// * `max_frame_len`    - The negotiated maximum frame length.
 /// * `pending`          - Bytes received during the handshake but not consumed.
 /// * `child_exit`       - Receives the SSH child's exit code.
-#[allow(clippy::too_many_arguments)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn run_control_channel(
-    api: &dyn WindowsApi,
     mut client: WindowsControlChannelClient,
     master: SharedWriter,
-    child_pid: u32,
     state_sender: &watch::Sender<ClientState>,
     highlight_sender: &watch::Sender<bool>,
     max_frame_len: u32,
@@ -418,10 +413,8 @@ async fn run_control_channel(
                 };
                 for message in decoded.messages {
                     let flow = dispatch_daemon_message(
-                        api,
                         message,
                         &*master,
-                        child_pid,
                         state_sender,
                         highlight_sender,
                     );
@@ -674,9 +667,11 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
     daemon_channel: Option<String>,
     config: &ClientConfig,
 ) {
-    // Shield this client from relayed CTRL+C/CTRL+Break so only the SSH child reacts.
-    if let Err(err) = api.install_console_ctrl_handler() {
-        warn!("Failed to install console control handler: {}", err);
+    if let Err(err) = api.install_ctrl_c_handler() {
+        warn!("Failed to install the Ctrl+C handler: {}", err);
+    }
+    if let Err(err) = api.install_ctrl_break_handler() {
+        warn!("Failed to install the Ctrl+Break handler: {}", err);
     }
 
     let Some(daemon_channel) = daemon_channel else {
@@ -735,10 +730,8 @@ pub async fn main<A: WindowsApi + Clone + 'static>(
     });
 
     let control_task = run_control_channel(
-        api,
         control_channel,
         pty.writer,
-        pty.child_pid,
         &state_sender,
         &highlight_sender,
         max_frame_len,

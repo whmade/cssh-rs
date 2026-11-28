@@ -47,7 +47,7 @@ pub enum ClientRunState {
     Unknown,
 }
 
-/// An out-of-band control signal delivered to a client's process group.
+/// A control signal a client raises in its child process.
 ///
 /// Ctrl+Break has no input-byte encoding, so it can only travel here; the
 /// daemon sends Ctrl+C inline as its `0x03` byte.

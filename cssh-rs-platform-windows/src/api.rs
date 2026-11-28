@@ -18,9 +18,12 @@ use windows::Win32::System::Console::{
     ReadConsoleOutputAttribute, SetConsoleCtrlHandler, SetConsoleScreenBufferInfoEx,
     SetConsoleTextAttribute, WriteConsoleOutputAttribute, CONSOLE_CHARACTER_ATTRIBUTES,
     CONSOLE_SCREEN_BUFFER_INFO, CONSOLE_SCREEN_BUFFER_INFOEX, COORD, CTRL_BREAK_EVENT,
-    CTRL_C_EVENT, INPUT_RECORD, INPUT_RECORD_0, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    CTRL_C_EVENT, ENHANCED_KEY, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
+    LEFT_CTRL_PRESSED, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
-use windows::Win32::System::Console::{GetConsoleMode, SetConsoleMode, CONSOLE_MODE};
+use windows::Win32::System::Console::{
+    GetConsoleMode, SetConsoleMode, CONSOLE_MODE, ENABLE_PROCESSED_INPUT,
+};
 use windows::Win32::System::Console::{
     ScrollConsoleScreenBufferW, SetConsoleCursorPosition, CHAR_INFO, KEY_EVENT as KEY_EVENT_U32,
     SMALL_RECT,
@@ -30,6 +33,7 @@ use windows::Win32::System::Threading::{
     CreateProcessW, CREATE_NEW_CONSOLE, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
 };
 use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess};
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL;
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetForegroundWindow, GetWindowPlacement, GetWindowTextW,
     GetWindowThreadProcessId, MoveWindow, SetWindowPos, SetWindowTextW, ShowWindow, HWND_NOTOPMOST,
@@ -285,49 +289,22 @@ pub trait WindowsApi: Send + Sync {
     /// The last error code from Windows API
     fn get_last_error(&self) -> u32;
 
-    /// Interrupt every process attached to the caller's console.
-    ///
-    /// Sends `CTRL_C_EVENT` to process group 0 so a Ctrl+C relayed from the
-    /// daemon reaches the child exactly as a focused Ctrl+C would.
-    /// `CTRL_BREAK_EVENT` is not interchangeable: many programs treat only
-    /// Ctrl+C as the interrupt (e.g. `ping` stops on Ctrl+C but merely prints
-    /// statistics on Ctrl+Break). The caller shields itself with the handler
-    /// from [`Self::install_console_ctrl_handler`], since group 0 signals it too.
-    /// <https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent>
+    /// Install a console control handler that swallows Ctrl+C and leaves
+    /// every other control event to the next handler.
     ///
     /// # Returns
     ///
     /// Result indicating success or failure of the operation
-    fn interrupt_console_process_group(&self) -> windows::core::Result<()>;
+    fn install_ctrl_c_handler(&self) -> windows::core::Result<()>;
 
-    /// Send a console control event to a process group.
-    /// <https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent>
-    ///
-    /// # Arguments
-    ///
-    /// * `ctrl_event`       - `CTRL_C_EVENT` or `CTRL_BREAK_EVENT`.
-    /// * `process_group_id` - Process id of the group leader.
+    /// Install a console control handler that keeps Ctrl+Break from ending
+    /// this process and, while processed input is off, turns it into a
+    /// keystroke. Every other control event goes to the next handler.
     ///
     /// # Returns
     ///
     /// Result indicating success or failure of the operation
-    fn generate_console_ctrl_event(
-        &self,
-        ctrl_event: u32,
-        process_group_id: u32,
-    ) -> windows::core::Result<()>;
-
-    /// Install a console control handler that shields this process from
-    /// CTRL+C and CTRL+Break.
-    ///
-    /// The handler reports both `CTRL_C_EVENT` and `CTRL_BREAK_EVENT` as
-    /// handled, so neither user-typed nor group-relayed signals terminate the
-    /// calling process; other control events keep their default handling.
-    ///
-    /// # Returns
-    ///
-    /// Result indicating success or failure of the operation
-    fn install_console_ctrl_handler(&self) -> windows::core::Result<()>;
+    fn install_ctrl_break_handler(&self) -> windows::core::Result<()>;
 
     /// Get standard output handle
     ///
@@ -663,17 +640,72 @@ impl Clone for MockWindowsApi {
     }
 }
 
-/// Console control handler that swallows CTRL+C and CTRL+Break.
-///
-/// Returning `TRUE` marks the event as handled so it does not terminate this
-/// process; other control events return `FALSE` to keep their default handling.
-/// <https://learn.microsoft.com/en-us/windows/console/handlerroutine>
+/// Ctrl+Break's key-down, with the fields of the key-up conhost queues for it.
+pub const CTRL_BREAK_KEY_DOWN: KEY_EVENT_RECORD = KEY_EVENT_RECORD {
+    bKeyDown: TRUE,
+    wRepeatCount: 1,
+    wVirtualKeyCode: VK_CANCEL.0,
+    wVirtualScanCode: 0x46,
+    uChar: KEY_EVENT_RECORD_0 { UnicodeChar: 0x03 },
+    dwControlKeyState: LEFT_CTRL_PRESSED | ENHANCED_KEY,
+};
+
+/// Console control handler of [`WindowsApi::install_ctrl_c_handler`].
+extern "system" fn ctrl_c_handler(ctrl_type: u32) -> BOOL {
+    return BOOL::from(ctrl_type == CTRL_C_EVENT);
+}
+
+/// Console control handler of [`WindowsApi::install_ctrl_break_handler`].
 #[cfg_attr(coverage_nightly, coverage(off))]
-unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
-    return match ctrl_type {
-        CTRL_C_EVENT | CTRL_BREAK_EVENT => TRUE,
-        _ => FALSE,
+extern "system" fn ctrl_break_handler(ctrl_type: u32) -> BOOL {
+    return handle_ctrl_break_event(&DefaultWindowsApi, ctrl_type);
+}
+
+/// Turn Ctrl+Break back into a keystroke with [`restore_ctrl_break_key_down`]
+/// and return `TRUE`, so it never ends this process; return `FALSE` to leave
+/// every other event to the next handler:
+/// <https://learn.microsoft.com/en-us/windows/console/handlerroutine>.
+fn handle_ctrl_break_event(api: &dyn WindowsApi, ctrl_type: u32) -> BOOL {
+    if ctrl_type != CTRL_BREAK_EVENT {
+        return FALSE;
+    }
+    restore_ctrl_break_key_down(api);
+    return TRUE;
+}
+
+/// Write the Ctrl+Break key-down conhost withholds to this process's console
+/// input, unless processed input is on:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/host/input.cpp#L134>.
+///
+/// A cooked read, like the daemon's hostname prompt, runs with processed
+/// input on and must not get the key-down.
+fn restore_ctrl_break_key_down(api: &dyn WindowsApi) {
+    let mode = match api
+        .get_std_handle(STD_INPUT_HANDLE)
+        .and_then(|stdin| return api.get_console_mode(stdin))
+    {
+        Ok(mode) => mode,
+        Err(err) => {
+            warn!(
+                "Failed to read the console input mode, dropping Ctrl+Break: {}",
+                err
+            );
+            return;
+        }
     };
+    if mode.0 & ENABLE_PROCESSED_INPUT.0 != 0 {
+        return;
+    }
+    let key_down = INPUT_RECORD {
+        EventType: KEY_EVENT,
+        Event: INPUT_RECORD_0 {
+            KeyEvent: CTRL_BREAK_KEY_DOWN,
+        },
+    };
+    let mut number_written = 0;
+    if let Err(err) = api.write_console_input(&[key_down], &mut number_written) {
+        warn!("Failed to restore the Ctrl+Break keystroke: {}", err);
+    }
 }
 
 /// Default implementation of WindowsApi that calls actual Windows APIs.
@@ -868,24 +900,12 @@ impl WindowsApi for DefaultWindowsApi {
         return unsafe { windows::Win32::Foundation::GetLastError().0 };
     }
 
-    fn interrupt_console_process_group(&self) -> windows::core::Result<()> {
-        return unsafe {
-            windows::Win32::System::Console::GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
-        };
+    fn install_ctrl_c_handler(&self) -> windows::core::Result<()> {
+        return unsafe { SetConsoleCtrlHandler(Some(ctrl_c_handler), true) };
     }
 
-    fn generate_console_ctrl_event(
-        &self,
-        ctrl_event: u32,
-        process_group_id: u32,
-    ) -> windows::core::Result<()> {
-        return unsafe {
-            windows::Win32::System::Console::GenerateConsoleCtrlEvent(ctrl_event, process_group_id)
-        };
-    }
-
-    fn install_console_ctrl_handler(&self) -> windows::core::Result<()> {
-        return unsafe { SetConsoleCtrlHandler(Some(console_ctrl_handler), true) };
+    fn install_ctrl_break_handler(&self) -> windows::core::Result<()> {
+        return unsafe { SetConsoleCtrlHandler(Some(ctrl_break_handler), true) };
     }
 
     fn get_stdout_handle(&self) -> windows::core::Result<HANDLE> {
@@ -1509,24 +1529,6 @@ fn get_std_handle(nstdhandle: STD_HANDLE) -> HANDLE {
         GetStdHandle(nstdhandle)
             .unwrap_or_else(|_| panic!("Failed to retrieve standard handle: {nstdhandle:?}"))
     };
-}
-
-/// Returns a [HANDLE] to the [STD_INPUT_HANDLE] of the current process.
-///
-/// # Returns
-///
-/// Handle to the standard input of the current process.
-///
-/// # Examples
-///
-/// ```no_run
-/// use cssh_rs_platform_windows::get_console_input_buffer;
-///
-/// let input_handle = get_console_input_buffer();
-/// ```
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn get_console_input_buffer() -> HANDLE {
-    return get_std_handle(STD_INPUT_HANDLE);
 }
 
 /// Returns a [HANDLE] to the [STD_OUTPUT_HANDLE] of the current process.

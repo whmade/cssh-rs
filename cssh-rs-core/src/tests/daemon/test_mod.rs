@@ -49,7 +49,8 @@ mod daemon_test {
             build_client_args, classify_control_mode_key, classify_enable_disable_submenu_key,
             encode_broadcast, expand_hosts,
             grid::{grid_dimensions, ClientGrid},
-            named_pipe_server_routine, next_submenu_selection, resolve_cluster_tags,
+            hosts_from_hostname_prompt, named_pipe_server_routine, next_submenu_selection,
+            resolve_cluster_tags,
             workspace::WorkspaceArea,
             Client, ClientBroadcast, Clients, ControlModeAction, ControlModeState, Daemon,
             EnableDisableSubmenuAction, HWNDWrapper, NavigationDirection,
@@ -204,6 +205,18 @@ mod daemon_test {
         let hosts: Vec<&str> = vec!["a.local", "b.local"];
         let clusters: Vec<Cluster> = vec![];
         assert_eq!(expand_hosts(hosts, &clusters), vec!["a.local", "b.local"]);
+    }
+
+    #[test]
+    fn test_hosts_from_hostname_prompt_ignores_extra_whitespace_and_ctrl_break_etx() {
+        let cases: [(&str, Vec<&str>); 3] = [
+            ("a.local  b.local\r\n", vec!["a.local", "b.local"]),
+            ("\x03a\x03.local\r\n", vec!["a.local"]),
+            ("\x03\r\n", vec![]),
+        ];
+        for (line, expected) in cases {
+            assert_eq!(hosts_from_hostname_prompt(line, &[]), expected, "{line:?}");
+        }
     }
 
     fn unique_pipe_name() -> OsString {
@@ -1091,6 +1104,60 @@ mod daemon_test {
         daemon.quit_control_mode(&mock);
 
         assert_eq!(daemon.control_mode_state, ControlModeState::Inactive);
+    }
+
+    /// Stub the Windows 10 console calls of `Daemon::set_up_console` that the test does not check.
+    fn mock_console_setup() -> crate::utils::windows::MockWindowsApi {
+        use windows::Win32::System::Console::{
+            CONSOLE_SCREEN_BUFFER_INFO, COORD, ENABLE_ECHO_INPUT, ENABLE_PROCESSED_INPUT,
+            STD_INPUT_HANDLE,
+        };
+        let mut mock = crate::utils::windows::MockWindowsApi::new();
+        mock.expect_set_console_title().returning(|_| return Ok(()));
+        mock.expect_set_console_text_attribute()
+            .returning(|_| return Ok(()));
+        mock.expect_get_console_screen_buffer_info().returning(|| {
+            return Ok(CONSOLE_SCREEN_BUFFER_INFO {
+                dwSize: COORD { X: 80, Y: 25 },
+                ..Default::default()
+            });
+        });
+        mock.expect_fill_console_output_attribute()
+            .returning(|_, length, _| return Ok(length));
+        mock.expect_invalidate_console_window()
+            .returning(|| return Ok(()));
+        mock.expect_get_os_version()
+            .returning(|| return "10.0.19045".to_string());
+        mock.expect_get_std_handle()
+            .withf(|handle_type| return *handle_type == STD_INPUT_HANDLE)
+            .returning(|_| return Ok(HANDLE::default()));
+        mock.expect_get_console_mode()
+            .returning(|_| return Ok(ENABLE_PROCESSED_INPUT | ENABLE_ECHO_INPUT));
+        mock.expect_get_system_metrics().returning(|_| return 1000);
+        return mock;
+    }
+
+    #[test]
+    fn test_set_up_console_reads_ctrl_break_as_a_keystroke() {
+        use windows::Win32::System::Console::ENABLE_PROCESSED_INPUT;
+        let config = DaemonConfig::default();
+        let clusters: Vec<Cluster> = Vec::new();
+        let daemon = Daemon::for_test(&config, &clusters, ControlModeState::Inactive);
+        for install_result in [Ok(()), Err(windows::core::Error::from_thread())] {
+            let mut mock = mock_console_setup();
+            mock.expect_set_console_mode()
+                .withf(|_, mode| return mode.0 & ENABLE_PROCESSED_INPUT.0 == 0)
+                .times(1)
+                .returning(|_, _| return Ok(()));
+            mock.expect_install_ctrl_break_handler()
+                .times(1)
+                .return_once(move || return install_result);
+            mock.expect_arrange_console()
+                .times(1)
+                .returning(|_, _, _, _| return Ok(()));
+
+            daemon.set_up_console(&mock);
+        }
     }
 
     /// Returns the dense 3x2 grid `[1,2,3 / 4,5,6]` used by the basic

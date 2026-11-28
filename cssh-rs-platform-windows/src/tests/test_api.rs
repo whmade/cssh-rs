@@ -678,6 +678,106 @@ mod console_input_test {
     }
 }
 
+mod ctrl_handler_test {
+    use windows::Win32::Foundation::{FALSE, HANDLE, TRUE};
+    use windows::Win32::System::Console::{
+        CONSOLE_MODE, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT, CTRL_LOGOFF_EVENT,
+        CTRL_SHUTDOWN_EVENT, ENABLE_PROCESSED_INPUT, ENABLE_WINDOW_INPUT, ENHANCED_KEY,
+        LEFT_CTRL_PRESSED,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_CANCEL;
+
+    use super::*;
+    use crate::api::{ctrl_c_handler, handle_ctrl_break_event};
+
+    const OTHER_EVENTS: [u32; 3] = [CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT];
+
+    fn mock_console_mode(mode: windows::core::Result<CONSOLE_MODE>) -> MockWindowsApi {
+        let mut mock_api = MockWindowsApi::new();
+        mock_api
+            .expect_get_std_handle()
+            .returning(|_| return Ok(HANDLE::default()));
+        mock_api
+            .expect_get_console_mode()
+            .return_once(move |_| return mode);
+        return mock_api;
+    }
+
+    /// Expect one write of Ctrl+Break's key-down, answered with `result`.
+    fn expect_key_down_write(mock_api: &mut MockWindowsApi, result: windows::core::Result<()>) {
+        mock_api
+            .expect_write_console_input()
+            .withf(|records, _| {
+                let [record] = records else {
+                    return false;
+                };
+                let key = unsafe { record.Event.KeyEvent };
+                return record.EventType == KEY_EVENT
+                    && (
+                        key.bKeyDown.as_bool(),
+                        key.wRepeatCount,
+                        key.wVirtualKeyCode,
+                        key.wVirtualScanCode,
+                        unsafe { key.uChar.UnicodeChar },
+                        key.dwControlKeyState,
+                    ) == (
+                        true,
+                        1,
+                        VK_CANCEL.0,
+                        0x46,
+                        0x03,
+                        LEFT_CTRL_PRESSED | ENHANCED_KEY,
+                    );
+            })
+            .times(1)
+            .return_once(move |_, _| return result);
+    }
+
+    #[test]
+    fn test_ctrl_break_handler_writes_the_key_down_in_raw_input_mode() {
+        for write_result in [Ok(()), Err(windows::core::Error::from_thread())] {
+            let mut mock_api = mock_console_mode(Ok(ENABLE_WINDOW_INPUT));
+            expect_key_down_write(&mut mock_api, write_result);
+
+            assert_eq!(handle_ctrl_break_event(&mock_api, CTRL_BREAK_EVENT), TRUE);
+        }
+    }
+
+    #[test]
+    fn test_ctrl_break_handler_writes_nothing_unless_input_is_raw() {
+        for mode in [
+            Ok(ENABLE_PROCESSED_INPUT),
+            Err(windows::core::Error::from_thread()),
+        ] {
+            let mut mock_api = mock_console_mode(mode);
+            mock_api.expect_write_console_input().never();
+
+            assert_eq!(handle_ctrl_break_event(&mock_api, CTRL_BREAK_EVENT), TRUE);
+        }
+    }
+
+    #[test]
+    fn test_ctrl_break_handler_leaves_other_events_to_the_next_handler() {
+        let mock_api = MockWindowsApi::new();
+
+        for ctrl_type in [CTRL_C_EVENT].into_iter().chain(OTHER_EVENTS) {
+            assert_eq!(
+                handle_ctrl_break_event(&mock_api, ctrl_type),
+                FALSE,
+                "{ctrl_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ctrl_c_handler_handles_only_ctrl_c() {
+        assert_eq!(ctrl_c_handler(CTRL_C_EVENT), TRUE);
+        for ctrl_type in [CTRL_BREAK_EVENT].into_iter().chain(OTHER_EVENTS) {
+            assert_eq!(ctrl_c_handler(ctrl_type), FALSE, "{ctrl_type}");
+        }
+    }
+}
+
 /// Test module for command line building functionality.
 mod command_line_test {
     use crate::api::{build_command_line, build_command_line_wide, encode_wide_z};

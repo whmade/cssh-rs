@@ -13,10 +13,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use crate::client::input_bytes::{
     input_event_to_bytes, key_event_record_to_bytes, keystroke_count, KeystrokeDecoder,
 };
+use crate::utils::windows::CTRL_BREAK_KEY_DOWN;
 
 pub(crate) const GRINNING_FACE: &str = "\u{1f600}";
 pub(crate) const GRINNING_FACE_HIGH_SURROGATE: u16 = 0xd83d;
 pub(crate) const GRINNING_FACE_LOW_SURROGATE: u16 = 0xde00;
+
+pub(crate) const CTRL_BREAK_WIN32_INPUT_MODE: &[u8] = b"\x1b[3;70;3;1;264;1_\x1b[3;70;3;0;264;1_";
 
 pub(crate) fn key_event_record(
     unicode_char: u16,
@@ -305,6 +308,14 @@ fn test_key_event_record_to_bytes_encodes_the_character_of_an_alt_code() {
     for records in [pasted, typed_by_hand] {
         assert_eq!(key_event_records_to_bytes(&records), "\u{20ac}".as_bytes());
     }
+}
+
+#[test]
+fn test_key_event_record_to_bytes_encodes_ctrl_break_as_its_keystroke_not_ctrl_c() {
+    assert_eq!(
+        key_event_records_to_bytes(&[CTRL_BREAK_KEY_DOWN, released(CTRL_BREAK_KEY_DOWN)]),
+        CTRL_BREAK_WIN32_INPUT_MODE
+    );
 }
 
 #[test]
