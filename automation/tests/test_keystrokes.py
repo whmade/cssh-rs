@@ -301,14 +301,16 @@ def test_scan_code_keys_go_down_in_order_and_up_in_reverse(
 @pytest.mark.parametrize(
     ("key", "scan", "extended"),
     [
-        # MS Learn scan code table: Dash and Underscore, Right Brace,
-        # Non-US Backslash and Pipe.
+        # Scan 1 make codes from the MS Learn scan code table.
         pytest.param("-", 0x0C, False, id="dash"),
         pytest.param("]", 0x1B, False, id="right-brace"),
         pytest.param("nonusbackslash", 0x56, False, id="non-us-backslash"),
+        pytest.param("left", 0x4B, True, id="left"),
+        pytest.param("f1", 0x3B, False, id="f1"),
+        pytest.param("f5", 0x3F, False, id="f5"),
     ],
 )
-def test_scan_code_keys_cover_the_keys_european_layouts_move(
+def test_scan_code_keys_send_each_key_by_its_scan_code(
     fake_send_input: _FakeSendInput, key: str, scan: int, extended: bool
 ) -> None:
     Keystrokes().press_keys_with_scan_codes(key)
@@ -405,8 +407,10 @@ def test_key_listener_reports_scan_code_keys(fake_send_input: _FakeSendInput) ->
     keys.add_key_listener(lambda label, kind: events.append((label, kind)))
 
     keys.press_keys_with_scan_codes("altleft", "altgr", "e")
+    keys.press_keys_with_scan_codes("ctrlleft", "left")
+    keys.press_keys_with_scan_codes("shiftleft", "f5")
 
-    assert events == [("Alt+AltGr+E", "key")]
+    assert events == [("Alt+AltGr+E", "key"), ("Ctrl+Left", "key"), ("Shift+F5", "key")]
 
 
 def test_key_listener_shows_scan_code_keys_as_the_layout_types_them(
