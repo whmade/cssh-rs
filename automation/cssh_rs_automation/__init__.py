@@ -5,6 +5,7 @@ from cssh_rs_automation.config_gen import ConfigGen, ConfigGenError
 from cssh_rs_automation.keyboard_layout import KeyboardLayout, KeyboardLayoutError
 from cssh_rs_automation.keycast import Keycast, KeycastOverlay
 from cssh_rs_automation.keystrokes import Keystrokes, KeystrokesError
+from cssh_rs_automation.process_exit import ProcessExit, ProcessExitError
 from cssh_rs_automation.screen_recorder import ScreenRecorder, ScreenRecorderError
 from cssh_rs_automation.sshd_fixture import SshdFixture, SshdFixtureError, resolve_bash_path
 from cssh_rs_automation.window_focus import WindowFocus, WindowFocusError
@@ -20,6 +21,8 @@ __all__ = [
     "KeycastOverlay",
     "Keystrokes",
     "KeystrokesError",
+    "ProcessExit",
+    "ProcessExitError",
     "ScreenRecorder",
     "ScreenRecorderError",
     "SshdFixture",
