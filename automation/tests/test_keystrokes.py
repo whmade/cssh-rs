@@ -318,6 +318,21 @@ def test_scan_code_keys_send_each_key_by_its_scan_code(
     assert fake_send_input.events == [_down(scan, extended), _up(scan, extended)]
 
 
+def test_scan_code_keys_send_ctrl_break_as_a_keyboard_does(
+    fake_send_input: _FakeSendInput,
+) -> None:
+    Keystrokes().press_keys_with_scan_codes("ctrlleft", "break")
+
+    # MS Learn scan code table: left Ctrl is 0x1D, and Ctrl+Pause emits the
+    # Break key's extended 0xE0 0x46.
+    assert fake_send_input.events == [
+        _down(0x1D),
+        _down(0x46, True),
+        _up(0x46, True),
+        _up(0x1D),
+    ]
+
+
 def test_scan_code_keys_repeat_the_last_key_down_like_a_held_key(
     fake_send_input: _FakeSendInput,
 ) -> None:
@@ -409,8 +424,14 @@ def test_key_listener_reports_scan_code_keys(fake_send_input: _FakeSendInput) ->
     keys.press_keys_with_scan_codes("altleft", "altgr", "e")
     keys.press_keys_with_scan_codes("ctrlleft", "left")
     keys.press_keys_with_scan_codes("shiftleft", "f5")
+    keys.press_keys_with_scan_codes("ctrlleft", "break")
 
-    assert events == [("Alt+AltGr+E", "key"), ("Ctrl+Left", "key"), ("Shift+F5", "key")]
+    assert events == [
+        ("Alt+AltGr+E", "key"),
+        ("Ctrl+Left", "key"),
+        ("Shift+F5", "key"),
+        ("Ctrl+Break", "key"),
+    ]
 
 
 def test_key_listener_shows_scan_code_keys_as_the_layout_types_them(
