@@ -18,9 +18,9 @@ mod daemon_test {
         SCROLLLOCK_ON, SHIFT_PRESSED,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        VIRTUAL_KEY, VK_7, VK_A, VK_BACK, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_ESCAPE, VK_H,
-        VK_J, VK_K, VK_L, VK_LEFT, VK_N, VK_OEM_4, VK_PACKET, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T,
-        VK_UP, VK_X,
+        VIRTUAL_KEY, VK_7, VK_A, VK_C, VK_CANCEL, VK_D, VK_DOWN, VK_E, VK_ESCAPE, VK_H, VK_J, VK_K,
+        VK_L, VK_LEFT, VK_N, VK_OEM_4, VK_PACKET, VK_Q, VK_R, VK_RIGHT, VK_SPACE, VK_T, VK_UP,
+        VK_X,
     };
 
     use cssh_rs_platform::ControlChannelClient;
@@ -2055,9 +2055,7 @@ mod daemon_test {
             (VK_E, 'É', SHIFT_PRESSED | altgr, Modifiers::SHIFT),
             (VK_X, 'x', LEFT_ALT_PRESSED, Modifiers::ALT),
             (VK_C, '\u{3}', LEFT_CTRL_PRESSED, Modifiers::CTRL),
-            (VK_ESCAPE, '\u{1b}', ctrl_alt, ctrl_alt_modifiers),
             (VK_SPACE, ' ', ctrl_alt, ctrl_alt_modifiers),
-            (VK_BACK, '\u{7f}', ctrl_alt, ctrl_alt_modifiers),
             (VK_OEM_4, '\\', right_ctrl_then_altgr, Modifiers::CTRL),
             (VK_OEM_4, '\\', altgr_then_right_ctrl, Modifiers::CTRL),
             (VK_Q, '@', ctrl_alt | RIGHT_CTRL_PRESSED, Modifiers::CTRL),

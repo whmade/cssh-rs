@@ -1,11 +1,9 @@
 //! Conversion of daemon keystrokes into v1 messages.
 
-use cssh_rs_protocol::v1::input::{InputEvent, SignalKind};
-use cssh_rs_protocol::v1::keycode::{KeyCode, Modifiers};
+use cssh_rs_protocol::v1::input::SignalKind;
 use cssh_rs_protocol::v1::message::DaemonToClient;
-use windows::Win32::System::Console::SHIFT_PRESSED;
 
-use crate::client::input_bytes::{Keystroke, ALT_PRESSED, CTRL_PRESSED};
+use crate::client::input_bytes::Keystroke;
 
 /// Return the message that broadcasts a keystroke to the clients.
 ///
@@ -13,33 +11,14 @@ use crate::client::input_bytes::{Keystroke, ALT_PRESSED, CTRL_PRESSED};
 /// * `keystroke` - The keystroke.
 ///
 /// # Returns
-/// A `Break` signal for Ctrl+Break, otherwise the key, its modifiers read
-/// from [`Keystroke::control_key_state_without_altgr`].
+/// A `Break` signal for Ctrl+Break, otherwise its [`Keystroke::input_event`].
 pub fn keystroke_to_message(keystroke: &Keystroke) -> DaemonToClient {
     if keystroke.is_ctrl_break() {
         return DaemonToClient::Signal(SignalKind::Break);
     }
     return DaemonToClient::Input {
-        event: InputEvent::Key {
-            code: keystroke.key_code().unwrap_or(KeyCode::Unknown),
-            modifiers: modifiers_from_state(keystroke.control_key_state_without_altgr()),
-            text: keystroke.composed_text.map(String::from),
-        },
+        event: keystroke.input_event(),
     };
-}
-
-fn modifiers_from_state(state: u32) -> Modifiers {
-    let mut modifiers = Modifiers::NONE;
-    if state & SHIFT_PRESSED != 0 {
-        modifiers = modifiers | Modifiers::SHIFT;
-    }
-    if state & CTRL_PRESSED != 0 {
-        modifiers = modifiers | Modifiers::CTRL;
-    }
-    if state & ALT_PRESSED != 0 {
-        modifiers = modifiers | Modifiers::ALT;
-    }
-    return modifiers;
 }
 
 #[cfg(test)]
