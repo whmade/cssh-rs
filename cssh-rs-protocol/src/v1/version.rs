@@ -85,6 +85,9 @@ impl From<ProtocolVersion> for String {
     }
 }
 
+/// Protocol version both endpoints of this build send in their `Hello`.
+pub const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
+
 /// Which endpoint an [`Hello`](crate::v1::handshake::Hello) came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

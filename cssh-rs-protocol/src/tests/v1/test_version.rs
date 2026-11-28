@@ -29,6 +29,11 @@ fn test_protocol_version_display() {
 }
 
 #[test]
+fn test_protocol_version_constant_is_a_v1_version() {
+    assert_eq!(PROTOCOL_VERSION.major, 1);
+}
+
+#[test]
 fn test_protocol_version_parse_rejects_malformed() {
     assert!("1".parse::<ProtocolVersion>().is_err());
     assert!("1.x".parse::<ProtocolVersion>().is_err());

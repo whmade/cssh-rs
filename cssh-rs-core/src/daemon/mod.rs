@@ -36,7 +36,7 @@ use cssh_rs_protocol::v1::handshake::{Hello, Welcome};
 use cssh_rs_protocol::v1::input::ClientRunState;
 use cssh_rs_protocol::v1::limits::DEFAULT_MAX_FRAME_LEN;
 use cssh_rs_protocol::v1::message::DaemonToClient;
-use cssh_rs_protocol::v1::version::{ProtocolVersion, Role};
+use cssh_rs_protocol::v1::version::{Role, PROTOCOL_VERSION};
 use cssh_rs_protocol::ClientState;
 use log::{debug, error, warn};
 use tokio::{
@@ -72,8 +72,6 @@ mod workspace;
 /// to send the input records read from the console input buffer
 /// to the named pipe servers connected to each client in parallel.
 const SENDER_CAPACITY: usize = 1024 * 1024;
-
-const DAEMON_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::new(1, 0);
 
 /// A frame encoded once and fanned out to every client's pipe-server task.
 #[derive(Clone, Debug)]
@@ -1669,7 +1667,7 @@ async fn named_pipe_server_routine(
     let Some(hello) = read_client_hello(&mut server).await else {
         return;
     };
-    if let Err(mismatch) = check_version(DAEMON_PROTOCOL_VERSION, hello.protocol_version) {
+    if let Err(mismatch) = check_version(PROTOCOL_VERSION, hello.protocol_version) {
         error!(
             "Protocol version mismatch: daemon {} vs client {}",
             mismatch.local, mismatch.remote
@@ -1700,7 +1698,7 @@ async fn named_pipe_server_routine(
     };
 
     let daemon_hello = Hello {
-        protocol_version: DAEMON_PROTOCOL_VERSION,
+        protocol_version: PROTOCOL_VERSION,
         role: Role::Daemon,
         pid: std::process::id(),
         capabilities: Vec::new(),
