@@ -130,6 +130,67 @@ fn test_input_event_to_bytes() {
 }
 
 #[test]
+fn test_input_event_to_bytes_sends_modified_navigation_and_function_keys_as_xterm_does() {
+    let cases: [(KeyCode, Modifiers, &[u8]); 31] = [
+        (KeyCode::Left, Modifiers::CTRL, b"\x1b[1;5D"),
+        (KeyCode::Right, Modifiers::CTRL, b"\x1b[1;5C"),
+        (KeyCode::Up, Modifiers::SHIFT, b"\x1b[1;2A"),
+        (
+            KeyCode::Down,
+            Modifiers::CTRL | Modifiers::SHIFT,
+            b"\x1b[1;6B",
+        ),
+        (KeyCode::Home, Modifiers::SHIFT, b"\x1b[1;2H"),
+        (KeyCode::End, Modifiers::CTRL, b"\x1b[1;5F"),
+        (KeyCode::Insert, Modifiers::SHIFT, b"\x1b[2;2~"),
+        (KeyCode::Delete, Modifiers::CTRL, b"\x1b[3;5~"),
+        (KeyCode::PageUp, Modifiers::CTRL, b"\x1b[5;5~"),
+        (KeyCode::PageDown, Modifiers::SHIFT, b"\x1b[6;2~"),
+        (KeyCode::F(1), Modifiers::SHIFT, b"\x1b[1;2P"),
+        (KeyCode::F(2), Modifiers::CTRL, b"\x1b[1;5Q"),
+        (KeyCode::F(3), Modifiers::SHIFT, b"\x1b[1;2R"),
+        (
+            KeyCode::F(4),
+            Modifiers::CTRL | Modifiers::SHIFT,
+            b"\x1b[1;6S",
+        ),
+        (KeyCode::F(5), Modifiers::SHIFT, b"\x1b[15;2~"),
+        (KeyCode::F(6), Modifiers::CTRL, b"\x1b[17;5~"),
+        (KeyCode::F(7), Modifiers::SHIFT, b"\x1b[18;2~"),
+        (KeyCode::F(8), Modifiers::CTRL, b"\x1b[19;5~"),
+        (KeyCode::F(9), Modifiers::SHIFT, b"\x1b[20;2~"),
+        (KeyCode::F(10), Modifiers::CTRL, b"\x1b[21;5~"),
+        (KeyCode::F(11), Modifiers::SHIFT, b"\x1b[23;2~"),
+        (
+            KeyCode::F(12),
+            Modifiers::CTRL | Modifiers::SHIFT,
+            b"\x1b[24;6~",
+        ),
+        (KeyCode::Left, Modifiers::ALT, b"\x1b[1;3D"),
+        (KeyCode::Up, Modifiers::ALT | Modifiers::SHIFT, b"\x1b[1;4A"),
+        (
+            KeyCode::Home,
+            Modifiers::ALT | Modifiers::CTRL,
+            b"\x1b[1;7H",
+        ),
+        (KeyCode::Delete, Modifiers::ALT, b"\x1b[3;3~"),
+        (KeyCode::F(1), Modifiers::ALT, b"\x1b[1;3P"),
+        (
+            KeyCode::F(5),
+            Modifiers::ALT | Modifiers::CTRL | Modifiers::SHIFT,
+            b"\x1b[15;8~",
+        ),
+        (KeyCode::Left, Modifiers::META, b"\x1b[D"),
+        (KeyCode::F(1), Modifiers::META, b"\x1bOP"),
+        (KeyCode::F(5), Modifiers::META, b"\x1b[15~"),
+    ];
+    for (code, modifiers, expected) in cases {
+        let event = key(code, modifiers, None);
+        assert_eq!(input_event_to_bytes(&event), expected, "{event:?}");
+    }
+}
+
+#[test]
 fn test_key_event_record_to_bytes() {
     let cases: [(u16, VIRTUAL_KEY, &[u8]); 26] = [
         (u16::from(b'a'), VK_C, b"a"),
