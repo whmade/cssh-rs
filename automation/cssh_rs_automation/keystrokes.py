@@ -173,8 +173,9 @@ class Keystrokes:
         Args:
             keys: Keys to hold down in order and release in reverse: ``altgr``
                 (right Alt), ``altleft``, ``ctrlleft``, ``ctrlright``,
-                ``shiftleft``, a letter, a digit, ``-`` or ``]`` (named by their
-                US characters), or ``nonusbackslash``, the extra key left of Z
+                ``shiftleft``, ``left`` (the arrow key), ``f1``, ``f5``, a
+                letter, a digit, ``-`` or ``]`` (named by their US
+                characters), or ``nonusbackslash``, the extra key left of Z
                 on 102-key keyboards.
             repeat: Key-down events the last key sends before its release, as
                 when a held key auto-repeats.
@@ -244,6 +245,9 @@ _SCAN_CODES: dict[str, tuple[int, bool]] = {
     "ctrlleft": (0x1D, False),
     "ctrlright": (0x1D, True),
     "shiftleft": (0x2A, False),
+    "left": (0x4B, True),
+    "f1": (0x3B, False),
+    "f5": (0x3F, False),
     "-": (0x0C, False),
     "]": (0x1B, False),
     "nonusbackslash": (0x56, False),
