@@ -44,6 +44,11 @@ pub(crate) fn input_event_to_bytes(event: &InputEvent) -> Vec<u8> {
 
 const HIGH_SURROGATES: RangeInclusive<u16> = 0xd800..=0xdbff;
 
+/// Control Sequence Introducer.
+const CSI: &str = "\x1b[";
+/// Single Shift Three.
+const SS3: &str = "\x1bO";
+
 /// A keystroke read from a key-event record.
 pub(crate) struct Keystroke {
     /// The virtual key of the record that completed the keystroke.
@@ -208,6 +213,9 @@ pub(crate) fn key_event_record_to_bytes(
 }
 
 /// Encode a key with its modifiers and optional composed text.
+///
+/// Navigation and function keys carry their modifiers in xterm's modifier
+/// parameter; any other key sends Alt as an ESC prefix.
 fn key_to_bytes(code: &KeyCode, modifiers: Modifiers, text: Option<&str>) -> Vec<u8> {
     let is_chord = modifiers.contains(Modifiers::CTRL)
         || modifiers.contains(Modifiers::ALT)
@@ -224,21 +232,20 @@ fn key_to_bytes(code: &KeyCode, modifiers: Modifiers, text: Option<&str>) -> Vec
         KeyCode::Tab => vec![b'\t'],
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Escape => vec![0x1b],
-        KeyCode::Delete => b"\x1b[3~".to_vec(),
-        KeyCode::Insert => b"\x1b[2~".to_vec(),
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        KeyCode::Home => b"\x1b[H".to_vec(),
-        KeyCode::End => b"\x1b[F".to_vec(),
-        KeyCode::PageUp => b"\x1b[5~".to_vec(),
-        KeyCode::PageDown => b"\x1b[6~".to_vec(),
-        KeyCode::F(number) => function_key_bytes(*number),
+        KeyCode::Delete => return tilde_final_key_bytes(3, modifiers),
+        KeyCode::Insert => return tilde_final_key_bytes(2, modifiers),
+        KeyCode::Up => return letter_final_key_bytes(CSI, 'A', modifiers),
+        KeyCode::Down => return letter_final_key_bytes(CSI, 'B', modifiers),
+        KeyCode::Right => return letter_final_key_bytes(CSI, 'C', modifiers),
+        KeyCode::Left => return letter_final_key_bytes(CSI, 'D', modifiers),
+        KeyCode::Home => return letter_final_key_bytes(CSI, 'H', modifiers),
+        KeyCode::End => return letter_final_key_bytes(CSI, 'F', modifiers),
+        KeyCode::PageUp => return tilde_final_key_bytes(5, modifiers),
+        KeyCode::PageDown => return tilde_final_key_bytes(6, modifiers),
+        KeyCode::F(number) => return function_key_bytes(*number, modifiers),
         KeyCode::Modifier(_) | KeyCode::Unknown => Vec::new(),
     };
 
-    // Terminals send Alt as an ESC prefix.
     if modifiers.contains(Modifiers::ALT) && !bytes.is_empty() {
         return [b"\x1b".as_slice(), &bytes].concat();
     }
@@ -255,23 +262,50 @@ fn ctrl_byte(text: &str) -> Option<u8> {
     return Some(character as u8 & 0x1f);
 }
 
-/// Return the xterm sequence for function key `number`.
-fn function_key_bytes(number: u8) -> Vec<u8> {
+/// Return the xterm sequence for function key `number` with its modifiers.
+fn function_key_bytes(number: u8, modifiers: Modifiers) -> Vec<u8> {
     match number {
-        1 => return b"\x1bOP".to_vec(),
-        2 => return b"\x1bOQ".to_vec(),
-        3 => return b"\x1bOR".to_vec(),
-        4 => return b"\x1bOS".to_vec(),
-        5 => return b"\x1b[15~".to_vec(),
-        6 => return b"\x1b[17~".to_vec(),
-        7 => return b"\x1b[18~".to_vec(),
-        8 => return b"\x1b[19~".to_vec(),
-        9 => return b"\x1b[20~".to_vec(),
-        10 => return b"\x1b[21~".to_vec(),
-        11 => return b"\x1b[23~".to_vec(),
-        12 => return b"\x1b[24~".to_vec(),
+        1 => return letter_final_key_bytes(SS3, 'P', modifiers),
+        2 => return letter_final_key_bytes(SS3, 'Q', modifiers),
+        3 => return letter_final_key_bytes(SS3, 'R', modifiers),
+        4 => return letter_final_key_bytes(SS3, 'S', modifiers),
+        5 => return tilde_final_key_bytes(15, modifiers),
+        6 => return tilde_final_key_bytes(17, modifiers),
+        7 => return tilde_final_key_bytes(18, modifiers),
+        8 => return tilde_final_key_bytes(19, modifiers),
+        9 => return tilde_final_key_bytes(20, modifiers),
+        10 => return tilde_final_key_bytes(21, modifiers),
+        11 => return tilde_final_key_bytes(23, modifiers),
+        12 => return tilde_final_key_bytes(24, modifiers),
         _ => return Vec::new(),
     }
+}
+
+/// Return `introducer final_byte`, or `CSI 1 ; m final_byte` with modifiers.
+fn letter_final_key_bytes(introducer: &str, final_byte: char, modifiers: Modifiers) -> Vec<u8> {
+    let sequence = match modifier_parameter(modifiers) {
+        None => format!("{introducer}{final_byte}"),
+        Some(parameter) => format!("{CSI}1;{parameter}{final_byte}"),
+    };
+    return sequence.into_bytes();
+}
+
+/// Return `CSI number ~`, or `CSI number ; m ~` with modifiers.
+fn tilde_final_key_bytes(number: u8, modifiers: Modifiers) -> Vec<u8> {
+    let sequence = match modifier_parameter(modifiers) {
+        None => format!("{CSI}{number}~"),
+        Some(parameter) => format!("{CSI}{number};{parameter}~"),
+    };
+    return sequence.into_bytes();
+}
+
+/// Return xterm's modifier parameter `m`, or `None` if no Shift, Alt or Ctrl is held:
+/// <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-PC-Style-Function-Keys>.
+fn modifier_parameter(modifiers: Modifiers) -> Option<u8> {
+    let held = |modifier: Modifiers| return u8::from(modifiers.contains(modifier));
+    let parameter =
+        1 + held(Modifiers::SHIFT) + 2 * held(Modifiers::ALT) + 4 * held(Modifiers::CTRL);
+    return (parameter > 1).then_some(parameter);
 }
 
 /// Return the number of keystrokes a key-event record holds.
