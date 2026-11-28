@@ -308,6 +308,9 @@ def test_scan_code_keys_go_down_in_order_and_up_in_reverse(
         pytest.param("left", 0x4B, True, id="left"),
         pytest.param("f1", 0x3B, False, id="f1"),
         pytest.param("f5", 0x3F, False, id="f5"),
+        pytest.param("backspace", 0x0E, False, id="backspace"),
+        pytest.param("tab", 0x0F, False, id="tab"),
+        pytest.param("enter", 0x1C, False, id="enter"),
     ],
 )
 def test_scan_code_keys_send_each_key_by_its_scan_code(
@@ -431,6 +434,28 @@ def test_key_listener_reports_scan_code_keys(fake_send_input: _FakeSendInput) ->
         ("Ctrl+Left", "key"),
         ("Shift+F5", "key"),
         ("Ctrl+Break", "key"),
+    ]
+
+
+def test_key_listener_names_keys_the_layout_types_as_control_characters(
+    fake_send_input: _FakeSendInput,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ToUnicodeEx types BS for Backspace, HT for Tab and CR for Enter, as on the UK layout.
+    control_characters = {0x0E: "\b", 0x0F: "\t", 0x1C: "\r"}
+    monkeypatch.setattr(keystrokes, "_layout_character", control_characters.get)
+    events: list[tuple[str, str]] = []
+    keys = Keystrokes()
+    keys.add_key_listener(lambda label, kind: events.append((label, kind)))
+
+    keys.press_keys_with_scan_codes("ctrlleft", "backspace")
+    keys.press_keys_with_scan_codes("shiftleft", "tab")
+    keys.press_keys_with_scan_codes("ctrlleft", "shiftleft", "enter")
+
+    assert events == [
+        ("Ctrl+Backspace", "key"),
+        ("Shift+Tab", "key"),
+        ("Ctrl+Shift+Enter", "key"),
     ]
 
 

@@ -173,11 +173,11 @@ class Keystrokes:
         Args:
             keys: Keys to hold down in order and release in reverse: ``altgr``
                 (right Alt), ``altleft``, ``ctrlleft``, ``ctrlright``,
-                ``shiftleft``, ``left`` (the arrow key), ``f1``, ``f5``, a
-                letter, a digit, ``-`` or ``]`` (named by their US
-                characters), ``nonusbackslash`` (the extra key left of Z on
-                102-key keyboards), or ``break`` (the key Ctrl+Pause sends;
-                pass a Ctrl key before it).
+                ``shiftleft``, ``left`` (the arrow key), ``f1``, ``f5``,
+                ``backspace``, ``tab``, ``enter``, a letter, a digit, ``-`` or
+                ``]`` (named by their US characters), ``nonusbackslash`` (the
+                extra key left of Z on 102-key keyboards), or ``break`` (the
+                key Ctrl+Pause sends; pass a Ctrl key before it).
             repeat: Key-down events the last key sends before its release, as
                 when a held key auto-repeats.
         """
@@ -249,6 +249,9 @@ _SCAN_CODES: dict[str, tuple[int, bool]] = {
     "left": (0x4B, True),
     "f1": (0x3B, False),
     "f5": (0x3F, False),
+    "backspace": (0x0E, False),
+    "tab": (0x0F, False),
+    "enter": (0x1C, False),
     "-": (0x0C, False),
     "]": (0x1B, False),
     "nonusbackslash": (0x56, False),
@@ -354,7 +357,7 @@ def _user32() -> Any:
 
 
 def _scan_code_key_label(key: str) -> str:
-    """Return a modifier's name, else what the foreground layout types for ``key``, or its name."""
+    """Return ``key``'s ``_KEY_LABELS`` name, else what the layout types for it, or its name."""
     if key in _KEY_LABELS:
         return _KEY_LABELS[key]
     character = _layout_character(_SCAN_CODES[key][0])
