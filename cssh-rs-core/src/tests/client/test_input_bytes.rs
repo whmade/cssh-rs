@@ -2,12 +2,15 @@
 
 use cssh_rs_protocol::v1::input::InputEvent;
 use cssh_rs_protocol::v1::keycode::{KeyCode, ModifierKeyCode, Modifiers};
-use windows::Win32::System::Console::{KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, LEFT_ALT_PRESSED};
+use windows::Win32::System::Console::{
+    KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED,
+    SHIFT_PRESSED,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VIRTUAL_KEY, VK_A, VK_C, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
-    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
-    VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD6, VK_NUMPAD8, VK_PACKET, VK_PRIOR,
-    VK_RIGHT, VK_UP,
+    VIRTUAL_KEY, VK_A, VK_BACK, VK_C, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F11,
+    VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT,
+    VK_MENU, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD6, VK_NUMPAD8,
+    VK_PACKET, VK_PRIOR, VK_Q, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP, VK_X,
 };
 
 use crate::client::input_bytes::{
@@ -194,10 +197,50 @@ fn test_input_event_to_bytes_sends_modified_navigation_and_function_keys_as_xter
 }
 
 #[test]
+fn test_input_event_to_bytes_sends_modified_editing_keys_as_windows_terminal_does() {
+    let cases: [(KeyCode, Modifiers, &[u8]); 14] = [
+        (KeyCode::Backspace, Modifiers::CTRL, b"\x08"),
+        (
+            KeyCode::Backspace,
+            Modifiers::CTRL | Modifiers::SHIFT,
+            b"\x08",
+        ),
+        (KeyCode::Backspace, Modifiers::SHIFT, b"\x7f"),
+        (KeyCode::Backspace, Modifiers::ALT, b"\x1b\x7f"),
+        (
+            KeyCode::Backspace,
+            Modifiers::ALT | Modifiers::CTRL,
+            b"\x1b\x08",
+        ),
+        (KeyCode::Tab, Modifiers::SHIFT, b"\x1b[Z"),
+        (KeyCode::Tab, Modifiers::CTRL | Modifiers::SHIFT, b"\x1b[Z"),
+        (KeyCode::Tab, Modifiers::CTRL, b"\t"),
+        (
+            KeyCode::Tab,
+            Modifiers::ALT | Modifiers::SHIFT,
+            b"\x1b\x1b[Z",
+        ),
+        (KeyCode::Enter, Modifiers::CTRL, b"\n"),
+        (KeyCode::Enter, Modifiers::CTRL | Modifiers::SHIFT, b"\n"),
+        (KeyCode::Enter, Modifiers::SHIFT, b"\r"),
+        (KeyCode::Enter, Modifiers::ALT, b"\x1b\r"),
+        (KeyCode::Escape, Modifiers::ALT, b"\x1b\x1b"),
+    ];
+    for (code, modifiers, expected) in cases {
+        let event = key(code, modifiers, None);
+        assert_eq!(input_event_to_bytes(&event), expected, "{event:?}");
+    }
+}
+
+#[test]
 fn test_key_event_record_to_bytes() {
-    let cases: [(u16, VIRTUAL_KEY, &[u8]); 26] = [
+    let cases: [(u16, VIRTUAL_KEY, &[u8]); 30] = [
         (u16::from(b'a'), VK_C, b"a"),
         (0x03, VK_C, b"\x03"),
+        (0x08, VK_BACK, b"\x7f"),
+        (0x09, VK_TAB, b"\t"),
+        (0x0d, VK_RETURN, b"\r"),
+        (0x1b, VK_ESCAPE, b"\x1b"),
         (0xDC00, VK_UP, b"\x1b[A"),
         (0, VIRTUAL_KEY(0), b""),
         (0, VK_UP, b"\x1b[A"),
@@ -229,6 +272,46 @@ fn test_key_event_record_to_bytes() {
             key_event_records_to_bytes(&[record]),
             expected,
             "{unicode_char:#x} {:#x}",
+            virtual_key.0
+        );
+    }
+}
+
+#[test]
+fn test_key_event_record_to_bytes_sends_the_modifiers_of_the_record() {
+    let cases: [(u16, VIRTUAL_KEY, u32, &[u8]); 12] = [
+        (0, VK_LEFT, LEFT_CTRL_PRESSED, b"\x1b[1;5D"),
+        (0, VK_F5, SHIFT_PRESSED, b"\x1b[15;2~"),
+        (0, VK_LEFT, LEFT_ALT_PRESSED, b"\x1b[1;3D"),
+        (
+            0,
+            VK_F5,
+            LEFT_CTRL_PRESSED | LEFT_ALT_PRESSED,
+            b"\x1b[15;7~",
+        ),
+        (u16::from(b'x'), VK_X, LEFT_ALT_PRESSED, b"\x1bx"),
+        (u16::from(b'A'), VK_A, SHIFT_PRESSED, b"A"),
+        (0x03, VK_C, LEFT_CTRL_PRESSED, b"\x03"),
+        (
+            u16::from(b'@'),
+            VK_Q,
+            LEFT_CTRL_PRESSED | RIGHT_ALT_PRESSED,
+            b"@",
+        ),
+        (0x7f, VK_BACK, LEFT_CTRL_PRESSED, b"\x08"),
+        (0x09, VK_TAB, SHIFT_PRESSED, b"\x1b[Z"),
+        (0x0a, VK_RETURN, LEFT_CTRL_PRESSED, b"\n"),
+        (0, VK_TAB, LEFT_CTRL_PRESSED, b"\t"),
+    ];
+    for (unicode_char, virtual_key, control_key_state, expected) in cases {
+        let record = KEY_EVENT_RECORD {
+            dwControlKeyState: control_key_state,
+            ..key_event_record(unicode_char, virtual_key, 1)
+        };
+        assert_eq!(
+            key_event_records_to_bytes(&[record]),
+            expected,
+            "{unicode_char:#x} {:#x} {control_key_state:#x}",
             virtual_key.0
         );
     }

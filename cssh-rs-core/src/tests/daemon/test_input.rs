@@ -6,7 +6,9 @@ use cssh_rs_protocol::v1::message::DaemonToClient;
 use windows::Win32::System::Console::{
     KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, SHIFT_PRESSED,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_A, VK_C, VK_CANCEL, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    VIRTUAL_KEY, VK_A, VK_BACK, VK_C, VK_CANCEL, VK_ESCAPE, VK_H, VK_RETURN, VK_TAB, VK_UP,
+};
 
 use crate::client::input_bytes::KeystrokeDecoder;
 use crate::daemon::input::keystroke_to_message;
@@ -61,6 +63,58 @@ fn test_keystroke_to_message() {
         (
             key(0, VK_CANCEL, LEFT_CTRL_PRESSED),
             DaemonToClient::Signal(SignalKind::Break),
+        ),
+    ];
+    for (key, expected) in cases {
+        let keystroke = KeystrokeDecoder::default()
+            .decode(&key)
+            .expect("a key-down record holds a keystroke");
+        assert_eq!(keystroke_to_message(&keystroke), expected);
+    }
+}
+
+#[test]
+fn test_keystroke_to_message_sends_editing_keys_by_their_virtual_key() {
+    let cases = [
+        (
+            key(0x08, VK_BACK, 0),
+            input(KeyCode::Backspace, Modifiers::NONE, None),
+        ),
+        (
+            key(0x7f, VK_BACK, LEFT_CTRL_PRESSED),
+            input(KeyCode::Backspace, Modifiers::CTRL, None),
+        ),
+        (
+            key(0x7f, VK_BACK, LEFT_CTRL_PRESSED | LEFT_ALT_PRESSED),
+            input(KeyCode::Backspace, Modifiers::CTRL | Modifiers::ALT, None),
+        ),
+        (
+            key(0x0d, VK_RETURN, 0),
+            input(KeyCode::Enter, Modifiers::NONE, None),
+        ),
+        (
+            key(0x0a, VK_RETURN, LEFT_CTRL_PRESSED),
+            input(KeyCode::Enter, Modifiers::CTRL, None),
+        ),
+        (
+            key(0x09, VK_TAB, SHIFT_PRESSED),
+            input(KeyCode::Tab, Modifiers::SHIFT, None),
+        ),
+        (
+            key(0x1b, VK_ESCAPE, 0),
+            input(KeyCode::Escape, Modifiers::NONE, None),
+        ),
+        (
+            key(0x1b, VK_ESCAPE, LEFT_CTRL_PRESSED | LEFT_ALT_PRESSED),
+            input(KeyCode::Escape, Modifiers::CTRL | Modifiers::ALT, None),
+        ),
+        (
+            key(0x08, VK_H, LEFT_CTRL_PRESSED),
+            input(
+                KeyCode::Char("\u{8}".to_string()),
+                Modifiers::CTRL,
+                Some("\u{8}"),
+            ),
         ),
     ];
     for (key, expected) in cases {

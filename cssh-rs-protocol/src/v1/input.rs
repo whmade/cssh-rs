@@ -18,8 +18,10 @@ pub enum InputEvent {
         /// Alt. Shift is always reported, because whether composing `text`
         /// used it up is unknown.
         modifiers: Modifiers,
-        /// The keystroke's composed text, when it produced any; omitted from
-        /// the wire when absent.
+        /// The keystroke's composed text when `code` is a character key;
+        /// omitted from the wire when absent. A named key such as Backspace
+        /// carries none, even when its layout composes a control character
+        /// for it, so that a client encodes the key itself.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },

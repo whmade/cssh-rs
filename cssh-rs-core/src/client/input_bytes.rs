@@ -9,11 +9,12 @@ use log::warn;
 use windows::Win32::Foundation::FALSE;
 use windows::Win32::System::Console::{
     KEY_EVENT_RECORD, LEFT_ALT_PRESSED, LEFT_CTRL_PRESSED, RIGHT_ALT_PRESSED, RIGHT_CTRL_PRESSED,
+    SHIFT_PRESSED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VIRTUAL_KEY, VK_CANCEL, VK_DELETE, VK_DOWN, VK_END, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
-    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
-    VK_PRIOR, VK_RIGHT, VK_UP,
+    VIRTUAL_KEY, VK_BACK, VK_CANCEL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F11,
+    VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_HOME, VK_INSERT, VK_LEFT,
+    VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
 };
 
 use crate::utils::windows::CTRL_BREAK_KEY_DOWN;
@@ -66,7 +67,7 @@ fn win32_input_mode_bytes(key: &KEY_EVENT_RECORD) -> Vec<u8> {
     .into_bytes();
 }
 
-/// Encode a daemon-delivered input event.
+/// Encode an input event, delivered by the daemon or typed at this window.
 ///
 /// # Arguments
 ///
@@ -97,25 +98,41 @@ const SS3: &str = "\x1bO";
 /// A keystroke read from a key-event record.
 pub(crate) struct Keystroke {
     /// The virtual key of the record that completed the keystroke.
-    pub(crate) virtual_key: VIRTUAL_KEY,
+    virtual_key: VIRTUAL_KEY,
     /// The `dwControlKeyState` of the record that completed the keystroke.
     control_key_state: u32,
     /// The composed text, `None` for a key such as an arrow.
-    pub(crate) composed_text: Option<char>,
+    composed_text: Option<char>,
 }
 
 impl Keystroke {
-    /// Return the key code of the keystroke.
+    /// Return the input event of the keystroke, as both the daemon and a client send it.
+    ///
+    /// Keyboard layouts compose Backspace, Enter, Tab and Esc into their
+    /// legacy control characters, as the US one does, so the virtual key goes
+    /// before the composed text:
+    /// <https://github.com/microsoft/Windows-driver-samples/blob/d49bb7d72f3651952b2b6e4ad28d14fe2247eb69/input/layout/kbdus/kbdus.c#L238>,
+    /// <https://github.com/microsoft/Windows-driver-samples/blob/d49bb7d72f3651952b2b6e4ad28d14fe2247eb69/input/layout/kbdus/kbdus.c#L253-L255>.
     ///
     /// # Returns
     ///
-    /// The composed text as a character key, else the code of the virtual
-    /// key, else `None`.
-    pub(crate) fn key_code(&self) -> Option<KeyCode> {
-        match self.composed_text {
-            Some(character) => return Some(KeyCode::Char(character.to_string())),
-            None => return virtual_key_to_keycode(self.virtual_key),
-        }
+    /// The code of the virtual key, else the composed text as a character
+    /// key with that text, else [`KeyCode::Unknown`], with the modifiers of
+    /// [`Keystroke::control_key_state_without_altgr`].
+    pub(crate) fn input_event(&self) -> InputEvent {
+        let (code, text) = match (virtual_key_to_keycode(self.virtual_key), self.composed_text) {
+            (Some(code), _) => (code, None),
+            (None, Some(character)) => (
+                KeyCode::Char(character.to_string()),
+                Some(character.to_string()),
+            ),
+            (None, None) => (KeyCode::Unknown, None),
+        };
+        return InputEvent::Key {
+            code,
+            modifiers: modifiers_from_state(self.control_key_state_without_altgr()),
+            text,
+        };
     }
 
     /// Return whether the keystroke is Ctrl+Break.
@@ -161,7 +178,7 @@ impl Keystroke {
     /// The `dwControlKeyState` of the record that completed the keystroke,
     /// minus its Ctrl and Alt flags if [`Keystroke::is_altgr_character`]
     /// matches, except a Ctrl or Alt kept as above.
-    pub(crate) fn control_key_state_without_altgr(&self) -> u32 {
+    fn control_key_state_without_altgr(&self) -> u32 {
         let state = self.control_key_state;
         if !self.is_altgr_character() {
             return state;
@@ -179,6 +196,20 @@ impl Keystroke {
         }
         return kept;
     }
+}
+
+fn modifiers_from_state(state: u32) -> Modifiers {
+    let mut modifiers = Modifiers::NONE;
+    if state & SHIFT_PRESSED != 0 {
+        modifiers = modifiers | Modifiers::SHIFT;
+    }
+    if state & CTRL_PRESSED != 0 {
+        modifiers = modifiers | Modifiers::CTRL;
+    }
+    if state & ALT_PRESSED != 0 {
+        modifiers = modifiers | Modifiers::ALT;
+    }
+    return modifiers;
 }
 
 /// A decoder of the keystrokes in the key-event records one console delivers.
@@ -251,7 +282,7 @@ impl KeystrokeDecoder {
 ///
 /// The bytes of the keystroke `decoder` reads from `key`, repeated
 /// [`keystroke_count`] times: [`ctrl_break_keystroke`] for Ctrl+Break, else
-/// the composed text, else the encoding of the virtual key, else nothing.
+/// the encoding of its [`Keystroke::input_event`].
 pub(crate) fn key_event_record_to_bytes(
     key: &KEY_EVENT_RECORD,
     decoder: &mut KeystrokeDecoder,
@@ -262,17 +293,16 @@ pub(crate) fn key_event_record_to_bytes(
     if keystroke.is_ctrl_break() {
         return ctrl_break_keystroke().repeat(keystroke_count(key));
     }
-    let bytes = keystroke
-        .key_code()
-        .map(|code| return key_to_bytes(&code, Modifiers::NONE, None))
-        .unwrap_or_default();
-    return bytes.repeat(keystroke_count(key));
+    return input_event_to_bytes(&keystroke.input_event()).repeat(keystroke_count(key));
 }
 
 /// Encode a key with its modifiers and optional composed text.
 ///
 /// Navigation and function keys carry their modifiers in xterm's modifier
-/// parameter; any other key sends Alt as an ESC prefix.
+/// parameter; any other key sends Alt as an ESC prefix. As in Windows
+/// Terminal, Ctrl turns Backspace's DEL into BS and Enter's CR into LF, and
+/// Shift turns Tab into CBT:
+/// <https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/input/terminalInput.cpp#L911-L967>.
 fn key_to_bytes(code: &KeyCode, modifiers: Modifiers, text: Option<&str>) -> Vec<u8> {
     let is_chord = modifiers.contains(Modifiers::CTRL)
         || modifiers.contains(Modifiers::ALT)
@@ -285,8 +315,11 @@ fn key_to_bytes(code: &KeyCode, modifiers: Modifiers, text: Option<&str>) -> Vec
         KeyCode::Char(text) if modifiers.contains(Modifiers::CTRL) => ctrl_byte(text)
             .map_or_else(|| return text.as_bytes().to_vec(), |byte| return vec![byte]),
         KeyCode::Char(text) => text.as_bytes().to_vec(),
+        KeyCode::Enter if modifiers.contains(Modifiers::CTRL) => vec![b'\n'],
         KeyCode::Enter => vec![b'\r'],
+        KeyCode::Tab if modifiers.contains(Modifiers::SHIFT) => format!("{CSI}Z").into_bytes(),
         KeyCode::Tab => vec![b'\t'],
+        KeyCode::Backspace if modifiers.contains(Modifiers::CTRL) => vec![0x08],
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Escape => vec![0x1b],
         KeyCode::Delete => return tilde_final_key_bytes(3, modifiers),
@@ -388,6 +421,10 @@ pub(crate) fn keystroke_count(key: &KEY_EVENT_RECORD) -> usize {
 
 fn virtual_key_to_keycode(virtual_key: VIRTUAL_KEY) -> Option<KeyCode> {
     match virtual_key {
+        VK_BACK => return Some(KeyCode::Backspace),
+        VK_TAB => return Some(KeyCode::Tab),
+        VK_RETURN => return Some(KeyCode::Enter),
+        VK_ESCAPE => return Some(KeyCode::Escape),
         VK_UP => return Some(KeyCode::Up),
         VK_DOWN => return Some(KeyCode::Down),
         VK_LEFT => return Some(KeyCode::Left),
