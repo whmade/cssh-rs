@@ -41,7 +41,7 @@ mod daemon_test {
                     GRINNING_FACE_HIGH_SURROGATE, GRINNING_FACE_LOW_SURROGATE,
                 },
             },
-            read_message,
+            read_message, HandshakeError,
         },
         daemon::{
             build_client_args, classify_control_mode_key, classify_enable_disable_submenu_key,
@@ -285,7 +285,7 @@ mod daemon_test {
         let (mut client, _routine) =
             connect_to_routine(std::process::id(), &state_sender, &broadcast_sender).await;
 
-        let (_, mut pending) = client_handshake(&mut client).await;
+        let (_, mut pending) = client_handshake(&mut client).await.expect("handshake");
 
         assert_eq!(
             next_non_keep_alive(&mut client, &mut pending).await,
@@ -305,7 +305,7 @@ mod daemon_test {
         let (broadcast_sender, _) = broadcast::channel(16);
         let (mut client, routine) =
             connect_to_routine(std::process::id(), &state_sender, &broadcast_sender).await;
-        let (_, mut pending) = client_handshake(&mut client).await;
+        let (_, mut pending) = client_handshake(&mut client).await.expect("handshake");
         next_non_keep_alive(&mut client, &mut pending).await;
         next_non_keep_alive(&mut client, &mut pending).await;
 
@@ -343,8 +343,9 @@ mod daemon_test {
         let (broadcast_sender, _) = broadcast::channel(16);
         let (mut client, routine) = connect_to_routine(0, &state_sender, &broadcast_sender).await;
 
-        client_handshake(&mut client).await;
+        let handshake = client_handshake(&mut client).await;
 
+        assert_eq!(handshake, Err(HandshakeError::NoHello));
         assert!(routine.await.unwrap_err().is_panic());
     }
 
@@ -354,7 +355,7 @@ mod daemon_test {
         let (broadcast_sender, _) = broadcast::channel(2);
         let (mut client, routine) =
             connect_to_routine(std::process::id(), &state_sender, &broadcast_sender).await;
-        let (_, mut pending) = client_handshake(&mut client).await;
+        let (_, mut pending) = client_handshake(&mut client).await.expect("handshake");
 
         for _ in 0..16 {
             send_keystroke(&broadcast_sender, "a");
